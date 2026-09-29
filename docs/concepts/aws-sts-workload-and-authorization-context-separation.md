@@ -195,8 +195,13 @@ NAT Gatewayなしに成立するか。
   Pre Token Generation Lambdaトリガーで ID token に上記2つのクレームを注入した上で、
   アプリ（またはサイドカー）が`sts:AssumeRoleWithWebIdentity`を直接呼ぶ。これはaws-authスキル自身の
   一般指針（「クライアントが自前のバックエンドしか呼ばないならIdentity Poolは不要」）とも整合する。
-- ID tokenのクレームカスタマイズ（Pre Token Generation Lambda）はCognitoの無料枠（entry-level plan）で
-  利用可能。access tokenのクレームカスタマイズだけが有料プラン必須（今回はID token側で完結するため影響なし）。
+- Pre Token Generation Lambdaは、ネストしたJSONクレーム（`https://aws.amazon.com/tags`の
+  `principal_tags`/`transitive_tag_keys`）を返すためにV2トリガーを使い、V2は
+  **Essentials以上のプラン**が必要（新規User Poolのデフォルト）。Essentialsも月10,000 MAUまでは
+  無料枠がある（[Cognito料金](https://aws.amazon.com/cognito/pricing/)）。V1トリガーは
+  クレーム値が文字列のみのため、配列である`transitive_tag_keys`を返せず、role chainingを
+  越えるtag伝播ができない可能性が高い（公式ドキュメント上の記述に基づく推定で、実機未確認）。
+  本コンセプトはV2を前提とし、V1は対象外とする。
 - **実機確認（2026-09-30、ap-northeast-1）**：User Pool（Essentialsプラン）に
   Pre Token Generation **V2**トリガーを付け、ID tokenに
   `https://aws.amazon.com/source_identity`（文字列）と`https://aws.amazon.com/tags`
@@ -237,15 +242,20 @@ NAT Gatewayなしに成立するか。
 
 ## 未検証事項・次のステップ
 
-- gekko_08で最終的にECS等の別コンピュート基盤も使う場合、そちらでの
-  `GetWebIdentityToken`対応は別途要確認。
-- Pre Token Generation **V1**（Liteプラン等、より安価なプラン）でも、ネストしたJSONクレーム
-  （`https://aws.amazon.com/tags`）を注入できるか。検証はV2（Essentialsプラン）のみ。
-  V1で不可の場合、上記の「無料枠で利用可能」という記述は成立しない可能性がある。
-- 業務RBAC情報（特定の業務ロールにのみ許可される操作の区別等）をどこに持たせるか
-  （ログイン時federationでprincipal_tags/session tagsに焼き込むか、各サービスがダウンストリームで
-  ディレクトリを引き直すか）は未決定。
 - role chaining 1時間上限が、長時間のエージェントセッションで実運用上どこまで問題になるか。
+- IPv6のegress-only IGW経路（前掲「IPv6スタックでの実現」）。
+
+## スコープ外
+
+以下は本コンセプトの検証・ソリューションの対象に含めない。含めなくても、ここまでの
+検証の価値は損なわれない。
+
+- **Lambda以外のコンピュート基盤**（ECS等）：現時点で予定はなく、将来拡張する可能性があるもの。
+  その際は`GetWebIdentityToken`の対応状況（ECS task固有のclaimなど）を改めて確認する。
+- **業務RBACの持たせ方**（ログイン時federationでprincipal_tags/session tagsに焼き込むか、
+  各サービスがダウンストリームでディレクトリを引き直すか等）：設計判断であり、
+  コンセプトの実現可能性の検証とは独立して決められる。
+- **Pre Token Generation V1トリガー**：上記のとおりV2を前提とする。
 
 ## 参考
 
