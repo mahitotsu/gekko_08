@@ -79,6 +79,38 @@ export class CognitoSpikeStack extends cdk.Stack {
     const byTag = mkChain('ChainByTag', { StringEquals: { 'aws:PrincipalTag/department': 'sales' } });
     const bySrc = mkChain('ChainBySource', { StringEquals: { 'aws:SourceIdentity': 'alice' } });
 
+    // 検証4: 受信側 resource-based policy のみ（chain role の identity policy は Receiver2 に対して何も許可しない）
+    // PutResourcePolicy は既存ポリシーを置換するため、AddPermission で管理している Receiver とは別関数にする
+    const receiver2 = new lambda.Function(this, 'Receiver2', {
+      runtime: lambda.Runtime.PYTHON_3_13,
+      handler: 'index.handler',
+      code: lambda.Code.fromAsset('lambda/receiver'),
+    });
+    const url2 = receiver2.addFunctionUrl({ authType: lambda.FunctionUrlAuthType.AWS_IAM });
+    const stmt = (sid: string, role: iam.IRole, cond: Record<string, Record<string, string>>) => [
+      {
+        Sid: `${sid}Url`, Effect: 'Allow', Principal: { AWS: role.roleArn },
+        Action: 'lambda:InvokeFunctionUrl', Resource: receiver2.functionArn,
+        Condition: { ...cond, StringEquals: { ...(cond.StringEquals ?? {}), 'lambda:FunctionUrlAuthType': 'AWS_IAM' } },
+      },
+      {
+        Sid: `${sid}Fn`, Effect: 'Allow', Principal: { AWS: role.roleArn },
+        Action: 'lambda:InvokeFunction', Resource: receiver2.functionArn,
+        Condition: { ...cond, Bool: { 'lambda:InvokedViaFunctionUrl': 'true' } },
+      },
+    ];
+    new lambda.CfnResourcePolicy(this, 'Receiver2Policy', {
+      resourceArn: receiver2.functionArn,
+      policyDocument: {
+        Version: '2012-10-17',
+        Statement: [
+          ...stmt('ByTag', byTag, { StringEquals: { 'aws:PrincipalTag/department': 'sales' } }),
+          ...stmt('BySource', bySrc, { StringEquals: { 'aws:SourceIdentity': 'alice' } }),
+        ],
+      },
+    });
+    new cdk.CfnOutput(this, 'Receiver2Url', { value: url2.url });
+
     new cdk.CfnOutput(this, 'ClientId', { value: client.userPoolClientId });
     new cdk.CfnOutput(this, 'PoolId', { value: pool.userPoolId });
     new cdk.CfnOutput(this, 'FederatedRoleArn', { value: fed.roleArn });

@@ -48,6 +48,8 @@ mTLSは「その通信の両端が本当に名乗ったとおりの相手か」�
 
 - `AssumeRole`系オペレーションで一度設定すると、role chaining全体を通じて**不変**（後続で書き換え不可）。
 - 設定後は`aws:SourceIdentity`として、そのセッションで行う**すべての後続APIコール**がCloudTrailに記録される。
+  実機確認：chain後のセッションによる`GetWebIdentityToken`呼び出しのCloudTrailイベントに
+  `userIdentity.sessionContext.sourceIdentity`として記録された（2026-09-30）。
 - アカウント跨ぎのchainingでは、起点側の実行ポリシーと先方のtrust policy両方に
   `sts:SetSourceIdentity`が必要。
 - `AssumeRoleWithWebIdentity`では、OIDCトークンの`https://aws.amazon.com/source_identity`
@@ -111,8 +113,14 @@ AssumeRoleWithWebIdentityなら`SubjectFromWebIdentityToken`）で判別する�
   **実機確認（2026-09-30）**：Function URLを呼ぶchain先roleのidentity-based policyに
   `aws:PrincipalTag/department`だけ、または`aws:SourceIdentity`だけを条件にした許可を書き、
   ログイン時に注入した値が異なるユーザーで呼ぶと、条件を満たす場合のみ200、満たさない場合は
-  403になった（片方の条件だけを満たすユーザーでも正しく区別された）。なお受信側の
-  resource-based policyでこれらの条件キーが使えるかは未検証。
+  403になった（片方の条件だけを満たすユーザーでも正しく区別された）。
+  受信側のresource-based policyでも同様に機能した。呼び出し元roleのidentity policyには
+  何も許可を書かず、受信側関数のresource policy（`PutResourcePolicy`／CloudFormationの
+  `AWS::Lambda::ResourcePolicy`）に、呼び出し元roleをPrincipalとして`aws:PrincipalTag`または
+  `aws:SourceIdentity`の条件付きで`lambda:InvokeFunctionUrl`と`lambda:InvokeFunction`
+  （`lambda:InvokedViaFunctionUrl`）を許可した場合も、結果は同じだった。
+  注意：`PutResourcePolicy`は関数の既存のresource policyを**置き換える**（`AddPermission`で
+  付けた許可も上書きされる）ため、同じ関数で両方を併用しない。
 - 残る差分は「盗まれたBearerトークン（＝ここではSigV4署名の元になるIAM認証情報）の再利用防止」。
   mTLS/送信者拘束が持っていたこの性質の代替は、STSセッションの短寿命化
   （`GetWebIdentityToken`の`sts:DurationSeconds`条件キー等）に委ねる。
@@ -234,17 +242,10 @@ NAT Gatewayなしに成立するか。
 - Pre Token Generation **V1**（Liteプラン等、より安価なプラン）でも、ネストしたJSONクレーム
   （`https://aws.amazon.com/tags`）を注入できるか。検証はV2（Essentialsプラン）のみ。
   V1で不可の場合、上記の「無料枠で利用可能」という記述は成立しない可能性がある。
-- SourceIdentityがCloudTrailの後続APIコールに`sourceIdentity`として記録されること。
-- Cognito User PoolをIAM OIDC providerとして登録し、Pre Token Generation Lambdaで
-  `https://aws.amazon.com/source_identity`と`https://aws.amazon.com/tags`クレームを実際に
-  注入・伝播できるか（ドキュメント上は可能なはずだが実機未確認）。
 - 業務RBAC情報（特定の業務ロールにのみ許可される操作の区別等）をどこに持たせるか
   （ログイン時federationでprincipal_tags/session tagsに焼き込むか、各サービスがダウンストリームで
   ディレクトリを引き直すか）は未決定。
 - role chaining 1時間上限が、長時間のエージェントセッションで実運用上どこまで問題になるか。
-- Lambda function URLの受信側**resource-based policy**（`PutResourcePolicy`）で、
-  `aws:SourceIdentity`/`aws:PrincipalTag`条件キーを使った許可の絞り込みが機能するか
-  （`AddPermission`が受け付ける条件は限られる。identity-based policyでは検証済み）。
 
 ## 参考
 
