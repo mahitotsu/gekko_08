@@ -68,6 +68,14 @@ mTLSは「その通信の両端が本当に名乗ったとおりの相手か」�
 - `sts:GetWebIdentityToken`/`sts:TagGetWebIdentityToken`権限と、
   `sts:IdentityTokenAudience`・`sts:DurationSeconds`・`sts:SigningAlgorithm`の
   条件キーで発行を制御できる。
+- **Lambdaでの実機確認（2026-09-30、ap-northeast-1、Python 3.13、boto3 1.42.97）**：
+  Lambda関数の実行roleから呼び出せた（ランタイム同梱のSDKで足り、追加バンドル不要）。
+  `sub`は実行roleのARN、`lambda_source_function_arn`・`principal_tags`・`org_id`・
+  `aws_account`等が付与された。`iss`はアカウント固有の
+  `https://<uuid>.tokens.sts.global.api.aws`。
+  `AssumeRoleWithWebIdentity`でSourceIdentityを設定し、role chainingを1段経たセッションで
+  呼んだ場合、JWTの`https://sts.amazonaws.com/`名前空間に`source_identity`が継承され、
+  transitiveに指定したsession tagも`principal_tags`に入った（`sub`はchain先のroleのARN）。
 
 ## トランスポート：mTLSではなくTLS＋Bearer JWTの`sub`
 
@@ -89,12 +97,22 @@ AssumeRoleWithWebIdentityなら`SubjectFromWebIdentityToken`）で判別する�
   呼び出し元のidentity-based policyかこのresource-based policyのどちらかで足りるが、
   両方を組み合わせて「呼び出し元も許可され、かつ受信側も明示的に許可している」という
   二重の宣言にする方が、許可リストの感覚に近い。
+  **実機確認（2026-09-30）**：呼び出し元のidentity policyを空にして、受信側の
+  resource-based policy（`lambda:InvokeFunctionUrl`＋`lambda:InvokeFunction`
+  〔`invokedViaFunctionUrl`〕）だけで許可したroleは200、同一アカウント内で許可していない
+  roleと未署名リクエストはいずれも403だった。受信側には
+  `requestContext.authorizer.iam`として呼び出し元の`userArn`・`principalOrgId`等が渡る。
 - この`aws:SourceIdentity`/`aws:PrincipalTag`を、このresource-based policyやidentity-based
   policyの条件キーとして使えば、認可コンテキスト（誰の代理か・どの業務属性を持つか）の判定も
   IAMのポリシーエンジン自身が行うことになる。以前このコンセプトで整理した「tagはアプリコードが
   読んで従わない限りOAuth scopeと同じくただの飾り」という結論は、通信がプレーンHTTPであることが
   前提だった。Function URL/API Gatewayの`AWS_IAM`認証を使う限り、通信はプレーンHTTPではなく
   IAMが仲介するAWS API呼び出しになるため、その結論はここには当てはまらない。
+  **実機確認（2026-09-30）**：Function URLを呼ぶchain先roleのidentity-based policyに
+  `aws:PrincipalTag/department`だけ、または`aws:SourceIdentity`だけを条件にした許可を書き、
+  ログイン時に注入した値が異なるユーザーで呼ぶと、条件を満たす場合のみ200、満たさない場合は
+  403になった（片方の条件だけを満たすユーザーでも正しく区別された）。なお受信側の
+  resource-based policyでこれらの条件キーが使えるかは未検証。
 - 残る差分は「盗まれたBearerトークン（＝ここではSigV4署名の元になるIAM認証情報）の再利用防止」。
   mTLS/送信者拘束が持っていたこの性質の代替は、STSセッションの短寿命化
   （`GetWebIdentityToken`の`sts:DurationSeconds`条件キー等）に委ねる。
@@ -171,6 +189,17 @@ NAT Gatewayなしに成立するか。
   一般指針（「クライアントが自前のバックエンドしか呼ばないならIdentity Poolは不要」）とも整合する。
 - ID tokenのクレームカスタマイズ（Pre Token Generation Lambda）はCognitoの無料枠（entry-level plan）で
   利用可能。access tokenのクレームカスタマイズだけが有料プラン必須（今回はID token側で完結するため影響なし）。
+- **実機確認（2026-09-30、ap-northeast-1）**：User Pool（Essentialsプラン）に
+  Pre Token Generation **V2**トリガーを付け、ID tokenに
+  `https://aws.amazon.com/source_identity`（文字列）と`https://aws.amazon.com/tags`
+  （ネストしたJSON：`principal_tags`＋`transitive_tag_keys`）を注入できた。User PoolをIAM OIDC
+  providerとして登録し（`aud`＝App ClientのIDで信頼ポリシーを絞る）、`AssumeRoleWithWebIdentity`を
+  直接呼ぶと、SourceIdentityとsession tagが1回の呼び出しで設定された。Chain先のroleの
+  `AssumeRole`でもSourceIdentityは保持され、transitiveに指定したtagも伝播した。
+  federated roleの信頼ポリシーには`sts:AssumeRoleWithWebIdentity`に加えて`sts:TagSession`と
+  `sts:SetSourceIdentity`、chain先の信頼ポリシーには`sts:AssumeRole`＋同2つが必要。
+  IdP側から取得した認証は`USER_PASSWORD_AUTH`で行い、Authorization Code + PKCEでの
+  ログインフローは検証していない（発行されるID tokenの形式は同じ）。
 
 ## 想定するフロー
 
@@ -200,9 +229,12 @@ NAT Gatewayなしに成立するか。
 
 ## 未検証事項・次のステップ
 
-- Lambda関数から実際に`GetWebIdentityToken`が呼べ、`lambda_source_function_arn`クレームが
-  付与されるか（ドキュメント上の参照実装どおりのはずだが実機未確認）。gekko_08で最終的に
-  ECS等の別コンピュート基盤も使う場合、そちらでの`GetWebIdentityToken`対応は別途要確認。
+- gekko_08で最終的にECS等の別コンピュート基盤も使う場合、そちらでの
+  `GetWebIdentityToken`対応は別途要確認。
+- Pre Token Generation **V1**（Liteプラン等、より安価なプラン）でも、ネストしたJSONクレーム
+  （`https://aws.amazon.com/tags`）を注入できるか。検証はV2（Essentialsプラン）のみ。
+  V1で不可の場合、上記の「無料枠で利用可能」という記述は成立しない可能性がある。
+- SourceIdentityがCloudTrailの後続APIコールに`sourceIdentity`として記録されること。
 - Cognito User PoolをIAM OIDC providerとして登録し、Pre Token Generation Lambdaで
   `https://aws.amazon.com/source_identity`と`https://aws.amazon.com/tags`クレームを実際に
   注入・伝播できるか（ドキュメント上は可能なはずだが実機未確認）。
@@ -210,12 +242,13 @@ NAT Gatewayなしに成立するか。
   （ログイン時federationでprincipal_tags/session tagsに焼き込むか、各サービスがダウンストリームで
   ディレクトリを引き直すか）は未決定。
 - role chaining 1時間上限が、長時間のエージェントセッションで実運用上どこまで問題になるか。
-- Lambda function URLの`AWS_IAM`認証＋resource-based policyの組み合わせが、実機で
-  意図通りに「登録した呼び出し元roleのみ許可」として機能するか（`aws:SourceIdentity`/
-  `aws:PrincipalTag`条件キーを含めた検証）。
+- Lambda function URLの受信側**resource-based policy**（`PutResourcePolicy`）で、
+  `aws:SourceIdentity`/`aws:PrincipalTag`条件キーを使った許可の絞り込みが機能するか
+  （`AddPermission`が受け付ける条件は限られる。identity-based policyでは検証済み）。
 
 ## 参考
 
+- 検証用CDKコード：[spike/cdk/](../../spike/cdk/)
 - [AWS: Federating AWS Identities to external services](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_providers_outbound.html)
 - [AWS: Understanding token claims](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_providers_outbound_token_claims.html)
 - [AWS: Controlling access with IAM policies（outbound federation）](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_providers_outbound_policies.html)
