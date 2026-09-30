@@ -1,0 +1,9 @@
+{
+  "name": "@gekko08/fraud-agent",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@gekko08/authz-context": "*",
+    "@aws-sdk/client-bedrock-runtime": "^3.1143.0"
+  }
+}

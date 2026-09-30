@@ -33,7 +33,7 @@ export class WebFrontend extends Construct {
       },
       additionalBehaviors: {
         '/api/*': {
-          origin: origins.FunctionUrlOrigin.withOriginAccessControl(props.bff.url),
+          origin: origins.FunctionUrlOrigin.withOriginAccessControl(props.bff.url, { readTimeout: cdk.Duration.seconds(60) }),
           viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.HTTPS_ONLY,
           allowedMethods: cloudfront.AllowedMethods.ALLOW_ALL,
           cachePolicy: cloudfront.CachePolicy.CACHING_DISABLED,

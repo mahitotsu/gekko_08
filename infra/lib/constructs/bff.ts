@@ -37,6 +37,8 @@ export class Bff extends Construct {
     this.fn = new NodeFunction(this, 'Function', {
       entry: 'services/bff/src/index.ts',
       description: 'bff: login, session, and the first hop',
+      // エージェントの経路はモデルを複数回呼ぶ。CloudFrontのオリジンの応答待ち（60秒）に合わせる
+      timeout: cdk.Duration.seconds(60),
       environment: {
         SESSIONS_TABLE: this.sessions.tableName,
         BFF_CONFIG_PARAM: this.configParamName,

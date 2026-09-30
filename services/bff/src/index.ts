@@ -202,6 +202,24 @@ async function withChain<T>(s: Session, requestId: string, timings: Timings, f: 
 
 const CASE_SUMMARY = /^\/api\/cases\/([\w-]{1,64})\/summary$/;
 
+/** ホップを呼ぶ経路。ブラウザから受け取るのは案件IDだけで、ユーザーの情報は受け取らない */
+function hopRoute(event: LambdaFunctionURLEvent): { name: string; target: string; body: unknown } | undefined {
+  const method = event.requestContext.http.method;
+  const m = method === 'GET' ? event.rawPath.match(CASE_SUMMARY) : null;
+  if (m) return { name: 'case-summary', target: 'case-service', body: { action: 'summary', caseId: m[1] } };
+  if (method === 'POST' && event.rawPath === '/api/agent') {
+    let caseId: unknown;
+    try {
+      const raw = event.isBase64Encoded ? Buffer.from(event.body ?? '', 'base64').toString() : event.body;
+      caseId = JSON.parse(raw || '{}').caseId;
+    } catch {
+      return undefined;
+    }
+    if (typeof caseId === 'string' && /^[\w-]{1,64}$/.test(caseId)) return { name: 'agent', target: 'fraud-agent', body: { caseId } };
+  }
+  return undefined;
+}
+
 export const handler = async (event: LambdaFunctionURLEvent): Promise<LambdaFunctionURLResult> => {
   const method = event.requestContext.http.method;
   const path = event.rawPath;
@@ -214,15 +232,15 @@ export const handler = async (event: LambdaFunctionURLEvent): Promise<LambdaFunc
     if (!s) return json(401, { error: 'not logged in' });
     if (method === 'GET' && path === '/api/me') return json(200, { username: s.username, branch: s.branch });
 
-    const m = method === 'GET' ? path.match(CASE_SUMMARY) : null;
-    if (!m) return json(404, { error: 'not found' });
+    const route = hopRoute(event);
+    if (!route) return json(404, { error: 'not found' });
 
     const requestId = randomUUID();
     const t0 = performance.now();
     const timings: Timings = {};
-    const r = await withChain(s, requestId, timings, (call) => call('case-service', { action: 'summary', caseId: m[1] }));
+    const r = await withChain(s, requestId, timings, (call) => call(route.target, route.body));
     log('info', 'handled', {
-      hop: 'bff', requestId, route: 'case-summary', user: s.username, status: r.status,
+      hop: 'bff', requestId, route: route.name, user: s.username, status: r.status,
       timings: { ...timings, totalMs: Math.round(performance.now() - t0) },
     });
     return json(r.status, { requestId, ...(typeof r.body === 'object' ? r.body : { detail: r.body }) });

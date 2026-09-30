@@ -1,7 +1,7 @@
 import { AssumeRoleCommand, GetWebIdentityTokenCommand, STSClient } from '@aws-sdk/client-sts';
 import type { AwsCredentialIdentity } from '@smithy/types';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { browserGet, federatedSession, loginSession, signedPost, stackOutputs, type Outputs } from './helpers';
+import { browserGet, browserPost, federatedSession, loginSession, signedPost, stackOutputs, type Outputs } from './helpers';
 
 // マイクロサービスの経路（bff → case-service → account-service）のシナリオテスト。
 // デプロイしたスタックに対して実行し、各テストは要件のIDにひも付ける（設計書§10）
@@ -110,6 +110,14 @@ describe('FR-5: ブラウザには認証情報を持たせない', () => {
     const setCookie = r.headers.get('set-cookie') ?? '';
     expect(setCookie).toMatch(/__Host-login=[\w-]+; Path=\/; Secure; HttpOnly; SameSite=Lax/);
     expect(setCookie).not.toMatch(/eyJ/);
+  });
+
+  it('ログアウトするとセッションが無効になり、cookieが消える', async () => {
+    const session = await loginSession('yamada');
+    const r = await browserPost('/api/logout', '', session);
+    expect(r.status).toBe(200);
+    expect(r.headers.get('set-cookie')).toMatch(/__Host-sid=; .*Max-Age=0/);
+    expect((await browserGet('/api/me', session)).status).toBe(401);
   });
 
   it('セッションcookieがなければ401', async () => {

@@ -46,7 +46,12 @@ export interface CallerOptions {
   timings: Timings;
 }
 
-export type Call = (target: string, body: unknown) => Promise<CallResult>;
+export interface CallOptions {
+  /** 追加のヘッダー（MCPの`Accept`など）。認可に関わるヘッダーは上書きできない */
+  headers?: Record<string, string>;
+}
+
+export type Call = (target: string, body: unknown, options?: CallOptions) => Promise<CallResult>;
 
 async function timed<T>(timings: Timings, key: string, f: () => Promise<T>): Promise<T> {
   const t0 = performance.now();
@@ -73,7 +78,7 @@ export function createCaller(opts: CallerOptions): Call {
     return chained;
   };
 
-  return async (name, body) => {
+  return async (name, body, options = {}) => {
     const target = opts.targets[name];
     if (!target) throw new Error(`unknown target: ${name}`);
     const session = await chain();
@@ -89,6 +94,7 @@ export function createCaller(opts: CallerOptions): Call {
     const url = new URL(target.url);
     const payload = JSON.stringify(body ?? {});
     const headers: Record<string, string> = {
+      ...options.headers,
       host: url.host,
       'content-type': 'application/json',
       [HEADER_CONTEXT]: token,

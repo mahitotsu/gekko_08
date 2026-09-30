@@ -8,7 +8,7 @@ async function sha256Hex(text) {
 
 // CloudFrontのOACでLambdaを呼ぶため、POSTには本文のSHA-256を付ける
 async function post(path, body = '') {
-  return fetch(path, { method: 'POST', body, headers: { 'x-amz-content-sha256': await sha256Hex(body) } });
+  return fetch(path, { method: 'POST', body, headers: { 'content-type': 'application/json', 'x-amz-content-sha256': await sha256Hex(body) } });
 }
 
 async function show() {
@@ -25,6 +25,13 @@ async function show() {
 $('logout').addEventListener('click', async () => {
   await post('/api/logout');
   await show();
+});
+
+$('agent-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  $('result').textContent = '分析中…';
+  const res = await post('/api/agent', JSON.stringify({ caseId: $('agent-case-id').value }));
+  $('result').textContent = `${res.status}\n${JSON.stringify(await res.json(), null, 2)}`;
 });
 
 $('summary-form').addEventListener('submit', async (e) => {

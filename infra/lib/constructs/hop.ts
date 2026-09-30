@@ -77,7 +77,7 @@ export class Hop extends Construct {
     this.fn = new NodeFunction(this, 'Function', {
       entry: props.entry,
       description: `${props.hopName} hop`,
-      timeout: props.timeout,
+      ...(props.timeout ? { timeout: props.timeout } : {}),
       environment: {
         HOP_NAME: props.hopName,
         HOP_AUDIENCE: this.audience,

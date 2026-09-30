@@ -76,7 +76,7 @@ describe('SR-3: 各ホップのログに、認証情報・JWT・cookieが含ま�
   it('テスト中に出たログのすべてに、認証情報のパターンが現れない', async () => {
     const groups = await hopLogGroups();
     let total = 0;
-    for (const hop of HOPS) {
+    for (const hop of Object.keys(groups) as HopName[]) {
       const messages = await readLogs(groups[hop], startTime);
       total += messages.length;
       for (const m of messages) {

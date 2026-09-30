@@ -90,6 +90,19 @@ export async function browserGet(path: string, cookie?: string, headers: Record<
   return { status: res.status, headers: res.headers, text, body };
 }
 
+/** ブラウザと同じ経路（CloudFront）でbffにPOSTする。OACの要件で本文のSHA-256を付ける */
+export async function browserPost(path: string, body: string, cookie?: string) {
+  const o = await stackOutputs();
+  const res = await fetch(`${o.WebUrl}${path}`, {
+    method: 'POST', body, redirect: 'manual',
+    headers: { 'content-type': 'application/json', 'x-amz-content-sha256': createHash('sha256').update(body).digest('hex'), ...(cookie ? { cookie } : {}) },
+  });
+  const text = await res.text();
+  let parsed: any = text;
+  try { parsed = JSON.parse(text); } catch { /* 文字列のまま */ }
+  return { status: res.status, headers: res.headers, text, body: parsed };
+}
+
 /** 漏れたchainのセッションに相当する、ユーザーの属性を持つfederated roleのセッションを得る */
 export async function federatedSession(user: DemoUser, sessionName = `test-${Date.now()}`): Promise<AwsCredentialIdentity> {
   const o = await stackOutputs();
@@ -113,7 +126,13 @@ export async function signedPost(url: string, body: unknown, headers: Record<str
   return { status: res.status, text: await res.text() };
 }
 
-const HOP_LOG_GROUPS = { bff: 'BffFunctionLogs', 'case-service': 'CaseServiceFunctionLogs', 'account-service': 'AccountServiceFunctionLogs' } as const;
+const HOP_LOG_GROUPS = {
+  bff: 'BffFunctionLogs',
+  'case-service': 'CaseServiceFunctionLogs',
+  'account-service': 'AccountServiceFunctionLogs',
+  'fraud-agent': 'FraudAgentFunctionLogs',
+  'fraud-mcp': 'FraudMcpFunctionLogs',
+} as const;
 export type HopName = keyof typeof HOP_LOG_GROUPS;
 
 let logGroups: Promise<Record<HopName, string>> | undefined;
@@ -165,6 +184,7 @@ export interface HandledLog {
   tokenSub?: string;
   subject?: { id: string; branch: string };
   user?: string;
+  route?: string;
   timings: Record<string, number>;
 }
 

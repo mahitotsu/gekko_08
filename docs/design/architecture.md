@@ -222,10 +222,17 @@ bffのFunction URLを直接呼べうるが、セッションcookieがなけれ�
 - **データ**：案件と取引（case-service）、口座（account-service）。それぞれ`branch`を持つ。
 - **マイクロサービスの経路**：yamadaが自分の支店の案件の要約を開くと、case-serviceが口座の情報をaccount-serviceから取得して返す。
   他の支店の案件は、case-serviceのABACで拒否される。
-- **エージェントの経路**：yamadaが案件の分析をfraud-agentに依頼する。案件の取引メモには、他の支店の口座（999）の参照を促す文言を混ぜておく。
-  エージェントがそれに誘導されてfraud-mcpのツールで口座999を要求しても、account-serviceのABACで拒否される。
+- **エージェントの経路**：yamadaが案件の分析をfraud-agentに依頼する。案件の取引メモには、他の支店の口座（A-999）の参照を促す文言を混ぜておく。
+  エージェントがそれに誘導されてfraud-mcpのツールで口座A-999を要求しても、account-serviceのABACで拒否される。
 - **エージェントとLLM**：fraud-agentはBedrockのConverse APIでClaude Haiku 4.5を呼び、ツールはfraud-mcpから取得する（MCPのtools/list・tools/call）。
   モデルに渡すのは業務データとツールの結果だけで、ヘッダーや認証情報は渡さない。
+  モデルは日本国内の推論プロファイル（`jp.anthropic.claude-haiku-4-5-20251001-v1:0`、東京・大阪）で呼ぶ。1回の分析でモデルを呼ぶのは最大8回。
+- **MCPの実装**：fraud-mcpはStreamable HTTPのステートレスなサーバーで、SSEを使わずJSONで応答する。ツールは`get_case`（case-service）と
+  `get_account`（account-service）の2つで、呼び出し先のホップの結果（HTTPステータスを含む）をそのまま返す。認可の判断はしない。
+  fraud-agentは分析のたびに`initialize`から始め、MCPの各メッセージを共通部品の送信（§4）で送る。MCPが求める`Accept`と
+  `MCP-Protocol-Version`のヘッダーは、共通部品に追加のヘッダーとして渡す。
+- **タイムアウト**：CloudFrontのオリジンの応答待ちは既定の上限の60秒で、bffのLambdaも60秒、fraud-agentは55秒とする。
+  他のホップは30秒。
 - **MCPの認可についての注記**：MCPの仕様では認可は任意で、HTTPではOAuthに従うことが推奨される。この参照実装のfraud-mcpはOAuthではなく、
   他のホップと同じ入口（実行roleとJWT）で守る。
 
@@ -269,7 +276,7 @@ npmのワークスペースで次のように分ける。
 | FR-4 | 途中のホップを飛ばした呼び出しが403 |
 | FR-5 | ブラウザに返す応答とcookieに、トークンも認証情報も含まれない |
 | FR-6 | 1回のリクエストを、各ホップのログとCloudTrailでリクエストIDとユーザーから追える |
-| FR-7 | エージェントが誘導されて他の支店の口座を要求しても拒否される。自分の支店の案件は分析できる |
+| FR-7 | エージェントが誘導されて他の支店の口座を要求しても拒否される。自分の支店の案件は分析できる。モデルの判断は毎回変わりうるので、誘導されたかどうかではなく、誘導されても他の支店のデータが応答に現れないことを確かめる |
 | NFR-3 | 各ホップの処理時間（chain、JWTの発行、検証）を集計して公開する |
 | SR-1 | 受け渡したchainのセッションで、どのホップも呼べない |
 | SR-2 | 許可していない主体（広い権限を持つroleを含む）が各ホップを呼ぶと403 |
