@@ -1,7 +1,7 @@
 # gekko08
 
 AWS上のマイクロサービスで、Authorization Context（誰の権限で処理するのか）とWorkload Identity（どのサービスが呼んでいるのか）を分け、
-多段呼び出しの奥まで届ける仕組みの参照実装。背景と設計は[docs/](docs/README.md)にある。
+多段呼び出しの奥まで届ける仕組みの参照実装。仕組みと当てはめ方は[設計ガイド](docs/guide.md)に、背景と設計の詳細は[docs/](docs/README.md)にある。
 
 ## 前提条件
 
