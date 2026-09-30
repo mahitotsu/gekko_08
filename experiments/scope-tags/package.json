@@ -1,0 +1,17 @@
+{
+  "name": "gekko08-exp-scope-tags",
+  "private": true,
+  "type": "module",
+  "scripts": { "cdk": "cdk", "run": "tsx scripts/run.ts" },
+  "devDependencies": {
+    "aws-cdk": "^2.1143.0",
+    "tsx": "^4.23.15",
+    "typescript": "~5.9.3"
+  },
+  "dependencies": {
+    "@aws-sdk/client-cloudformation": "^3.1143.0",
+    "@aws-sdk/client-sts": "^3.1143.0",
+    "aws-cdk-lib": "^2.271.0",
+    "constructs": "^10.0.0"
+  }
+}
