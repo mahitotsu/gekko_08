@@ -13,7 +13,7 @@
 このノート自体も最終的には削除する。検証済みの事実（日付・リージョン・SDKバージョンと
 観測結果）は検証記録またはADRの根拠へ、設計上の判断（mTLSを外す、Cognitoを採用し
 Identity Poolsは使わない等）はADRへ、未検証事項はADRか設計書の未解決事項へ移す。
-すべての移し先ができ、PRFAQ等からのリンクを付け替えた時点で、`spike/cdk/`の扱いと
+すべての移し先ができ、PRFAQ等からのリンクを付け替えた時点で、`experiments/feasibility/`の扱いと
 あわせて削除する。
 
 ## 背景：2つの独立した関心事
@@ -263,7 +263,7 @@ NAT Gatewayなしに成立するか。
 ## 参考
 
 - PRFAQ：[aws-authorization-context-propagation.md](../prfaq/aws-authorization-context-propagation.md)
-- 検証用CDKコード：[spike/cdk/](../../spike/cdk/)（スタック`Gekko08Spike`/`Gekko08SpikeCognito`は2026-09-30に削除済み）
+- 検証用CDKコード：[experiments/feasibility/](../../experiments/feasibility/)（スタック`Gekko08Spike`/`Gekko08SpikeCognito`は2026-09-30に削除済み）
 - [AWS: Federating AWS Identities to external services](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_providers_outbound.html)
 - [AWS: Understanding token claims](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_providers_outbound_token_claims.html)
 - [AWS: Controlling access with IAM policies（outbound federation）](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_providers_outbound_policies.html)
