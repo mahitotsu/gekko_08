@@ -31,3 +31,4 @@ AWS SDK for JavaScript v3の`@aws-sdk/client-sts` 3.1143.0に`GetWebIdentityToke
 
 - 検証はPythonで行ったため、TypeScriptでの実装はテストで改めて確かめる必要がある。
 - SDKを同梱する分、デプロイパッケージが大きくなり、コールドスタートがわずかに伸びうる。
+- 共通部品はTypeScriptのパッケージとして提供するので、TypeScript以外で書かれた関数からは使えない。他の言語で使うには、共通部品の機能を別に提供する必要がある。
