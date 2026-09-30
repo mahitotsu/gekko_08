@@ -12,7 +12,8 @@
     "test": "npm run test -w @gekko08/authz-context",
     "test:scenario": "npm run test -w @gekko08/tests",
     "deploy": "npm run cdk -w @gekko08/infra -- deploy",
-    "destroy": "npm run cdk -w @gekko08/infra -- destroy"
+    "destroy": "npm run cdk -w @gekko08/infra -- destroy",
+    "test:scenario:cloudtrail": "CHECK_CLOUDTRAIL=1 npm run test -w @gekko08/tests"
   },
   "devDependencies": {
     "@types/aws-lambda": "^8.10.160",

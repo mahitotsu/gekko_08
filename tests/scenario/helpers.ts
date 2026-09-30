@@ -1,6 +1,7 @@
 import { createHash, createHmac, randomBytes } from 'node:crypto';
 import { Sha256 } from '@aws-crypto/sha256-js';
-import { CloudFormationClient, DescribeStacksCommand } from '@aws-sdk/client-cloudformation';
+import { CloudFormationClient, DescribeStacksCommand, paginateListStackResources } from '@aws-sdk/client-cloudformation';
+import { CloudWatchLogsClient, paginateFilterLogEvents } from '@aws-sdk/client-cloudwatch-logs';
 import {
   AdminCreateUserCommand, AdminInitiateAuthCommand, AdminSetUserPasswordCommand, AdminUpdateUserAttributesCommand,
   CognitoIdentityProviderClient, DescribeUserPoolClientCommand, UsernameExistsException,
@@ -110,4 +111,75 @@ export async function signedPost(url: string, body: unknown, headers: Record<str
   });
   const res = await fetch(u, { method: 'POST', headers: signed.headers, body: payload });
   return { status: res.status, text: await res.text() };
+}
+
+const HOP_LOG_GROUPS = { bff: 'BffFunctionLogs', 'case-service': 'CaseServiceFunctionLogs', 'account-service': 'AccountServiceFunctionLogs' } as const;
+export type HopName = keyof typeof HOP_LOG_GROUPS;
+
+let logGroups: Promise<Record<HopName, string>> | undefined;
+/** 各ホップのロググループ名。論理IDの接頭辞でスタックのリソースから探す */
+export function hopLogGroups(): Promise<Record<HopName, string>> {
+  logGroups ??= (async () => {
+    const found: Partial<Record<HopName, string>> = {};
+    for await (const page of paginateListStackResources({ client: new CloudFormationClient({}) }, { StackName: STACK })) {
+      for (const r of page.StackResourceSummaries ?? []) {
+        for (const [hop, prefix] of Object.entries(HOP_LOG_GROUPS)) {
+          if (r.ResourceType === 'AWS::Logs::LogGroup' && r.LogicalResourceId!.startsWith(prefix)) found[hop as HopName] = r.PhysicalResourceId!;
+        }
+      }
+    }
+    for (const hop of Object.keys(HOP_LOG_GROUPS)) if (!found[hop as HopName]) throw new Error(`log group for ${hop} not found`);
+    return found as Record<HopName, string>;
+  })();
+  return logGroups;
+}
+
+const logs = new CloudWatchLogsClient({});
+
+/** ロググループのイベントを、開始時刻以降・パターンで絞って読む */
+export async function readLogs(group: string, startTime: number, filterPattern?: string): Promise<string[]> {
+  const out: string[] = [];
+  for await (const page of paginateFilterLogEvents({ client: logs }, { logGroupName: group, startTime, filterPattern })) {
+    for (const e of page.events ?? []) out.push(e.message!);
+  }
+  return out;
+}
+
+/** 条件を満たすまで繰り返す。ログやCloudTrailの到着を待つのに使う */
+export async function eventually<T>(f: () => Promise<T | undefined>, timeoutMs: number, intervalMs = 3000): Promise<T> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const v = await f();
+    if (v !== undefined) return v;
+    if (Date.now() > deadline) throw new Error('timed out');
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+}
+
+/** 共通部品とbffが出す、1回のリクエストの処理結果のログ */
+export interface HandledLog {
+  hop: string;
+  requestId: string;
+  status: number;
+  actor?: string;
+  tokenSub?: string;
+  subject?: { id: string; branch: string };
+  user?: string;
+  timings: Record<string, number>;
+}
+
+/** 各ホップの`handled`ログのうち、指定したリクエストIDのものを、すべてのホップに揃うまで待って返す */
+export async function handledLogs(requestIds: string[], hops: HopName[], startTime: number): Promise<Record<string, Partial<Record<HopName, HandledLog>>>> {
+  const groups = await hopLogGroups();
+  const byId: Record<string, Partial<Record<HopName, HandledLog>>> = Object.fromEntries(requestIds.map((id) => [id, {}]));
+  return eventually(async () => {
+    for (const hop of hops) {
+      for (const m of await readLogs(groups[hop], startTime, '{ $.message = "handled" }')) {
+        // Lambdaのtext形式のログは、時刻などの接頭辞の後ろにJSONが続く
+        const l = JSON.parse(m.slice(m.indexOf('{'))) as HandledLog;
+        if (byId[l.requestId]) byId[l.requestId][hop] = l;
+      }
+    }
+    return requestIds.every((id) => hops.every((h) => byId[id][h])) ? byId : undefined;
+  }, 90_000, 5000);
 }

@@ -21,6 +21,7 @@ npm install
 npm test               # 共通部品の単体テスト
 npm run deploy         # スタック Gekko08App をデプロイする
 npm run test:scenario  # デプロイしたスタックに対するシナリオテスト
+npm run test:scenario:cloudtrail  # CloudTrailでの追跡も確かめる（最大15分ほどかかる）
 ```
 
 デモのユーザー（yamada：tokyo、tanaka：osaka）はシナリオテストが作る。ブラウザで試すときは、パスワードを設定してから、

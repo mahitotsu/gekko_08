@@ -275,6 +275,10 @@ npmのワークスペースで次のように分ける。
 | SR-2 | 許可していない主体（広い権限を持つroleを含む）が各ホップを呼ぶと403 |
 | SR-3 | 各ホップのログに、認証情報・JWT・cookieが含まれない |
 
+FR-6・SR-3・NFR-3のテストは、各ホップの構造化ログをCloudWatch Logsから読んで確かめる。FR-6のうちCloudTrailの確認は、イベントが届くまでに
+最大15分ほどかかるため、`npm run test:scenario:cloudtrail`のときだけ実行する。CloudTrailのイベントは、`Username`（＝`RoleSessionName`＝リクエストID）で引ける。
+NFR-3のテストは、集計結果を`tests/out-latency.json`（git管理外）に書く。
+
 共通部品の単体テストは、要件のIDにはひも付けない。
 
 ## 11. 前提条件と制約
