@@ -135,7 +135,7 @@ account-serviceは呼び出し先を持たないので、chain用roleを持た�
 | 種類 | 個数 | 権限 |
 |---|---|---|
 | 実行role | Lambda関数ごとに1つ | 自分のデータ（DynamoDB）へのアクセス、ログ出力。fraud-agentはBedrockの呼び出し、bffはセッションのテーブルとSSMのパラメータ。ホップの呼び出しには権限を付けない（呼び出し先のresource policyで許可する） |
-| chain用role | §4の表のとおり | 次のchain用roleへの`sts:AssumeRole`・`sts:TagSession`・`sts:SetSourceIdentity`と、許された宛先への`sts:GetWebIdentityToken`だけ |
+| chain用role | §4の表のとおり | 次のchain用roleへの`sts:AssumeRole`・`sts:TagSession`・`sts:SetSourceIdentity`と、許された宛先への`sts:GetWebIdentityToken`だけ。`sts:GetWebIdentityToken`は、宛先を`ForAllValues:StringEquals`＋`Null`で許された宛先だけに、署名方式をES384に、有効期間を300秒以下に限る |
 
 ### chain用roleの信頼ポリシーのひな形
 

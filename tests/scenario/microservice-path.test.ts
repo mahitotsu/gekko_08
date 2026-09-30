@@ -72,6 +72,13 @@ describe('FR-4, SR-1, SR-2: 入口は直前のホップの実行roleだけを許
     expect((await signedPost(o.AccountServiceUrl, { accountId: 'A-101' }, { 'x-authz-context': toAccount }, chained)).status).toBe(403);
   });
 
+  it('SR-1: 受け渡したchainのセッションで、内部のホップ以外を宛先に含むJWTを作れない', async () => {
+    const fed = await federatedSession('yamada');
+    await expect(stsWith(fed).send(new GetWebIdentityTokenCommand({
+      Audience: [o.CaseServiceAudience, 'https://external.example'], SigningAlgorithm: 'ES384', DurationSeconds: 300,
+    }))).rejects.toThrow(/not authorized to perform: sts:GetWebIdentityToken/);
+  });
+
   it('FR-4・SR-2: 正しい宛先のJWTを持っていても、直前のホップ以外（テストを実行する主体）はcase-serviceを飛ばしてaccount-serviceを呼べない', async () => {
     const fed = await federatedSession('yamada');
     const toAccount = await mint(await chainToCase(fed), o.AccountServiceAudience);

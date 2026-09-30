@@ -115,6 +115,8 @@ Token Exchangeでは、認可サーバーがトークンを発行するときに
 
 - 入口のresource policyを手で書かない。`Hop`を通さずに書くと、Denyの書き漏らしがそのまま穴になる。
 - `GetWebIdentityToken`の宛先を、内部のホップに限る。外部のサービスがこのJWTを単独で信じると、そこではユーザーになりすませる。
+  `Hop`は宛先を`ForAllValues:StringEquals`と`Null`で絞る。`ForAnyValue`で書くと、許した宛先に外部の宛先を混ぜたJWTを発行できる
+  （[検証](../experiments/scope-tags/RESULTS.md)）。
 - 受け渡すセッションとJWTをログや応答に出さない。共通部品は出さないが、業務のコードで`event`全体をログに出すと漏れる。
 - Pre Token GenerationトリガーとUser Poolの設定を守る。SourceIdentityとtagの値はこのLambdaが決め、AWSは値の正しさを検証しない。
 

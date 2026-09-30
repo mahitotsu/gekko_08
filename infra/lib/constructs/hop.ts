@@ -144,13 +144,16 @@ export class Hop extends Construct {
     this.callerFunctions.push(caller.fn);
     this.callers[caller.execRole.roleName] = { hop: caller.hopName, sub: caller.chainRole.roleArn };
 
-    // callerのchain用roleは、このホップ宛てのJWTだけを発行できる
+    // callerのchain用roleは、このホップ宛てのJWTだけを、共通部品が発行する形（ES384、有効期間300秒以下）で発行できる
     caller.chainRole.addToPrincipalPolicy(new iam.PolicyStatement({
       actions: ['sts:GetWebIdentityToken'],
       resources: ['*'],
       conditions: {
-        'ForAnyValue:StringEquals': { 'sts:IdentityTokenAudience': [this.audience] },
+        // ForAnyValueでは、許した宛先に外部の宛先を混ぜたJWTを発行できる（experiments/scope-tagsのE1-7）
+        'ForAllValues:StringEquals': { 'sts:IdentityTokenAudience': [this.audience] },
+        Null: { 'sts:IdentityTokenAudience': 'false' },
         StringEquals: { 'sts:SigningAlgorithm': 'ES384' },
+        NumericLessThanEquals: { 'sts:DurationSeconds': 300 },
       },
     }));
 
