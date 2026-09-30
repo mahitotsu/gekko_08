@@ -6,7 +6,7 @@ working backwardsの手法で、これから作る参照実装を「公開した
 プレスリリースは**目指す到達点**を描いたもので、現時点で実現済みの事実ではない。
 実現済みの事実と未解決の課題は、FAQ（特に[内部FAQ](#内部faq)）で区別して書く。
 
-- 前提となる検証結果：[コンセプトノート](../concepts/aws-sts-workload-and-authorization-context-separation.md)
+- 前提となる検証結果：[実現性検証](../../experiments/feasibility/RESULTS.md)
 - 提供形態：OSSのCDK構成＋参照設計（事業化はしない）
 - 想定読者（顧客）：AWS上でマイクロサービスを実装しているエンジニア
 
@@ -132,7 +132,7 @@ mTLSが守っていたのは「正規に配置されたワークロードしか�
 この参照実装では、それをネットワークではなくIAMで守る。Lambda Function URLを`AWS_IAM`認証にすると、
 呼び出しにはSigV4署名が必要になる。そのうえで受信側のresource policyに、許可する呼び出し元roleを
 明示的に列挙する。署名のない呼び出しと許可されていないroleからの呼び出しが403になることは、
-実機で確認済みである（[コンセプトノート](../concepts/aws-sts-workload-and-authorization-context-separation.md#トランスポートmtlsではなくtlsbearer-jwtのsub)）。
+実機で確認済みである（[実現性検証](../../experiments/feasibility/RESULTS.md)）。
 
 SigV4では`SecretAccessKey`が通信路に乗らず、署名はリクエスト内容と時刻に縛られる。このため、
 通信路で盗み見た値から新しいリクエストは作れず、mTLSの送信者拘束に近い性質をもともと持つ。
