@@ -3,12 +3,12 @@ import { Sha256 } from '@aws-crypto/sha256-js';
 import { CloudFormationClient, DescribeStacksCommand, paginateListStackResources } from '@aws-sdk/client-cloudformation';
 import { CloudWatchLogsClient, paginateFilterLogEvents } from '@aws-sdk/client-cloudwatch-logs';
 import {
-  AdminCreateUserCommand, AdminInitiateAuthCommand, AdminSetUserPasswordCommand, AdminUpdateUserAttributesCommand,
+  AdminCreateUserCommand, AdminInitiateAuthCommand, AdminSetUserPasswordCommand,
   CognitoIdentityProviderClient, DescribeUserPoolClientCommand, UsernameExistsException,
 } from '@aws-sdk/client-cognito-identity-provider';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocumentClient, PutCommand } from '@aws-sdk/lib-dynamodb';
-import { AssumeRoleWithWebIdentityCommand, STSClient } from '@aws-sdk/client-sts';
+import { DynamoDBDocumentClient, PutCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import { AssumeRoleCommand, AssumeRoleWithWebIdentityCommand, GetWebIdentityTokenCommand, STSClient, type Tag } from '@aws-sdk/client-sts';
 import { defaultProvider } from '@aws-sdk/credential-provider-node';
 import type { AwsCredentialIdentity } from '@smithy/types';
 import { SignatureV4 } from '@smithy/signature-v4';
@@ -29,7 +29,8 @@ export function stackOutputs(): Promise<Outputs> {
   return outputs;
 }
 
-export const DEMO_USERS = { yamada: 'tokyo', tanaka: 'osaka' } as const;
+/** デモユーザーの人事データ（DemoDataの初期値） */
+export const DEMO_USERS = { yamada: { branch: 'tokyo', title: '支店長' }, tanaka: { branch: 'osaka', title: '担当者' } } as const;
 export type DemoUser = keyof typeof DEMO_USERS;
 
 /**
@@ -40,16 +41,11 @@ export async function loginTokens(user: DemoUser): Promise<{ idToken: string; re
   const o = await stackOutputs();
   const UserPoolId = o.UserPoolId;
   const ClientId = o.UserPoolClientId;
+  // Cognitoはユーザーの識別だけを持つ。所属と役職は人事データ（属性サービス）にある
   try {
-    await cognito.send(new AdminCreateUserCommand({
-      UserPoolId, Username: user, MessageAction: 'SUPPRESS',
-      UserAttributes: [{ Name: 'custom:branch', Value: DEMO_USERS[user] }],
-    }));
+    await cognito.send(new AdminCreateUserCommand({ UserPoolId, Username: user, MessageAction: 'SUPPRESS' }));
   } catch (e) {
     if (!(e instanceof UsernameExistsException)) throw e;
-    await cognito.send(new AdminUpdateUserAttributesCommand({
-      UserPoolId, Username: user, UserAttributes: [{ Name: 'custom:branch', Value: DEMO_USERS[user] }],
-    }));
   }
   // 毎回ランダムなパスワードに置き換える。テストの外にパスワードを残さない
   const password = `${randomBytes(18).toString('base64url')}aA1!`;
@@ -73,7 +69,7 @@ export async function loginSession(user: DemoUser): Promise<string> {
     TableName: o.SessionsTable,
     Item: {
       pk: `sid#${createHash('sha256').update(sid).digest('base64url')}`,
-      username: user, branch: DEMO_USERS[user], idToken, idTokenExp: claims.exp, refreshToken,
+      username: user, idToken, idTokenExp: claims.exp, refreshToken,
       ttl: Math.floor(Date.now() / 1000) + 3600,
     },
   }));
@@ -113,6 +109,42 @@ export async function federatedSession(user: DemoUser, sessionName = `test-${Dat
   return { accessKeyId: c!.AccessKeyId!, secretAccessKey: c!.SecretAccessKey!, sessionToken: c!.SessionToken! };
 }
 
+/** bffと同じ手順で、取引の目的を刻んだセッションを得る。漏れた「受け渡すセッション」に相当する */
+export async function purposeSession(user: DemoUser, purpose: string, extraTags: Tag[] = []): Promise<AwsCredentialIdentity> {
+  const o = await stackOutputs();
+  const fed = await federatedSession(user);
+  const { Credentials: c } = await new STSClient({ credentials: fed }).send(new AssumeRoleCommand({
+    RoleArn: o.PurposeRoleArn, RoleSessionName: `test-${Date.now()}`, DurationSeconds: 900,
+    Tags: [{ Key: 'purpose', Value: purpose }, ...extraTags], TransitiveTagKeys: ['purpose'],
+  }));
+  return { accessKeyId: c!.AccessKeyId!, secretAccessKey: c!.SecretAccessKey!, sessionToken: c!.SessionToken! };
+}
+
+/** セッションからchain用roleへchainする */
+export async function chainTo(from: AwsCredentialIdentity, roleArn: string, extra: { SourceIdentity?: string; Tags?: Tag[] } = {}): Promise<AwsCredentialIdentity> {
+  const { Credentials: c } = await new STSClient({ credentials: from }).send(new AssumeRoleCommand({
+    RoleArn: roleArn, RoleSessionName: `test-${Date.now()}`, DurationSeconds: 900, ...extra,
+  }));
+  return { accessKeyId: c!.AccessKeyId!, secretAccessKey: c!.SecretAccessKey!, sessionToken: c!.SessionToken! };
+}
+
+/** セッションでJWTを発行する。scopeを渡すと、JWTのrequest_tagsに付ける */
+export async function mintJwt(credentials: AwsCredentialIdentity, audience: string | string[], scope?: string, durationSeconds = 300): Promise<string> {
+  const r = await new STSClient({ credentials }).send(new GetWebIdentityTokenCommand({
+    Audience: Array.isArray(audience) ? audience : [audience], SigningAlgorithm: 'ES384', DurationSeconds: durationSeconds,
+    Tags: scope ? [{ Key: 'scope', Value: scope }] : undefined,
+  }));
+  return r.WebIdentityToken!;
+}
+
+/** 人事データでユーザーの所属を変える（異動） */
+export async function setStaffBranch(user: DemoUser, branch: string): Promise<void> {
+  const o = await stackOutputs();
+  await db.send(new UpdateCommand({
+    TableName: o.StaffTable, Key: { userId: user }, UpdateExpression: 'SET branch = :b', ExpressionAttributeValues: { ':b': branch },
+  }));
+}
+
 /** 任意の認証情報でSigV4署名し、ホップのFunction URLを直接呼ぶ */
 export async function signedPost(url: string, body: unknown, headers: Record<string, string>, credentials?: AwsCredentialIdentity) {
   const u = new URL(url);
@@ -132,6 +164,7 @@ const HOP_LOG_GROUPS = {
   'account-service': 'AccountServiceFunctionLogs',
   'fraud-agent': 'FraudAgentFunctionLogs',
   'fraud-mcp': 'FraudMcpFunctionLogs',
+  'entitlement-service': 'EntitlementServiceFunctionLogs',
 } as const;
 export type HopName = keyof typeof HOP_LOG_GROUPS;
 
@@ -185,7 +218,9 @@ export interface HandledLog {
   /** 呼び出し元の実行role名 */
   actorRole?: string;
   tokenSub?: string;
-  subject?: { id: string; branch: string };
+  subject?: { id: string };
+  purpose?: string;
+  scope?: string;
   user?: string;
   route?: string;
   timings: Record<string, number>;

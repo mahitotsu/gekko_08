@@ -23,7 +23,12 @@ beforeAll(async () => {
     .sign(privateKey);
 });
 
-const claims = { 'https://sts.amazonaws.com/': { source_identity: 'yamada', principal_tags: { branch: 'tokyo', stack: 'x' } } };
+const ns = (over: Record<string, unknown> = {}) => ({
+  'https://sts.amazonaws.com/': {
+    source_identity: 'yamada', principal_tags: { purpose: 'case-summary', project: 'x' }, request_tags: { scope: 'account:read' }, ...over,
+  },
+});
+const claims = ns();
 
 async function rejected(p: Promise<unknown>, status: number) {
   const e = await p.then(() => undefined, (err) => err);
@@ -34,12 +39,12 @@ async function rejected(p: Promise<unknown>, status: number) {
 describe('verifyInbound', () => {
   it('検証済みのsubjectとactorを返す', async () => {
     const v = await verifyInbound(await sign(claims), CALLER_ARN, opts);
-    expect(v).toEqual({ subject: { id: 'yamada', branch: 'tokyo' }, actor: 'case-service', actorRole: 'case-exec', tokenSub: CHAIN });
+    expect(v).toEqual({ subject: { id: 'yamada' }, purpose: 'case-summary', scope: 'account:read', actor: 'case-service', actorRole: 'case-exec', tokenSub: CHAIN });
   });
 
   it('tagの値が配列でも読める', async () => {
-    const t = await sign({ 'https://sts.amazonaws.com/': { source_identity: 'yamada', principal_tags: { branch: ['tokyo'] } } });
-    expect((await verifyInbound(t, CALLER_ARN, opts)).subject.branch).toBe('tokyo');
+    const t = await sign(ns({ principal_tags: { purpose: ['case-summary'] } }));
+    expect((await verifyInbound(t, CALLER_ARN, opts)).purpose).toBe('case-summary');
   });
 
   it('宛先の違うJWTを拒否する', async () => rejected(verifyInbound(await sign(claims, { aud: 'aud-case' }), CALLER_ARN, opts), 401));
@@ -48,7 +53,7 @@ describe('verifyInbound', () => {
   it('改ざんしたJWTを拒否する', async () => {
     const t = await sign(claims);
     const [h, p, s] = t.split('.');
-    const forged = Buffer.from(JSON.stringify({ ...JSON.parse(Buffer.from(p, 'base64url').toString()), 'https://sts.amazonaws.com/': { source_identity: 'tanaka', principal_tags: { branch: 'osaka' } } })).toString('base64url');
+    const forged = Buffer.from(JSON.stringify({ ...JSON.parse(Buffer.from(p, 'base64url').toString()), ...ns({ source_identity: 'tanaka' }) })).toString('base64url');
     await rejected(verifyInbound(`${h}.${forged}.${s}`, CALLER_ARN, opts), 401);
   });
   it('JWTなしを拒否する', async () => rejected(verifyInbound(undefined, CALLER_ARN, opts), 401));
@@ -64,8 +69,13 @@ describe('verifyInbound', () => {
   });
 
   it('subjectが欠けたJWTを拒否する', async () => {
-    await rejected(verifyInbound(await sign({ 'https://sts.amazonaws.com/': { source_identity: 'yamada' } }), CALLER_ARN, opts), 401);
+    await rejected(verifyInbound(await sign(ns({ source_identity: undefined })), CALLER_ARN, opts), 401);
     await rejected(verifyInbound(await sign({}), CALLER_ARN, opts), 401);
+  });
+
+  it('委任の範囲（目的かscope）が欠けたJWTを拒否する', async () => {
+    await rejected(verifyInbound(await sign(ns({ principal_tags: {} })), CALLER_ARN, opts), 401);
+    await rejected(verifyInbound(await sign(ns({ request_tags: undefined })), CALLER_ARN, opts), 401);
   });
 });
 

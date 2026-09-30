@@ -5,7 +5,7 @@ import { browserGet, eventually, handledLogs, hopLogGroups, loginSession, readLo
 
 // 追跡（FR-6）、ログに認証情報を入れない（SR-3）、処理時間の実測（NFR-3）。
 // ログはCloudWatch Logsから読む。到着に数秒〜数十秒かかる
-const HOPS: HopName[] = ['bff', 'case-service', 'account-service'];
+const HOPS: HopName[] = ['bff', 'case-service', 'account-service', 'entitlement-service'];
 const LATENCY_SAMPLES = 10;
 
 let startTime: number;
@@ -23,22 +23,23 @@ beforeAll(async () => {
     return r.body.requestId as string;
   };
   allowedId = await summary('C-1001');
-  deniedId = await summary('C-2001'); // case-serviceのABACで拒否される
+  deniedId = await summary('C-2001'); // case-serviceが業務的なアクセス権で拒否する
   latencyIds = [];
   for (let i = 0; i < LATENCY_SAMPLES; i++) latencyIds.push(await summary('C-1001'));
   logsById = await handledLogs([allowedId, ...latencyIds], HOPS, startTime);
 }, 240_000);
 
 describe('FR-6: 1回のリクエストを、各ホップのログでリクエストIDとユーザーから追える', () => {
-  it('bff・case-service・account-serviceのログが同じリクエストIDでつながり、ユーザーと呼び出し元が記録される', () => {
+  it('bff・case-service・account-service・属性サービスのログが同じリクエストIDでつながり、ユーザー・目的・呼び出し元が記録される', () => {
     const l = logsById[allowedId];
-    expect(l.bff).toMatchObject({ user: 'yamada', status: 200 });
-    expect(l['case-service']).toMatchObject({ subject: { id: 'yamada', branch: 'tokyo' }, status: 200 });
-    expect(l['account-service']).toMatchObject({ subject: { id: 'yamada', branch: 'tokyo' }, status: 200 });
-    // actorは直前のホップ（入口の実行role）、JWTの`sub`は直前のホップのchain用role（bffではfederated role）
+    expect(l.bff).toMatchObject({ user: 'yamada', purpose: 'case-summary', status: 200 });
+    expect(l['case-service']).toMatchObject({ subject: { id: 'yamada' }, purpose: 'case-summary', scope: 'case:summary', status: 200 });
+    expect(l['account-service']).toMatchObject({ subject: { id: 'yamada' }, purpose: 'case-summary', scope: 'account:read', status: 200 });
+    expect(l['entitlement-service']).toMatchObject({ subject: { id: 'yamada' }, scope: 'entitlements:read', status: 200 });
+    // actorは直前のホップ（入口の実行role）、JWTの`sub`は直前のホップのchain用role（bffでは目的用のrole）
     expect(l['case-service']).toMatchObject({ actor: 'bff' });
     expect(l['case-service']!.actorRole).toMatch(/BffFunction/);
-    expect(l['case-service']!.tokenSub).toMatch(/FederatedRole/);
+    expect(l['case-service']!.tokenSub).toMatch(/PurposeRole/);
     expect(l['account-service']).toMatchObject({ actor: 'case-service' });
     expect(l['account-service']!.actorRole).toMatch(/CaseServiceFunction/);
     expect(l['account-service']!.tokenSub).toMatch(/CaseServiceChainRole/);
@@ -98,9 +99,10 @@ describe('NFR-3: ホップごとの追加時間を実測する', () => {
     };
     const rows: Record<string, ReturnType<typeof stats>> = {};
     for (const [hop, keys] of [
-      ['bff', ['assumeMs', 'mintMs', 'callMs', 'totalMs']],
+      ['bff', ['assumeMs', 'purposeMs', 'mintMs', 'callMs', 'totalMs']],
       ['case-service', ['verifyMs', 'chainMs', 'mintMs', 'callMs', 'totalMs']],
-      ['account-service', ['verifyMs', 'totalMs']],
+      ['account-service', ['verifyMs', 'chainMs', 'mintMs', 'callMs', 'totalMs']],
+      ['entitlement-service', ['verifyMs', 'totalMs']],
     ] as [HopName, string[]][]) {
       for (const key of keys) {
         const xs = pick(hop, key);

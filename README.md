@@ -2,7 +2,15 @@
 
 AWS上のマイクロサービスで、Authorization Context（誰の権限で処理するのか）とWorkload Identity（どのサービスが呼んでいるのか）を分け、
 多段呼び出しの奥まで届ける仕組みの参照実装。認可サーバーもサイドカーも置かず、Cognito・STS・IAM・Lambdaだけで、OAuth Token Exchangeと
-同じこと（各ホップが「誰の代理か」「どのサービスから来たか」「自分宛てか」を確かめる）を実現する。
+同じこと（各ホップが「誰の代理か」「どのサービスから来たか」「自分宛てか」「代理として何を許されているか」を確かめる）を実現する。
+
+認可の根拠は3つの層に分ける。
+
+| 層 | 問い | 担い手 |
+|---|---|---|
+| 身元 | 誰の代理か、どのサービスから来たか | SourceIdentity、入口のIAM、STSが署名したJWT |
+| 委任の範囲（OAuthのscopeに相当） | この取引で、この呼び出し元に何を許すか | 取引の目的（transitive session tag）とホップごとのscope（JWTのtag）。値はIAMが強制する |
+| 業務的なアクセス権 | このユーザーは、このデータを扱ってよいか | 属性サービス（人事データと権限マスタ） |
 
 仕組みと当てはめ方は[設計ガイド](docs/guide.md)に、背景と設計の詳細は[docs/](docs/README.md)にある。
 
@@ -10,9 +18,10 @@ AWS上のマイクロサービスで、Authorization Context（誰の権限で�
 
 ```
 ブラウザ ─> CloudFront ─> bff ─┬─> case-service ─> account-service        マイクロサービスの経路
-                               └─> fraud-agent ─> fraud-mcp ─┬─> case-service      エージェントの経路
-                                        │                    └─> account-service
-                                        └─> Amazon Bedrock（Claude Haiku 4.5）
+                               ├─> fraud-agent ─> fraud-mcp ─┬─> case-service      エージェントの経路
+                               │        │                    └─> account-service
+                               │        └─> Amazon Bedrock（Claude Haiku 4.5）
+                               └─> entitlement-service（属性サービス。case-service・account-serviceからも呼ばれる）
 ```
 
 | ディレクトリ | 内容 |
@@ -53,14 +62,14 @@ npm run test:scenario:cloudtrail  # CloudTrailでの追跡も確かめる（最�
 
 ### ユーザーを用意する
 
-デモのユーザーは、yamada（`branch`＝tokyo）とtanaka（`branch`＝osaka）の2人。次のコマンドで作り、パスワードを設定する。
+デモのユーザーは、yamada（tokyo・支店長）とtanaka（osaka・担当者）の2人。所属と役職は人事データ（DynamoDBのテーブル、出力`StaffTable`）に
+デプロイ時に入る。Cognitoにはユーザー名とパスワードだけを置く。次のコマンドでユーザーを作り、パスワードを設定する。
 パスワードは12文字以上で、大文字・小文字・数字・記号を含める。
 
 ```sh
 POOL=$(aws cloudformation describe-stacks --stack-name Gekko08App --query "Stacks[0].Outputs[?OutputKey=='UserPoolId'].OutputValue" --output text)
-for u in yamada:tokyo tanaka:osaka; do
-  aws cognito-idp admin-create-user --user-pool-id "$POOL" --username "${u%%:*}" --message-action SUPPRESS \
-    --user-attributes Name=custom:branch,Value="${u##*:}"
+for u in yamada tanaka; do
+  aws cognito-idp admin-create-user --user-pool-id "$POOL" --username "$u" --message-action SUPPRESS
 done
 aws cognito-idp admin-set-user-password --user-pool-id "$POOL" --username yamada --password '<パスワード>' --permanent
 aws cognito-idp admin-set-user-password --user-pool-id "$POOL" --username tanaka --password '<パスワード>' --permanent
@@ -72,10 +81,10 @@ aws cognito-idp admin-set-user-password --user-pool-id "$POOL" --username tanaka
 
 スタックの出力`WebUrl`をブラウザで開き、ログインする。
 
-| 操作 | yamada（tokyo）の結果 | tanaka（osaka）の結果 |
+| 操作 | yamada（tokyo・支店長）の結果 | tanaka（osaka・担当者）の結果 |
 |---|---|---|
-| 案件`C-1001`（tokyo）の要約を開く | 200。案件と口座A-101が返る | 403。case-serviceが拒否する |
-| 案件`C-2001`（osaka）の要約を開く | 403 | 200 |
+| 案件`C-1001`（tokyo）の要約を開く | 200。案件と口座A-101が、残高付きで返る | 403。case-serviceが業務的なアクセス権で拒否する |
+| 案件`C-2001`（osaka）の要約を開く | 403 | 200。担当者なので残高は返らない |
 | 案件`C-1001`をエージェントに分析させる | 200。下を参照 | 案件の取得がcase-serviceに拒否され、分析できない |
 
 案件`C-1001`の取引メモには、他の支店の口座A-999を参照させるプロンプトインジェクションが入っている。yamadaがエージェントに分析させると、
@@ -89,10 +98,25 @@ aws cognito-idp admin-set-user-password --user-pool-id "$POOL" --username tanaka
 ]
 ```
 
-エージェントは誘導されてA-999を要求したが、account-serviceが、JWTで届いたyamadaの`branch`（tokyo）とA-999の`branch`（osaka）を比べて拒否した。
-エージェントの判断は揺らいでも、ユーザーの権限の境界は揺らがない。
+ここでは2つの層がそれぞれ効いている。
 
-各ホップのCloudWatch Logsには、同じ`requestId`で、ユーザー（`subject`）、呼び出し元の実行role（`actor`）、処理時間が出る。
+- **業務的なアクセス権**：エージェントは誘導されてA-999を要求したが、account-serviceが、属性サービスから得たyamadaの所属（tokyo）と
+  A-999の支店（osaka）を比べて拒否した。エージェントの判断は揺らいでも、ユーザーの権限の境界は揺らがない。
+- **委任の範囲**：A-101は取得できたが、残高は返っていない。取引の目的が「エージェントによる分析」（`agent-analysis`）なので、
+  支店長のyamadaにもaccount-serviceは残高を返さない。目的は入口のbffが刻み、途中のホップ（エージェントを含む）は変えられない。
+
+### 異動を試す
+
+人事データでyamadaの所属を変えると、ログインし直さなくても、次のリクエストから結果が変わる。
+
+```sh
+STAFF=$(aws cloudformation describe-stacks --stack-name Gekko08App --query "Stacks[0].Outputs[?OutputKey=='StaffTable'].OutputValue" --output text)
+aws dynamodb update-item --table-name "$STAFF" --key '{"userId":{"S":"yamada"}}' \
+  --update-expression 'SET branch = :b' --expression-attribute-values '{":b":{"S":"osaka"}}'
+# 画面を再読み込みすると yamada（osaka・支店長）になり、C-2001が開けて、C-1001は拒否される。戻すときは :b を tokyo にする
+```
+
+各ホップのCloudWatch Logsには、同じ`requestId`で、ユーザー（`subject`）、取引の目的（`purpose`）、scope、呼び出し元（`actor`）、処理時間が出る。
 
 ## 片付け
 

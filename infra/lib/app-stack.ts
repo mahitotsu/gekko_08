@@ -9,6 +9,9 @@ import { OutboundFederationCheck } from './constructs/outbound-federation-check'
 import { WebFrontend } from './constructs/web-frontend';
 
 const BEDROCK_MODEL = 'anthropic.claude-haiku-4-5-20251001-v1:0';
+
+/** 取引の目的。bffが経路ごとに決めて刻む（設計書§3） */
+const PURPOSE = { profile: 'profile', caseSummary: 'case-summary', agentAnalysis: 'agent-analysis' } as const;
 const BEDROCK_PROFILE = `jp.${BEDROCK_MODEL}`;
 
 /** 参照実装の単一のスタック（設計書§9） */
@@ -19,8 +22,14 @@ export class Gekko08AppStack extends cdk.Stack {
     const data = new DemoData(this, 'DemoData');
 
     // ホップ
+    const entitlementService = new Hop(this, 'EntitlementService', {
+      hopName: 'entitlement-service', entry: 'services/entitlement-service/src/index.ts', issuer, callsOthers: false,
+      environment: { STAFF_TABLE: data.staff.tableName, TITLE_PERMISSIONS_TABLE: data.titlePermissions.tableName },
+    });
+    data.staff.grantReadData(entitlementService.fn);
+    data.titlePermissions.grantReadData(entitlementService.fn);
     const accountService = new Hop(this, 'AccountService', {
-      hopName: 'account-service', entry: 'services/account-service/src/index.ts', issuer, callsOthers: false,
+      hopName: 'account-service', entry: 'services/account-service/src/index.ts', issuer, callsOthers: true,
       environment: { ACCOUNTS_TABLE: data.accounts.tableName },
     });
     data.accounts.grantReadData(accountService.fn);
@@ -51,15 +60,22 @@ export class Gekko08AppStack extends cdk.Stack {
     const callbackUrl = `${web.origin}/api/callback`;
     const auth = new AuthFoundation(this, 'Auth', { callbackUrl, logoutUrl: `${web.origin}/` });
 
-    // 呼び出し関係
+    bff.connect(auth, Object.values(PURPOSE));
+
+    // 呼び出し関係と委任の範囲（設計書§4）。scopeと発行できる目的はIAMが強制する
+    const { profile, caseSummary, agentAnalysis } = PURPOSE;
     // マイクロサービスの経路：bff → case-service → account-service
-    caseService.allowCaller(bff.asCaller(auth));
-    accountService.allowCaller(caseService.asCaller());
+    caseService.allowCaller(bff.asCaller(), { scope: 'case:summary', purposes: [caseSummary] });
+    accountService.allowCaller(caseService.asCaller(), { scope: 'account:read', purposes: [caseSummary] });
     // エージェントの経路：bff → fraud-agent → fraud-mcp → case-service または account-service
-    fraudAgent.allowCaller(bff.asCaller(auth));
-    fraudMcp.allowCaller(fraudAgent.asCaller());
-    caseService.allowCaller(fraudMcp.asCaller());
-    accountService.allowCaller(fraudMcp.asCaller());
+    fraudAgent.allowCaller(bff.asCaller(), { scope: 'agent:analyze', purposes: [agentAnalysis] });
+    fraudMcp.allowCaller(fraudAgent.asCaller(), { scope: 'mcp:tools', purposes: [agentAnalysis] });
+    caseService.allowCaller(fraudMcp.asCaller(), { scope: 'case:read', purposes: [agentAnalysis] });
+    accountService.allowCaller(fraudMcp.asCaller(), { scope: 'account:read', purposes: [agentAnalysis] });
+    // 属性サービス：業務的なアクセス権を判定するホップと、表示用のbff
+    entitlementService.allowCaller(bff.asCaller(), { scope: 'entitlements:read', purposes: [profile] });
+    entitlementService.allowCaller(caseService.asCaller(), { scope: 'entitlements:read', purposes: [caseSummary, agentAnalysis] });
+    entitlementService.allowCaller(accountService.asCaller(), { scope: 'entitlements:read', purposes: [caseSummary, agentAnalysis] });
 
     bff.writeSettings(auth, callbackUrl);
 
@@ -68,8 +84,10 @@ export class Gekko08AppStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'UserPoolClientId', { value: auth.client.userPoolClientId });
     new cdk.CfnOutput(this, 'SessionsTable', { value: bff.sessions.tableName });
     new cdk.CfnOutput(this, 'FederatedRoleArn', { value: auth.federatedRole.roleArn });
+    new cdk.CfnOutput(this, 'PurposeRoleArn', { value: bff.asCaller().chainRole.roleArn });
+    new cdk.CfnOutput(this, 'StaffTable', { value: data.staff.tableName });
     new cdk.CfnOutput(this, 'Issuer', { value: issuer });
-    for (const hop of [caseService, accountService, fraudAgent, fraudMcp]) {
+    for (const hop of [caseService, accountService, entitlementService, fraudAgent, fraudMcp]) {
       const key = hop.hopName.replace(/(^|-)(\w)/g, (_, __, c: string) => c.toUpperCase());
       new cdk.CfnOutput(this, `${key}Url`, { value: hop.url.url });
       new cdk.CfnOutput(this, `${key}Audience`, { value: hop.audience });

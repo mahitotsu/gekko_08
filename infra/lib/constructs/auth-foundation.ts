@@ -2,7 +2,6 @@ import * as cdk from 'aws-cdk-lib';
 import * as cognito from 'aws-cdk-lib/aws-cognito';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import { Construct } from 'constructs';
-import { TAG_KEYS } from './hop';
 import { NodeFunction } from './node-function';
 
 export interface AuthFoundationProps {
@@ -32,7 +31,7 @@ export class AuthFoundation extends Construct {
       featurePlan: cognito.FeaturePlan.ESSENTIALS,
       selfSignUpEnabled: false,
       signInAliases: { username: true },
-      // 業務属性は管理者だけが変えられる（アプリクライアントには書き込みを許さない）
+      // 使わない（業務属性は属性サービスが持つ）。User Poolのスキーマから属性を消せないため、既存の環境との互換のために定義だけを残す
       customAttributes: { branch: new cognito.StringAttribute({ mutable: true, minLen: 1, maxLen: 32 }) },
       passwordPolicy: { minLength: 12 },
       removalPolicy: cdk.RemovalPolicy.DESTROY,
@@ -80,14 +79,11 @@ export class AuthFoundation extends Construct {
     this.federatedRole = new iam.Role(this, 'FederatedRole', {
       assumedBy: principal,
       maxSessionDuration: cdk.Duration.hours(1),
-      description: 'bff: federated role carrying the user identity (SourceIdentity and branch tag)',
+      description: 'bff: federated role carrying the user identity (SourceIdentity)',
     });
+    // IDトークンにtagはないので、sts:TagSessionは許さない
     this.federatedRole.assumeRolePolicy!.addStatements(
       new iam.PolicyStatement({ actions: ['sts:SetSourceIdentity'], principals: [principal] }),
-      new iam.PolicyStatement({
-        actions: ['sts:TagSession'], principals: [principal],
-        conditions: { 'ForAllValues:StringEquals': { 'aws:TagKeys': TAG_KEYS } },
-      }),
     );
   }
 }

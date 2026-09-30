@@ -1,9 +1,7 @@
-/** 業務のコードに渡す、検証済みのユーザー（誰の代理か）。 */
+/** 業務のコードに渡す、検証済みのユーザー（誰の代理か）。業務的なアクセス権は含まない（属性サービスから得る） */
 export interface Subject {
   /** ユーザー識別子（STSセッションのSourceIdentity） */
   id: string;
-  /** 業務属性（transitive session tag） */
-  branch: string;
 }
 
 /** STSセッションの認証情報。ログや応答に出さない。 */
@@ -17,6 +15,8 @@ export interface SessionCredentials {
 export interface Target {
   url: string;
   audience: string;
+  /** JWTに付けるscope。IAMが、呼び出し元と呼び出し先の組ごとに宣言した値だけを付けさせる */
+  scope: string;
   /** 呼び出し先がchain用roleを持ち、chainのセッションを受け取るか */
   forwardSession: boolean;
 }

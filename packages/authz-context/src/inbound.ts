@@ -28,6 +28,10 @@ export interface VerifyOptions {
 
 export interface Verified {
   subject: Subject;
+  /** 取引の目的（入口で刻まれ、途中で変えられないtransitive session tag） */
+  purpose: string;
+  /** 呼び出し元がこの宛先に付けたscope（IAMが値を限る） */
+  scope: string;
   /** 呼び出し元のホップ名（actor） */
   actor: string;
   /** 呼び出し元の実行role名 */
@@ -92,9 +96,14 @@ export async function verifyInbound(token: string | undefined, callerArn: string
   // JWTを作ったのが、入口を通った呼び出し元のchain用roleであること
   if (payload.sub !== caller.sub) throw new AuthzError(401, 'token subject does not match caller');
 
-  const ns = payload[STS_NAMESPACE] as { source_identity?: unknown; principal_tags?: Record<string, unknown> } | undefined;
+  const ns = payload[STS_NAMESPACE] as {
+    source_identity?: unknown; principal_tags?: Record<string, unknown>; request_tags?: Record<string, unknown>;
+  } | undefined;
   const id = ns?.source_identity;
-  const branch = tagValue(ns?.principal_tags?.branch);
-  if (typeof id !== 'string' || !id || !branch) throw new AuthzError(401, 'authorization context lacks subject');
-  return { subject: { id, branch }, actor: caller.hop, actorRole, tokenSub: payload.sub };
+  if (typeof id !== 'string' || !id) throw new AuthzError(401, 'authorization context lacks subject');
+  // 委任の範囲が欠けたJWTは何も許さない
+  const purpose = tagValue(ns?.principal_tags?.purpose);
+  const scope = tagValue(ns?.request_tags?.scope);
+  if (!purpose || !scope) throw new AuthzError(401, 'authorization context lacks delegation scope');
+  return { subject: { id }, purpose, scope, actor: caller.hop, actorRole, tokenSub: payload.sub };
 }

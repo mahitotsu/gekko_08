@@ -6,7 +6,7 @@ import * as cr from 'aws-cdk-lib/custom-resources';
 import * as ssm from 'aws-cdk-lib/aws-ssm';
 import { Construct } from 'constructs';
 import type { AuthFoundation } from './auth-foundation';
-import type { HopCaller, HopTarget } from './hop';
+import { PURPOSE_TAG, type HopCaller, type HopTarget } from './hop';
 import { NodeFunction } from './node-function';
 
 /**
@@ -20,6 +20,7 @@ export class Bff extends Construct {
   private readonly configParamName: string;
   private readonly secretParamName: string;
   private readonly targets: Record<string, HopTarget> = {};
+  private purposeRole?: iam.Role;
 
   constructor(scope: Construct, id: string) {
     super(scope, id);
@@ -53,13 +54,40 @@ export class Bff extends Construct {
     this.url = this.fn.addFunctionUrl({ authType: lambda.FunctionUrlAuthType.AWS_IAM });
   }
 
-  /** federated roleを最初のホップ宛てのJWTを作るroleとして、bffをホップの呼び出し元として扱う */
-  asCaller(auth: AuthFoundation): HopCaller {
+  /**
+   * 目的用のroleを作り、federated roleとつなぐ。bffは取引ごとにfederated roleのセッションからこのroleへchainし、
+   * 取引の目的をtransitive session tagとして刻む。刻める目的はpurposesに限る
+   */
+  connect(auth: AuthFoundation, purposes: string[]): void {
+    const principal = new iam.ArnPrincipal(auth.federatedRole.roleArn);
+    this.purposeRole = new iam.Role(this, 'PurposeRole', {
+      assumedBy: principal,
+      description: 'bff: stamps the transaction purpose as a transitive session tag',
+    });
+    this.purposeRole.assumeRolePolicy!.addStatements(
+      new iam.PolicyStatement({ actions: ['sts:SetSourceIdentity'], principals: [principal] }),
+      new iam.PolicyStatement({
+        actions: ['sts:TagSession'], principals: [principal],
+        conditions: {
+          'ForAllValues:StringEquals': { 'aws:TagKeys': [PURPOSE_TAG] },
+          StringEquals: { [`aws:RequestTag/${PURPOSE_TAG}`]: purposes },
+        },
+      }),
+    );
+    auth.federatedRole.addToPrincipalPolicy(new iam.PolicyStatement({
+      actions: ['sts:AssumeRole', 'sts:TagSession', 'sts:SetSourceIdentity'],
+      resources: [this.purposeRole.roleArn],
+    }));
+  }
+
+  /** 目的用のroleを最初のホップ宛てのJWTを作るroleとして、bffをホップの呼び出し元として扱う */
+  asCaller(): HopCaller {
+    if (!this.purposeRole) throw new Error('call connect() first');
     return {
       hopName: 'bff',
       execRole: this.fn.role!,
       fn: this.fn,
-      chainRole: auth.federatedRole,
+      chainRole: this.purposeRole,
       addTarget: (name, target) => { this.targets[name] = target; },
     };
   }
@@ -75,6 +103,7 @@ export class Bff extends Construct {
           authDomain: auth.authDomain,
           redirectUri,
           federatedRoleArn: auth.federatedRole.roleArn,
+          purposeRoleArn: this.purposeRole!.roleArn,
           targets: this.targets,
         }),
       }),

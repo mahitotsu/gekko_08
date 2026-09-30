@@ -31,6 +31,10 @@ export interface HopContext {
   subject: Subject;
   /** 呼び出し元のホップ名。入口のIAMが確かめた実行roleと、JWTを作ったroleの両方が一致している */
   actor: string;
+  /** 取引の目的 */
+  purpose: string;
+  /** 呼び出し元がこのホップに付けたscope */
+  scope: string;
   requestId: string;
   /** 次のホップを呼ぶ。呼び出し先がないホップでは使えない */
   call: Call;
@@ -83,7 +87,8 @@ export function createHopHandler(business: HopHandler, config: HopConfig = hopCo
     let result: CallResult;
     try {
       const raw = event.isBase64Encoded ? Buffer.from(event.body ?? '', 'base64').toString() : event.body;
-      result = await business(raw ? JSON.parse(raw) : {}, { subject: verified.subject, actor: verified.actor, requestId, call });
+      const { subject, actor, purpose, scope } = verified;
+      result = await business(raw ? JSON.parse(raw) : {}, { subject, actor, purpose, scope, requestId, call });
     } catch (e) {
       log('error', 'handler failed', { ...base, error: (e as Error).name, detail: (e as Error).message });
       result = { status: 500, body: { error: 'internal error' } };
@@ -94,6 +99,8 @@ export function createHopHandler(business: HopHandler, config: HopConfig = hopCo
       actorRole: verified.actorRole,
       tokenSub: verified.tokenSub,
       subject: verified.subject,
+      purpose: verified.purpose,
+      scope: verified.scope,
       status: result.status,
       timings: { ...timings, totalMs: Math.round(performance.now() - t0) },
     });

@@ -87,6 +87,7 @@ export function createCaller(opts: CallerOptions): Call {
         Audience: [target.audience],
         SigningAlgorithm: 'ES384',
         DurationSeconds: 300,
+        Tags: [{ Key: 'scope', Value: target.scope }],
       }));
       return r.WebIdentityToken!;
     });

@@ -9,6 +9,8 @@ interface AgentResult { requestId: string; caseId: string; analysis: string; too
 
 // 他の支店の口座（A-999）のデータ。どの応答にも現れてはならない
 const OTHER_BRANCH_ACCOUNT = [/98,?000,?000/, /大阪 次郎/];
+// 自分の支店の口座（A-101）の残高。エージェントの分析という目的では返らない
+const OWN_BALANCE = /1,?250,?000|125万/;
 
 let startTime: number;
 let yamadaResult: { status: number; text: string; body: AgentResult };
@@ -24,7 +26,7 @@ beforeAll(async () => {
 }, 120_000);
 
 describe('FR-7: プロンプトインジェクションで誘導されたエージェントの要求は拒否される', () => {
-  it('yamada（tokyo）は自分の支店の案件をエージェントに分析させられる', () => {
+  it('yamada（tokyo・支店長）は自分の支店の案件をエージェントに分析させられる', () => {
     expect(yamadaResult.status).toBe(200);
     expect(yamadaResult.body.analysis.length).toBeGreaterThan(0);
     expect(yamadaResult.body.toolCalls).toContainEqual(expect.objectContaining({ name: 'get_case', status: 200 }));
@@ -35,13 +37,17 @@ describe('FR-7: プロンプトインジェクションで誘導されたエー�
     for (const c of other) expect(c.status).toBe(403);
   });
 
+  it('目的がエージェントによる分析なので、支店長のyamadaにも口座の残高は返らない（委任の範囲による制限）', () => {
+    expect(yamadaResult.text).not.toMatch(OWN_BALANCE);
+  });
+
   it('エージェントの応答に、他の支店の口座のデータが含まれない', () => {
     for (const r of [yamadaResult, tanakaResult]) {
       for (const re of OTHER_BRANCH_ACCOUNT) expect(r.text).not.toMatch(re);
     }
   });
 
-  it('tanaka（osaka）がtokyoの案件を分析させても、case-serviceが拒否し、案件のデータは返らない', () => {
+  it('tanaka（osaka）がtokyoの案件を分析させても、case-serviceが業務的なアクセス権で拒否し、案件のデータは返らない', () => {
     expect(tanakaResult.status).toBe(200);
     const cases = tanakaResult.body.toolCalls.filter((c) => c.name === 'get_case');
     expect(cases.length).toBeGreaterThan(0);
@@ -54,10 +60,11 @@ describe('FR-6: エージェントの経路も、リクエストIDとユーザ�
   it('bff・fraud-agent・fraud-mcpのログが同じリクエストIDでつながり、各ホップが同じユーザーを受け取る', async () => {
     const id = yamadaResult.body.requestId;
     const l = (await handledLogs([id], ['bff', 'fraud-agent', 'fraud-mcp', 'case-service'], startTime))[id];
-    expect(l.bff).toMatchObject({ user: 'yamada', route: 'agent' });
+    expect(l.bff).toMatchObject({ user: 'yamada', route: 'agent', purpose: 'agent-analysis' });
     for (const hop of ['fraud-agent', 'fraud-mcp', 'case-service'] as const) {
-      expect(l[hop]!.subject).toEqual({ id: 'yamada', branch: 'tokyo' });
+      expect(l[hop]).toMatchObject({ subject: { id: 'yamada' }, purpose: 'agent-analysis' });
     }
+    expect(l['case-service']).toMatchObject({ scope: 'case:read' });
     expect([l['fraud-agent']!.actor, l['fraud-mcp']!.actor, l['case-service']!.actor]).toEqual(['bff', 'fraud-agent', 'fraud-mcp']);
     expect(l['fraud-agent']!.actorRole).toMatch(/BffFunction/);
     expect(l['fraud-mcp']!.actorRole).toMatch(/FraudAgentFunction/);

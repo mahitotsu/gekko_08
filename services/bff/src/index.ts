@@ -2,7 +2,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DeleteCommand, DynamoDBDocumentClient, GetCommand, PutCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { GetParameterCommand, SSMClient } from '@aws-sdk/client-ssm';
-import { AssumeRoleWithWebIdentityCommand, STSClient } from '@aws-sdk/client-sts';
+import { AssumeRoleCommand, AssumeRoleWithWebIdentityCommand, STSClient } from '@aws-sdk/client-sts';
 import { createCaller, log, type Call, type Target, type Timings } from '@gekko08/authz-context';
 import type { LambdaFunctionURLEvent, LambdaFunctionURLResult } from 'aws-lambda';
 
@@ -23,6 +23,8 @@ interface BffConfig {
   authDomain: string;
   redirectUri: string;
   federatedRoleArn: string;
+  /** 取引の目的を刻むrole */
+  purposeRoleArn: string;
   targets: Record<string, Target>;
 }
 
@@ -42,7 +44,6 @@ function settings() {
 interface Session {
   pk: string;
   username: string;
-  branch: string;
   idToken: string;
   idTokenExp: number;
   refreshToken: string;
@@ -133,7 +134,6 @@ async function putSession(sid: string, idToken: string, refreshToken: string) {
   const item: Session = {
     pk: sessionKey(sid),
     username: c['cognito:username'],
-    branch: c['custom:branch'],
     idToken,
     idTokenExp: c.exp,
     refreshToken,
@@ -185,28 +185,52 @@ async function logout(event: LambdaFunctionURLEvent): Promise<LambdaFunctionURLR
   return json(200, { loggedOut: true }, [cookie(SESSION_COOKIE, '', 0, 'Strict')]);
 }
 
-/** ログイン中のユーザーのセッションで最初のホップを呼ぶ。STSの認証情報はどこにも保存しない */
-async function withChain<T>(s: Session, requestId: string, timings: Timings, f: (call: Call) => Promise<T>): Promise<T> {
+/**
+ * ログイン中のユーザーの代理で、取引の目的を刻んだセッションを作り、最初のホップを呼ぶ。STSの認証情報はどこにも保存しない
+ * 1. IDトークンでfederated roleのセッションを得る（SourceIdentity＝ユーザー識別子）
+ * 2. 目的用のroleへchainし、目的をtransitive session tagとして刻む。以降のホップは目的を変えられない
+ */
+async function withChain<T>(s: Session, requestId: string, purpose: string, timings: Timings, f: (call: Call) => Promise<T>): Promise<T> {
   const { config } = await settings();
   const t0 = performance.now();
-  const { Credentials: c } = await sts.send(new AssumeRoleWithWebIdentityCommand({
+  const { Credentials: fed } = await sts.send(new AssumeRoleWithWebIdentityCommand({
     RoleArn: config.federatedRoleArn,
     RoleSessionName: requestId,
     WebIdentityToken: s.idToken,
     DurationSeconds: 900,
   }));
   timings.assumeMs = Math.round(performance.now() - t0);
+  const t1 = performance.now();
+  const { Credentials: c } = await new STSClient({
+    credentials: { accessKeyId: fed!.AccessKeyId!, secretAccessKey: fed!.SecretAccessKey!, sessionToken: fed!.SessionToken! },
+  }).send(new AssumeRoleCommand({
+    RoleArn: config.purposeRoleArn,
+    RoleSessionName: requestId,
+    DurationSeconds: 900,
+    Tags: [{ Key: 'purpose', Value: purpose }],
+    TransitiveTagKeys: ['purpose'],
+  }));
+  timings.purposeMs = Math.round(performance.now() - t1);
   const session = { accessKeyId: c!.AccessKeyId!, secretAccessKey: c!.SecretAccessKey!, sessionToken: c!.SessionToken! };
   return f(createCaller({ session, requestId, targets: config.targets, timings }));
 }
 
 const CASE_SUMMARY = /^\/api\/cases\/([\w-]{1,64})\/summary$/;
 
-/** ホップを呼ぶ経路。ブラウザから受け取るのは案件IDだけで、ユーザーの情報は受け取らない */
-function hopRoute(event: LambdaFunctionURLEvent): { name: string; target: string; body: unknown } | undefined {
+interface HopRoute {
+  name: string;
+  /** 取引の目的。bffが経路ごとに決める */
+  purpose: string;
+  target: string;
+  body: unknown;
+}
+
+/** ホップを呼ぶ経路。ブラウザから受け取るのは案件IDだけで、ユーザーの情報も目的も受け取らない */
+function hopRoute(event: LambdaFunctionURLEvent): HopRoute | undefined {
   const method = event.requestContext.http.method;
+  if (method === 'GET' && event.rawPath === '/api/me') return { name: 'me', purpose: 'profile', target: 'entitlement-service', body: {} };
   const m = method === 'GET' ? event.rawPath.match(CASE_SUMMARY) : null;
-  if (m) return { name: 'case-summary', target: 'case-service', body: { action: 'summary', caseId: m[1] } };
+  if (m) return { name: 'case-summary', purpose: 'case-summary', target: 'case-service', body: { action: 'summary', caseId: m[1] } };
   if (method === 'POST' && event.rawPath === '/api/agent') {
     let caseId: unknown;
     try {
@@ -215,7 +239,7 @@ function hopRoute(event: LambdaFunctionURLEvent): { name: string; target: string
     } catch {
       return undefined;
     }
-    if (typeof caseId === 'string' && /^[\w-]{1,64}$/.test(caseId)) return { name: 'agent', target: 'fraud-agent', body: { caseId } };
+    if (typeof caseId === 'string' && /^[\w-]{1,64}$/.test(caseId)) return { name: 'agent', purpose: 'agent-analysis', target: 'fraud-agent', body: { caseId } };
   }
   return undefined;
 }
@@ -230,19 +254,22 @@ export const handler = async (event: LambdaFunctionURLEvent): Promise<LambdaFunc
 
     const s = await loadSession(event);
     if (!s) return json(401, { error: 'not logged in' });
-    if (method === 'GET' && path === '/api/me') return json(200, { username: s.username, branch: s.branch });
-
     const route = hopRoute(event);
     if (!route) return json(404, { error: 'not found' });
 
     const requestId = randomUUID();
     const t0 = performance.now();
     const timings: Timings = {};
-    const r = await withChain(s, requestId, timings, (call) => call(route.target, route.body));
+    const r = await withChain(s, requestId, route.purpose, timings, (call) => call(route.target, route.body));
     log('info', 'handled', {
-      hop: 'bff', requestId, route: route.name, user: s.username, status: r.status,
+      hop: 'bff', requestId, route: route.name, purpose: route.purpose, user: s.username, status: r.status,
       timings: { ...timings, totalMs: Math.round(performance.now() - t0) },
     });
+    if (route.name === 'me') {
+      // 表示用。所属と役職は属性サービスから得る（トークンには入れていない）
+      const e = r.body as { branch?: string; title?: string };
+      return r.status === 200 ? json(200, { username: s.username, branch: e.branch, title: e.title }) : json(r.status, { username: s.username });
+    }
     return json(r.status, { requestId, ...(typeof r.body === 'object' ? r.body : { detail: r.body }) });
   } catch (e) {
     log('error', 'handler failed', { path, error: (e as Error).name, detail: (e as Error).message });

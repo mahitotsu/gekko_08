@@ -18,7 +18,8 @@ async function show() {
   $('signed-out').hidden = signedIn;
   if (signedIn) {
     const me = await res.json();
-    $('who').textContent = `${me.username}（${me.branch}）`;
+    // 所属と役職は属性サービス（人事データ）から得たもの
+    $('who').textContent = me.branch ? `${me.username}（${me.branch}・${me.title}）` : me.username;
   }
 }
 

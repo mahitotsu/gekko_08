@@ -4,8 +4,8 @@ import * as lambda from 'aws-cdk-lib/aws-lambda';
 import { Construct } from 'constructs';
 import { NodeFunction } from './node-function';
 
-/** JWTに刻まれ、chainで引き継ぐ業務属性のキー */
-export const TAG_KEYS = ['branch'];
+/** 取引の目的を運ぶtransitive session tagのキー。chainで引き継ぎ、途中で変えられない */
+export const PURPOSE_TAG = 'purpose';
 
 /** 初期の信頼ポリシーに何も加えないprincipal */
 class TrustAddedLater extends iam.ArnPrincipal {
@@ -19,15 +19,24 @@ class TrustAddedLater extends iam.ArnPrincipal {
 export interface HopTarget {
   url: string;
   audience: string;
+  scope: string;
   forwardSession: boolean;
 }
 
-/** 他のホップを呼ぶ側。bffも、federated roleをchain用roleとして同じ形で扱う */
+/** 呼び出し元に許す委任の範囲 */
+export interface Delegation {
+  /** 呼び出し元がこのホップ宛てのJWTに付けるscope */
+  scope: string;
+  /** このホップ宛てのJWTを発行できる取引の目的 */
+  purposes: string[];
+}
+
+/** 他のホップを呼ぶ側。bffも、目的用のroleをchain用roleとして同じ形で扱う */
 export interface HopCaller {
   readonly hopName: string;
   readonly execRole: iam.IRole;
   readonly fn: lambda.IFunction;
-  /** 次のホップ宛てのJWTを作るセッションのrole（bffではfederated role） */
+  /** 次のホップ宛てのJWTを作るセッションのrole（bffでは目的用のrole） */
   readonly chainRole: iam.Role;
   addTarget(name: string, target: HopTarget): void;
 }
@@ -138,22 +147,38 @@ export class Hop extends Construct {
     };
   }
 
-  /** callerからこのホップへの呼び出しを許す。入口、JWTの`sub`の対応、chainとJWTの発行の権限をまとめて設定する */
-  allowCaller(caller: HopCaller): void {
+  /**
+   * callerからこのホップへの呼び出しを許す。入口、JWTの`sub`の対応、chainとJWTの発行の権限、委任の範囲（scopeと目的）を
+   * まとめて設定する
+   */
+  allowCaller(caller: HopCaller, delegation: Delegation): void {
     this.callerRoles.push(caller.execRole);
     this.callerFunctions.push(caller.fn);
     this.callers[caller.execRole.roleName] = { hop: caller.hopName, sub: caller.chainRole.roleArn };
 
-    // callerのchain用roleは、このホップ宛てのJWTだけを、共通部品が発行する形（ES384、有効期間300秒以下）で発行できる
+    // ForAnyValueでは、許した宛先に外部の宛先を混ぜたJWTを発行できる（experiments/scope-tagsのE1-7）
+    const onlyThisAudience = {
+      'ForAllValues:StringEquals': { 'sts:IdentityTokenAudience': [this.audience] },
+      Null: { 'sts:IdentityTokenAudience': 'false' },
+    };
+    // callerのchain用roleは、許された目的の取引でだけ、このホップ宛てのJWTを、共通部品が発行する形（ES384、有効期間300秒以下）で発行できる
     caller.chainRole.addToPrincipalPolicy(new iam.PolicyStatement({
       actions: ['sts:GetWebIdentityToken'],
       resources: ['*'],
       conditions: {
-        // ForAnyValueでは、許した宛先に外部の宛先を混ぜたJWTを発行できる（experiments/scope-tagsのE1-7）
-        'ForAllValues:StringEquals': { 'sts:IdentityTokenAudience': [this.audience] },
-        Null: { 'sts:IdentityTokenAudience': 'false' },
-        StringEquals: { 'sts:SigningAlgorithm': 'ES384' },
+        ...onlyThisAudience,
+        StringEquals: { 'sts:SigningAlgorithm': 'ES384', [`aws:PrincipalTag/${PURPOSE_TAG}`]: delegation.purposes },
         NumericLessThanEquals: { 'sts:DurationSeconds': 300 },
+      },
+    }));
+    // このホップ宛てのJWTに付けられるのは、宣言したscopeだけ
+    caller.chainRole.addToPrincipalPolicy(new iam.PolicyStatement({
+      actions: ['sts:TagGetWebIdentityToken'],
+      resources: ['*'],
+      conditions: {
+        'ForAllValues:StringEquals': { ...onlyThisAudience['ForAllValues:StringEquals'], 'aws:TagKeys': ['scope'] },
+        Null: onlyThisAudience.Null,
+        StringEquals: { 'aws:RequestTag/scope': delegation.scope },
       },
     }));
 
@@ -164,7 +189,7 @@ export class Hop extends Construct {
         // 新しいtagのキーは加えられない（FR-3）
         new iam.PolicyStatement({
           actions: ['sts:TagSession'], principals: [principal],
-          conditions: { 'ForAllValues:StringEquals': { 'aws:TagKeys': TAG_KEYS } },
+          conditions: { 'ForAllValues:StringEquals': { 'aws:TagKeys': [PURPOSE_TAG] } },
         }),
       );
       caller.chainRole.addToPrincipalPolicy(new iam.PolicyStatement({
@@ -173,6 +198,6 @@ export class Hop extends Construct {
       }));
     }
 
-    caller.addTarget(this.hopName, { url: this.url.url, audience: this.audience, forwardSession: !!this.chainRole });
+    caller.addTarget(this.hopName, { url: this.url.url, audience: this.audience, scope: delegation.scope, forwardSession: !!this.chainRole });
   }
 }
