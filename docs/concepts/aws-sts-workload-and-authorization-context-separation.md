@@ -2,16 +2,13 @@
 
 ## 位置づけ
 
-これはADRではない。実機検証を経ていない段階のアイデアを記録したコンセプトノートである。
-検証（Lambda関数からの`GetWebIdentityToken`呼び出し確認など）が済むまではADRとして
-`Accepted`にすべきではない内容である。実現可能性が確認できた段階で、ここに書いた内容を
-根拠にADRを書き起こす。さらにその先、working backwardsの手法でPRFAQから
-ソリューションとして整理し直す想定。
+これはADRではない。アイデアとその実機検証の結果を記録したコンセプトノートである。
+主要な前提（Lambda関数からの`GetWebIdentityToken`呼び出し、SourceIdentity・session tagの
+伝播、resource-based policyの条件判定など）は実機で確認できたため、ソリューションの設計に
+進む。設計上の判断は、ここに書いた検証結果を根拠にADRとして書き起こす。
 
-現在の[ADR 0001](../adr/0001-spire-agent-compute-platform.md)（SPIRE agentの実行基盤に
-self-managed EC2を採用）は、このコンセプトが目指す方向とは前提が異なる（SPIRE agentの
-配置問題そのものを解消しうる方向）。有益な調査記録ではあるため今は残すが、この方向性が
-実現可能と確認でき次第、適切なタイミングで整理（削除、または新ADRによる置き換え）する。
+以前のADR 0001（SPIRE agentの実行基盤にself-managed EC2を採用）は、SPIRE agentの配置を
+前提としており本コンセプトの方向と外れるため削除した（git履歴から参照可能）。
 
 ## 背景：2つの独立した関心事
 
@@ -136,7 +133,7 @@ Lambdaを最初のスパイク対象にするのはこの判断と相性がよ�
    モデル）を取る場合、ALBの管理範囲外になるためサービスごとに証明書を自前で用意・更新する
    必要が生じる（これはmTLS証明書発行基盤が自動化していた証明書配布の問題そのもの）。
 2. Lambdaはそもそも「ノードに常駐するmTLS証明書発行エージェント」「docker.sockへのworkload
-   attestation」というADR 0001の前提と構造的に噛み合わない実行環境だった。mTLS要件を外せば
+   attestation」というSPIRE前提の構成（旧ADR 0001）と構造的に噛み合わない実行環境だった。mTLS要件を外せば
    この噛み合わなさ自体が問題にならなくなる。
 3. `GetWebIdentityToken`のドキュメントはLambdaを参照実装として明示しており（session context
    claimに`lambda_source_function_arn`が明記されている一方、ECS task固有のclaimはドキュメント
@@ -259,7 +256,7 @@ NAT Gatewayなしに成立するか。
 
 ## 参考
 
-- 検証用CDKコード：[spike/cdk/](../../spike/cdk/)
+- 検証用CDKコード：[spike/cdk/](../../spike/cdk/)（スタック`Gekko08Spike`/`Gekko08SpikeCognito`は2026-09-30に削除済み）
 - [AWS: Federating AWS Identities to external services](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_providers_outbound.html)
 - [AWS: Understanding token claims](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_providers_outbound_token_claims.html)
 - [AWS: Controlling access with IAM policies（outbound federation）](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_providers_outbound_policies.html)
