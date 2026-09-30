@@ -10,16 +10,6 @@
   - 項目が十分に減ったとき
   - 緊急または重要で、丁寧に議論したうえで積んでおくべきと判断したとき
 
-## 設計で決める事項
-
-- BFFのホスティング（Lambda Function URL、API Gateway、CloudFrontとの組み合わせなど）
-- BFFのセッションとトークンの保存先と暗号化、ログインフロー（Authorization Code＋PKCE）とクライアントシークレットの扱い
-- `AssumeRoleWithWebIdentity`をリクエストごとに呼ぶか、IDトークンの有効期限の範囲で再利用するか
-- レイテンシの最適化（STSクライアントの使い回し、JWKSのキャッシュ）とJWTの有効期限
-- CDK Constructの単位と、JWT検証・ABACの共通部品
-- デモのエージェントに使うモデルとMCPサーバーの構成
-
 ## 作業の予定
 
-- 設計書を書く（`docs/design/`）
 - 設計ガイドに、代理で許す範囲の判断がToken Exchangeのように認可サーバーへ一元化されず、各受信側に分散することを明記する
