@@ -67,6 +67,13 @@
 2. Cognitoから`GET /api/callback`に戻る。bffは`state`をcookieと照合し、アプリクライアントのシークレット（SSM Parameter Store）を使って
    トークンエンドポイントでIDトークンとリフレッシュトークンを受け取る。
 3. bffはセッションをDynamoDBに保存し、セッションID（256ビットの乱数）だけを入れたcookie（`HttpOnly`・`Secure`・`SameSite=Strict`）を返す。
+   テーブルのキーはセッションIDのSHA-256にし、テーブルを読めてもcookieとして使える値が得られないようにする。
+   cookieの名前には`__Host-`を付ける（`__Host-sid`、`__Host-login`）。
+
+bffの設定（アプリクライアントのID、マネージドログインのドメイン、コールバックURL、federated roleのARN、呼び出し先）は、
+SSM Parameter StoreのStringパラメータに置き、実行時に読む。環境変数にすると、bff→CloudFront→Cognitoのアプリクライアント
+（コールバックURL）→federated role→case-serviceのchain用role→case-service→bffという循環参照になるため。
+アプリクライアントのシークレットは、デプロイ時にカスタムリソースがSecureStringとして書く（CloudFormationはSecureStringを作れない）。
 
 IDトークンには、Pre Token Generation V2トリガーが`https://aws.amazon.com/source_identity`（ユーザー識別子）と
 `https://aws.amazon.com/tags`（`principal_tags`に`branch`、`transitive_tag_keys`に`branch`）を入れる。
@@ -97,8 +104,8 @@ IDトークンには、Pre Token Generation V2トリガーが`https://aws.amazon
 | 送るもの | 載せ方 | 受信側での使い道 |
 |---|---|---|
 | SigV4署名 | 呼び出し元の**実行role**で署名 | 入口のIAMが呼び出し元（actor）を確かめる |
-| JWT | `x-authz-context`ヘッダー | アプリがsubject（誰の代理か、`branch`）とaud（自分宛てか）を確かめる |
-| chainのセッション | `x-authz-session`ヘッダー（呼び出し先がchain用roleを持つ場合だけ） | 受信側が次のホップ宛てのJWTを作るために、自分のchain用roleへchainする |
+| JWT | `x-authz-context`ヘッダー。`aud`は`<スタック名>:<ホップ名>` | アプリがsubject（誰の代理か、`branch`）とaud（自分宛てか）を確かめる |
+| chainのセッション | `x-authz-session`ヘッダー（呼び出し先がchain用roleを持つ場合だけ）。認証情報のJSONをbase64urlにしたもの | 受信側が次のホップ宛てのJWTを作るために、自分のchain用roleへchainする |
 | リクエストID | `x-request-id`ヘッダー | 追跡（§7） |
 
 呼び出し元での手順：
@@ -238,16 +245,21 @@ npmのワークスペースで次のように分ける。
 
 | Construct | 作るもの |
 |---|---|
-| `AuthFoundation` | Cognito User Pool（Essentials、マネージドログイン）、アプリクライアント、Pre Token Generation V2のLambda、OIDC provider、bffのfederated role |
+| `AuthFoundation` | Cognito User Pool（Essentials、マネージドログイン）、アプリクライアント、Pre Token Generation V2のLambda、OIDC provider、bffのfederated role。アプリクライアントには属性の書き込みを許さない |
 | `Hop` | `NodejsFunction`（関数ごとの実行role）、Function URL（`AWS_IAM`）、入口のresource policy、必要ならchain用role |
-| `Hop#allowCaller(caller)` | 呼び出し元と呼び出し先をつなぐ。入口のresource policyへの追加、chain用roleの信頼とchain権限、JWTの宛先の許可、`sub`の対応表 |
-| `WebFrontend` | CloudFront、S3（静的なフロントエンド）、bffのFunction URLへのOAC、セッションのテーブル、SSMのパラメータ |
+| `Hop#allowCaller(caller)` | 呼び出し元と呼び出し先をつなぐ。入口のresource policyへの追加、chain用roleの信頼とchain権限、JWTの宛先の許可、`sub`の対応表。bffは`Bff#asCaller`でfederated roleをchain用roleとして渡す |
+| `Bff` | bffの`NodejsFunction`とFunction URL、セッションのテーブル、SSMのパラメータ（設定とシークレット） |
+| `WebFrontend` | CloudFront、S3（静的なフロントエンド）、bffのFunction URLへのOAC |
 | `DemoData` | DynamoDBのテーブルとデモ用データ |
 | `OutboundFederationCheck` | デプロイ時の前提条件の確認と、JWTの発行者URLの取得（§11） |
 
 ## 10. テスト
 
 振る舞いを確かめるシナリオテストは、デプロイしたスタックに対して実行し、要件のIDにひも付ける。
+
+マネージドログインはブラウザを必要とするので、テストでは`ADMIN_USER_PASSWORD_AUTH`でIDトークンを得て、bffの`/api/callback`と同じ形の
+セッションをテーブルに書き、そのcookieでCloudFrontからbffを呼ぶ。`ADMIN_USER_PASSWORD_AUTH`はIAMの権限
+（`cognito-idp:AdminInitiateAuth`）がなければ呼べず、ブラウザからは使えない。
 
 | 要件 | テストの内容 |
 |---|---|

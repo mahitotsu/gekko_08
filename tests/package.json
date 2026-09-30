@@ -1,0 +1,20 @@
+{
+  "name": "@gekko08/tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@aws-sdk/client-cloudformation": "^3.1143.0",
+    "@aws-sdk/client-cognito-identity-provider": "^3.1143.0",
+    "@aws-sdk/client-dynamodb": "^3.1143.0",
+    "@aws-sdk/lib-dynamodb": "^3.1143.0",
+    "@aws-sdk/client-sts": "^3.1143.0",
+    "@aws-sdk/client-cloudwatch-logs": "^3.1143.0",
+    "@aws-sdk/credential-provider-node": "^3.972.84",
+    "@aws-crypto/sha256-js": "^5.2.0",
+    "@smithy/signature-v4": "^5.7.4",
+    "jose": "^6.2.12"
+  }
+}

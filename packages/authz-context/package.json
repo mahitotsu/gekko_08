@@ -1,0 +1,16 @@
+{
+  "name": "@gekko08/authz-context",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@aws-sdk/client-sts": "^3.1143.0",
+    "@aws-sdk/credential-provider-node": "^3.972.84",
+    "@aws-crypto/sha256-js": "^5.2.0",
+    "@smithy/signature-v4": "^5.7.4",
+    "jose": "^6.2.12"
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "name": "@gekko08/infra",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "cdk": "cdk"
+  },
+  "dependencies": {
+    "@aws-sdk/client-cognito-identity-provider": "^3.1143.0",
+    "@aws-sdk/client-iam": "^3.1143.0",
+    "@aws-sdk/client-ssm": "^3.1143.0",
+    "@aws-sdk/util-dynamodb": "^3.996.9",
+    "aws-cdk-lib": "^2.271.0",
+    "constructs": "^10.0.0"
+  },
+  "devDependencies": {
+    "aws-cdk": "^2.1143.0",
+    "esbuild": "^0.28.2",
+    "tsx": "^4.23.15"
+  }
+}

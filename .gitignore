@@ -1,0 +1,27 @@
+# 依存とビルド成果物
+node_modules/
+dist/
+build/
+cdk.out/
+*.tsbuildinfo
+coverage/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# 実機検証・デプロイの出力（アカウントIDやURL、トークンを含みうる）
+outputs.json
+out-*.json
+
+# 秘密情報
+.env
+.env.*
+*.pem
+*.key
+
+# エディタ・OS・ツールのローカル設定
+.DS_Store
+.idea/
+.claude/settings.local.json

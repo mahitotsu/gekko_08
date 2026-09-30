@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>gekko08 demo</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main>
+    <h1>不正検知デモ</h1>
+    <section id="signed-out" hidden>
+      <p>ログインしていません。</p>
+      <a class="button" href="/api/login">ログイン</a>
+    </section>
+    <section id="signed-in" hidden>
+      <p><span id="who"></span> <button id="logout" type="button">ログアウト</button></p>
+      <form id="summary-form">
+        <label>案件ID <input id="case-id" value="C-1001" required pattern="[\w-]{1,64}"></label>
+        <button type="submit">要約を開く</button>
+      </form>
+      <pre id="result"></pre>
+    </section>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+{
+  "name": "@gekko08/account-service",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@gekko08/authz-context": "*",
+    "@aws-sdk/client-dynamodb": "^3.1143.0",
+    "@aws-sdk/lib-dynamodb": "^3.1143.0"
+  }
+}
