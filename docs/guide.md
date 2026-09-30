@@ -63,9 +63,10 @@ Token Exchangeでは、認可サーバーがトークンを発行するときに
   自分で決める。
 - 入口のresource policyが決めるのは「どのサービスが呼べるか」までで、「そのサービスに何を許すか」は受信側のアプリのコードにある。
   許す範囲を見直すときは、1か所の設定ではなく、各受信側のコードを見る必要がある。
-- 参照実装では、呼び出し元によって許す操作を変えていない（case-serviceは、bffからもfraud-mcpからも同じ操作を受け付ける）。
-  呼び出し元ごとに変えたい場合は、共通部品が確かめたactorを業務のコードに渡し、受信側で判定する必要がある。現在の共通部品は、
-  業務のコードにactorを渡していない（ログにだけ出す）。
+- 共通部品は、subjectとともに、呼び出し元のホップ名（actor）を業務のコードに渡す。actorは、入口のIAMが確かめた実行roleと、JWTを作った
+  roleの両方が一致したときだけ渡る。呼び出し元ごとに許す操作を変えるときは、これを使う。
+- 参照実装では、case-serviceが、要約（口座の情報を含む）をbffからだけ、案件の取得をfraud-mcpからだけ受け付ける。エージェントの経路からは、
+  口座の情報をまとめて返す要約を使えない。
 
 ## 4. 自分のシステムへの当てはめ方
 
@@ -93,11 +94,12 @@ Token Exchangeでは、認可サーバーがトークンを発行するときに
    orders.allowCaller(caseService.asCaller());
    ```
 
-4. **業務のコードを書く。** `createHopHandler`に業務の関数を渡す。受け取るのは検証済みの`subject`と、次のホップを呼ぶ`call`だけで、
-   JWTも認証情報も扱わない。
+4. **業務のコードを書く。** `createHopHandler`に業務の関数を渡す。受け取るのは検証済みの`subject`、呼び出し元のホップ名`actor`、
+   次のホップを呼ぶ`call`だけで、JWTも認証情報も扱わない。
 
    ```ts
-   export const handler = createHopHandler(async (body, { subject, call }) => {
+   export const handler = createHopHandler(async (body, { subject, actor, call }) => {
+     if (actor !== 'case-service') return { status: 403, body: { error: 'forbidden' } };
      const order = await loadOrder(body.orderId);
      if (order.branch !== subject.branch) return { status: 403, body: { error: 'forbidden' } };
      return { status: 200, body: { order } };

@@ -9,19 +9,29 @@ export class AuthzError extends Error {
   }
 }
 
+/** 呼び出しを許したホップ。入口のIAMが確かめた実行roleから引く */
+export interface CallerEntry {
+  /** 呼び出し元のホップ名 */
+  hop: string;
+  /** JWTの`sub`として期待する、呼び出し元のchain用role（bffではfederated role）のARN */
+  sub: string;
+}
+
 export interface VerifyOptions {
   issuer: string;
   audience: string;
-  /** 入口のIAMが確かめた呼び出し元の実行role名 → JWTの`sub`として期待するchain用roleのARN */
-  callers: Record<string, string>;
+  /** 入口のIAMが確かめた呼び出し元の実行role名 → 呼び出し元のホップ */
+  callers: Record<string, CallerEntry>;
   /** 署名鍵の取得。テストでは差し替える */
   keys?: JWTVerifyGetKey;
 }
 
 export interface Verified {
   subject: Subject;
-  /** 呼び出し元の実行role名（actor） */
+  /** 呼び出し元のホップ名（actor） */
   actor: string;
+  /** 呼び出し元の実行role名 */
+  actorRole: string;
   /** JWTの`sub`（呼び出し元のchain用role） */
   tokenSub: string;
 }
@@ -58,13 +68,13 @@ function tagValue(v: unknown): string | undefined {
 
 /**
  * 受け取ったJWTを検証し、subjectを返す。
- * actor（呼び出し元の実行role）は入口のIAMが確かめた値を渡す。ヘッダーや本文の自己申告は使わない（FR-2）。
+ * callerArnには、入口のIAMが確かめた呼び出し元を渡す。ヘッダーや本文の自己申告は使わない（FR-2）。
  */
 export async function verifyInbound(token: string | undefined, callerArn: string | undefined, opts: VerifyOptions): Promise<Verified> {
-  const actor = roleNameFromAssumedRoleArn(callerArn);
-  const expectedSub = actor && opts.callers[actor];
+  const actorRole = roleNameFromAssumedRoleArn(callerArn);
+  const caller = actorRole ? opts.callers[actorRole] : undefined;
   // 入口のresource policyで拒否されるはずの呼び出し元。多層防御としてここでも拒否する
-  if (!actor || !expectedSub) throw new AuthzError(403, 'caller not allowed');
+  if (!actorRole || !caller) throw new AuthzError(403, 'caller not allowed');
   if (!token) throw new AuthzError(401, 'missing authorization context');
 
   const keys = opts.keys ?? (await remoteKeys(opts.issuer));
@@ -80,11 +90,11 @@ export async function verifyInbound(token: string | undefined, callerArn: string
     throw new AuthzError(401, `invalid authorization context: ${(e as Error).name}`);
   }
   // JWTを作ったのが、入口を通った呼び出し元のchain用roleであること
-  if (payload.sub !== expectedSub) throw new AuthzError(401, 'token subject does not match caller');
+  if (payload.sub !== caller.sub) throw new AuthzError(401, 'token subject does not match caller');
 
   const ns = payload[STS_NAMESPACE] as { source_identity?: unknown; principal_tags?: Record<string, unknown> } | undefined;
   const id = ns?.source_identity;
   const branch = tagValue(ns?.principal_tags?.branch);
   if (typeof id !== 'string' || !id || !branch) throw new AuthzError(401, 'authorization context lacks subject');
-  return { subject: { id, branch }, actor, tokenSub: payload.sub };
+  return { subject: { id, branch }, actor: caller.hop, actorRole, tokenSub: payload.sub };
 }

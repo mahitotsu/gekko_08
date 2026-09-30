@@ -12,7 +12,10 @@ let chained: AwsCredentialIdentity;
 
 // 入口のIAMが確かめた呼び出し元に相当する値。対応表（callers）はデプロイ時の環境変数と同じ形で渡す
 const callerArn = (role: string) => `arn:aws:sts::123456789012:assumed-role/${role}/fn`;
-const optsFor = (audience: string, callers: Record<string, string>): VerifyOptions => ({ issuer: o.Issuer, audience, callers });
+// 対応表は「実行role名 → chain用roleのARN」で書き、ホップ名は実行role名で代える
+const optsFor = (audience: string, callers: Record<string, string>): VerifyOptions => ({
+  issuer: o.Issuer, audience, callers: Object.fromEntries(Object.entries(callers).map(([role, sub]) => [role, { hop: role, sub }])),
+});
 
 const mint = async (credentials: AwsCredentialIdentity, audience: string, durationSeconds = 300) =>
   (await new STSClient({ credentials }).send(new GetWebIdentityTokenCommand({
@@ -42,7 +45,7 @@ describe('FR-1: 各ホップは、STSが署名したJWTでsubjectと宛先を確
   it('bffのセッションが作ったcase-service宛てのJWTから、subjectを取り出せる', async () => {
     const v = await verifyInbound(await mint(fed, o.CaseServiceAudience), callerArn('bff-exec'),
       optsFor(o.CaseServiceAudience, { 'bff-exec': o.FederatedRoleArn }));
-    expect(v).toEqual({ subject: { id: 'yamada', branch: 'tokyo' }, actor: 'bff-exec', tokenSub: o.FederatedRoleArn });
+    expect(v).toEqual({ subject: { id: 'yamada', branch: 'tokyo' }, actor: 'bff-exec', actorRole: 'bff-exec', tokenSub: o.FederatedRoleArn });
   });
 
   it('chainしたセッションが作ったJWTにも、同じsubjectが引き継がれる', async () => {

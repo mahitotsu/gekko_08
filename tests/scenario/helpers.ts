@@ -180,7 +180,10 @@ export interface HandledLog {
   hop: string;
   requestId: string;
   status: number;
+  /** 呼び出し元のホップ名 */
   actor?: string;
+  /** 呼び出し元の実行role名 */
+  actorRole?: string;
   tokenSub?: string;
   subject?: { id: string; branch: string };
   user?: string;

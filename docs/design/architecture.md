@@ -194,16 +194,20 @@ bffのFunction URLを直接呼べうるが、セッションcookieがなけれ�
 **受信時**
 
 1. `x-authz-context`のJWTを検証する。`iss`＝自アカウントのSTS発行者、`aud`＝自分、`exp`、署名（JWKSはメモリにキャッシュし、未知の`kid`のときだけ取り直す）。
-2. `sub`が「入口のIAMが確かめた呼び出し元の実行role」に対応するchain用roleであることを確かめる。対応表はデプロイ時に環境変数で渡す。
-3. `https://sts.amazonaws.com/`名前空間の`source_identity`と`principal_tags`から、subject（ユーザー識別子と`branch`）を取り出して業務のコードに渡す。
+2. `sub`が「入口のIAMが確かめた呼び出し元の実行role」に対応するchain用roleであることを確かめる。対応表（実行role名 → 呼び出し元のホップ名と
+   chain用roleのARN）はデプロイ時に環境変数で渡す。
+3. `https://sts.amazonaws.com/`名前空間の`source_identity`と`principal_tags`から、subject（ユーザー識別子と`branch`）を取り出し、
+   呼び出し元のホップ名（actor）とともに業務のコードに渡す。
    ヘッダーや引数に含まれるユーザー情報は使わない。
 4. 検証に失敗したら401を返す。
 
 **ABAC**：業務のコードは、共通部品が渡したsubjectだけを使って判定する（例：案件や口座の`branch`がsubjectの`branch`と一致するときだけ返す）。
+代理で何を許すかを呼び出し元によって変える場合は、共通部品が渡したactorを使う。case-serviceは、要約（口座の情報を含む）をbffからだけ、
+案件の取得をfraud-mcpからだけ受け付ける。
 
 **送信時**：§4の手順を行う。STSクライアントとJWKSはLambdaの実行環境ごとに使い回す。
 
-**ログ**：リクエストID、ホップ名、呼び出し元の実行role（actor）、subject、JWTの`sub`、判定結果、処理時間を構造化ログに出す。
+**ログ**：リクエストID、ホップ名、呼び出し元のホップ名（actor）と実行role名、subject、JWTの`sub`、判定結果、処理時間を構造化ログに出す。
 認証情報、JWT、cookieはログに出さない。
 
 ## 7. 追跡（FR-6）

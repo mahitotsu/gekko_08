@@ -58,9 +58,10 @@ describe('FR-6: エージェントの経路も、リクエストIDとユーザ�
     for (const hop of ['fraud-agent', 'fraud-mcp', 'case-service'] as const) {
       expect(l[hop]!.subject).toEqual({ id: 'yamada', branch: 'tokyo' });
     }
-    expect(l['fraud-agent']!.actor).toMatch(/BffFunction/);
-    expect(l['fraud-mcp']!.actor).toMatch(/FraudAgentFunction/);
-    expect(l['case-service']!.actor).toMatch(/FraudMcpFunction/);
+    expect([l['fraud-agent']!.actor, l['fraud-mcp']!.actor, l['case-service']!.actor]).toEqual(['bff', 'fraud-agent', 'fraud-mcp']);
+    expect(l['fraud-agent']!.actorRole).toMatch(/BffFunction/);
+    expect(l['fraud-mcp']!.actorRole).toMatch(/FraudAgentFunction/);
+    expect(l['case-service']!.actorRole).toMatch(/FraudMcpFunction/);
     expect(l['case-service']!.tokenSub).toMatch(/FraudMcpChainRole/);
   });
 });

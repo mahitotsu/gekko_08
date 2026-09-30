@@ -1,5 +1,5 @@
 import type { LambdaFunctionURLEvent, LambdaFunctionURLResult } from 'aws-lambda';
-import { AuthzError, verifyInbound } from './inbound';
+import { AuthzError, verifyInbound, type CallerEntry, type VerifyOptions } from './inbound';
 import { log } from './log';
 import { createCaller, decodeSession, type Call, type Timings } from './outbound';
 import { HEADER_CONTEXT, HEADER_REQUEST_ID, HEADER_SESSION, type CallResult, type Subject, type Target } from './types';
@@ -9,9 +9,11 @@ export interface HopConfig {
   hop: string;
   audience: string;
   issuer: string;
-  callers: Record<string, string>;
+  callers: Record<string, CallerEntry>;
   chainRoleArn?: string;
   targets: Record<string, Target>;
+  /** JWTの署名鍵の取得。テストでだけ差し替える */
+  keys?: VerifyOptions['keys'];
 }
 
 export function hopConfigFromEnv(env = process.env): HopConfig {
@@ -27,6 +29,8 @@ export function hopConfigFromEnv(env = process.env): HopConfig {
 
 export interface HopContext {
   subject: Subject;
+  /** 呼び出し元のホップ名。入口のIAMが確かめた実行roleと、JWTを作ったroleの両方が一致している */
+  actor: string;
   requestId: string;
   /** 次のホップを呼ぶ。呼び出し先がないホップでは使えない */
   call: Call;
@@ -79,7 +83,7 @@ export function createHopHandler(business: HopHandler, config: HopConfig = hopCo
     let result: CallResult;
     try {
       const raw = event.isBase64Encoded ? Buffer.from(event.body ?? '', 'base64').toString() : event.body;
-      result = await business(raw ? JSON.parse(raw) : {}, { subject: verified.subject, requestId, call });
+      result = await business(raw ? JSON.parse(raw) : {}, { subject: verified.subject, actor: verified.actor, requestId, call });
     } catch (e) {
       log('error', 'handler failed', { ...base, error: (e as Error).name, detail: (e as Error).message });
       result = { status: 500, body: { error: 'internal error' } };
@@ -87,6 +91,7 @@ export function createHopHandler(business: HopHandler, config: HopConfig = hopCo
     log('info', 'handled', {
       ...base,
       actor: verified.actor,
+      actorRole: verified.actorRole,
       tokenSub: verified.tokenSub,
       subject: verified.subject,
       status: result.status,

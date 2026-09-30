@@ -56,7 +56,7 @@ export class Hop extends Construct {
 
   private readonly callerRoles: iam.IRole[] = [];
   private readonly callerFunctions: lambda.IFunction[] = [];
-  private readonly expectedSubs: Record<string, string> = {};
+  private readonly callers: Record<string, { hop: string; sub: string }> = {};
   private readonly targets: Record<string, HopTarget> = {};
 
   constructor(scope: Construct, id: string, props: HopProps) {
@@ -82,7 +82,7 @@ export class Hop extends Construct {
         HOP_NAME: props.hopName,
         HOP_AUDIENCE: this.audience,
         AUTHZ_ISSUER: props.issuer,
-        AUTHZ_CALLERS: cdk.Lazy.string({ produce: () => stack.toJsonString(this.expectedSubs) }),
+        AUTHZ_CALLERS: cdk.Lazy.string({ produce: () => stack.toJsonString(this.callers) }),
         AUTHZ_TARGETS: cdk.Lazy.string({ produce: () => stack.toJsonString(this.targets) }),
         ...(this.chainRole ? { AUTHZ_CHAIN_ROLE: this.chainRole.roleArn } : {}),
         ...props.environment,
@@ -142,7 +142,7 @@ export class Hop extends Construct {
   allowCaller(caller: HopCaller): void {
     this.callerRoles.push(caller.execRole);
     this.callerFunctions.push(caller.fn);
-    this.expectedSubs[caller.execRole.roleName] = caller.chainRole.roleArn;
+    this.callers[caller.execRole.roleName] = { hop: caller.hopName, sub: caller.chainRole.roleArn };
 
     // callerのchain用roleは、このホップ宛てのJWTだけを発行できる
     caller.chainRole.addToPrincipalPolicy(new iam.PolicyStatement({

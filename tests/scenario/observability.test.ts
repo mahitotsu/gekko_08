@@ -35,10 +35,12 @@ describe('FR-6: 1回のリクエストを、各ホップのログでリクエス
     expect(l.bff).toMatchObject({ user: 'yamada', status: 200 });
     expect(l['case-service']).toMatchObject({ subject: { id: 'yamada', branch: 'tokyo' }, status: 200 });
     expect(l['account-service']).toMatchObject({ subject: { id: 'yamada', branch: 'tokyo' }, status: 200 });
-    // actorは直前のホップの実行role、JWTの`sub`は直前のホップのchain用role（bffではfederated role）
-    expect(l['case-service']!.actor).toMatch(/BffFunction/);
+    // actorは直前のホップ（入口の実行role）、JWTの`sub`は直前のホップのchain用role（bffではfederated role）
+    expect(l['case-service']).toMatchObject({ actor: 'bff' });
+    expect(l['case-service']!.actorRole).toMatch(/BffFunction/);
     expect(l['case-service']!.tokenSub).toMatch(/FederatedRole/);
-    expect(l['account-service']!.actor).toMatch(/CaseServiceFunction/);
+    expect(l['account-service']).toMatchObject({ actor: 'case-service' });
+    expect(l['account-service']!.actorRole).toMatch(/CaseServiceFunction/);
     expect(l['account-service']!.tokenSub).toMatch(/CaseServiceChainRole/);
   });
 

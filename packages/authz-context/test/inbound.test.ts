@@ -12,7 +12,7 @@ let sign: (payload: JWTPayload, over?: { alg?: string; aud?: string; exp?: strin
 beforeAll(async () => {
   const { privateKey, publicKey } = await generateKeyPair('ES384');
   const jwk = { ...(await exportJWK(publicKey)), kid: 'k1', alg: 'ES384' };
-  opts = { issuer: ISSUER, audience: 'aud-account', callers: { 'case-exec': CHAIN }, keys: createLocalJWKSet({ keys: [jwk] }) };
+  opts = { issuer: ISSUER, audience: 'aud-account', callers: { 'case-exec': { hop: 'case-service', sub: CHAIN } }, keys: createLocalJWKSet({ keys: [jwk] }) };
   sign = (payload, over = {}) => new SignJWT(payload)
     .setProtectedHeader({ alg: 'ES384', kid: 'k1' })
     .setIssuer(over.iss ?? ISSUER)
@@ -34,7 +34,7 @@ async function rejected(p: Promise<unknown>, status: number) {
 describe('verifyInbound', () => {
   it('検証済みのsubjectとactorを返す', async () => {
     const v = await verifyInbound(await sign(claims), CALLER_ARN, opts);
-    expect(v).toEqual({ subject: { id: 'yamada', branch: 'tokyo' }, actor: 'case-exec', tokenSub: CHAIN });
+    expect(v).toEqual({ subject: { id: 'yamada', branch: 'tokyo' }, actor: 'case-service', actorRole: 'case-exec', tokenSub: CHAIN });
   });
 
   it('tagの値が配列でも読める', async () => {
@@ -54,7 +54,7 @@ describe('verifyInbound', () => {
   it('JWTなしを拒否する', async () => rejected(verifyInbound(undefined, CALLER_ARN, opts), 401));
 
   it('呼び出し元のchain用roleと`sub`が一致しなければ拒否する', async () => {
-    const other = { ...opts, callers: { 'case-exec': 'arn:aws:iam::123456789012:role/other-chain' } };
+    const other = { ...opts, callers: { 'case-exec': { hop: 'case-service', sub: 'arn:aws:iam::123456789012:role/other-chain' } } };
     await rejected(verifyInbound(await sign(claims), CALLER_ARN, other), 401);
   });
 
