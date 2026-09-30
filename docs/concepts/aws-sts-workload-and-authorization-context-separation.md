@@ -7,7 +7,7 @@
 伝播、resource-based policyの条件判定など）は実機で確認できたため、ソリューションの設計に
 進む。設計上の判断は、ここに書いた検証結果を根拠にADRとして書き起こす。
 
-以前のADR 0001（SPIRE agentの実行基盤にself-managed EC2を採用）は、SPIRE agentの配置を
+以前のADR（SPIRE agentの実行基盤にself-managed EC2を採用）は、SPIRE agentの配置を
 前提としており本コンセプトの方向と外れるため削除した（git履歴から参照可能）。
 
 このノート自体も最終的には削除する。検証済みの事実（日付・リージョン・SDKバージョンと
@@ -139,7 +139,7 @@ Lambdaを最初のスパイク対象にするのはこの判断と相性がよ�
    モデル）を取る場合、ALBの管理範囲外になるためサービスごとに証明書を自前で用意・更新する
    必要が生じる（これはmTLS証明書発行基盤が自動化していた証明書配布の問題そのもの）。
 2. Lambdaはそもそも「ノードに常駐するmTLS証明書発行エージェント」「docker.sockへのworkload
-   attestation」というSPIRE前提の構成（旧ADR 0001）と構造的に噛み合わない実行環境だった。mTLS要件を外せば
+   attestation」というSPIRE前提の構成（削除した以前のADR）と構造的に噛み合わない実行環境だった。mTLS要件を外せば
    この噛み合わなさ自体が問題にならなくなる。
 3. `GetWebIdentityToken`のドキュメントはLambdaを参照実装として明示しており（session context
    claimに`lambda_source_function_arn`が明記されている一方、ECS task固有のclaimはドキュメント
