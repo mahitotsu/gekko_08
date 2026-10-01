@@ -1,0 +1,25 @@
+{
+  "name": "gekko08-exp-otel-export",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "deploy": "../../node_modules/.bin/cdk deploy",
+    "synth": "../../node_modules/.bin/cdk synth",
+    "destroy": "../../node_modules/.bin/cdk destroy",
+    "run": "../../node_modules/.bin/tsx scripts/run.ts",
+    "probe-iam": "../../node_modules/.bin/tsx scripts/probe-iam.ts"
+  },
+  "dependencies": {
+    "@opentelemetry/api": "^1.9.1",
+    "@opentelemetry/exporter-metrics-otlp-proto": "^0.222.0",
+    "@opentelemetry/exporter-trace-otlp-proto": "^0.222.0",
+    "@opentelemetry/otlp-transformer": "^0.222.0",
+    "@opentelemetry/resources": "^2.11.0",
+    "@opentelemetry/sdk-metrics": "^2.11.0",
+    "@opentelemetry/sdk-trace-base": "^2.11.0",
+    "@opentelemetry/sdk-trace-node": "^2.11.0"
+  },
+  "devDependencies": {
+    "@aws-sdk/client-lambda": "^3.1144.0"
+  }
+}

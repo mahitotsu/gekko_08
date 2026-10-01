@@ -1,0 +1,43 @@
+# C. コレクターのレイヤー（opentelemetry-lambda）の設定。関数と子プロセスからOTLPを受け、SigV4で署名してCloudWatchに送る。
+# decoupleで、関数の応答を送信の完了まで待たせない
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: localhost:4318
+
+extensions:
+  sigv4auth/xray:
+    region: ${env:AWS_REGION}
+    service: xray
+  sigv4auth/monitoring:
+    region: ${env:AWS_REGION}
+    service: monitoring
+
+processors:
+  decouple: {}
+
+exporters:
+  otlphttp/xray:
+    traces_endpoint: https://xray.${env:AWS_REGION}.amazonaws.com/v1/traces
+    auth:
+      authenticator: sigv4auth/xray
+  otlphttp/monitoring:
+    metrics_endpoint: https://monitoring.${env:AWS_REGION}.amazonaws.com/v1/metrics
+    auth:
+      authenticator: sigv4auth/monitoring
+
+service:
+  extensions: [sigv4auth/xray, sigv4auth/monitoring]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [decouple]
+      exporters: [otlphttp/xray]
+    metrics:
+      receivers: [otlp]
+      processors: [decouple]
+      exporters: [otlphttp/monitoring]
+  telemetry:
+    logs:
+      level: info
