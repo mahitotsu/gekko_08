@@ -14,17 +14,6 @@ AWS上のマイクロサービスで、Authorization Context（誰の権限で�
 
 仕組みと当てはめ方は[設計ガイド](docs/guide.md)に、背景と設計の詳細は[docs/](docs/README.md)にある。
 
-## 守れるもの・守れないもの
-
-- **守れる**：ホップのFunction URLは公開の経路から到達できるが、許可した呼び出し元の実行roleの署名（SigV4）がなければ呼べない。
-  途中のホップやエージェントが乗っ取られても、ユーザーと取引の目的は変えられず、許されていない呼び出し先、宣言していないscope、
-  その取引の目的が許さない影響の大きい操作（デモでは凍結の解除）には届かない。受け渡すセッションやJWTが漏れても、それだけではどのホップも呼べない。
-- **守れない**：乗っ取られたホップは、処理中のリクエストについて、自分に許された範囲ではユーザーとして振る舞える。BFF、Pre Token Generationトリガー、
-  属性サービスのデータ、アカウントの管理者が侵害されると、その要素が決める値のとおりになる。実行環境から実行roleの認証情報とセッションの両方を
-  持ち出されると、有効期限内はそのホップとして呼べる。エージェントの子プロセスとの境界は、認証情報の隔離ではなく、任意のコードを実行させない設定である。
-
-要素ごとの詳細は[設計ガイド§5](docs/guide.md#5-この構成が守らないもの)にある。
-
 ## 構成
 
 ```
@@ -37,11 +26,22 @@ AWS上のマイクロサービスで、Authorization Context（誰の権限で�
 
 | ディレクトリ | 内容 |
 |---|---|
-| [infra/](infra/) | CDKアプリ（単一のスタック`Gekko08App`） |
+| [infra/](infra/) | CDKアプリ（単一のスタック`Gekko08App`）と、`Hop`のテンプレートと委任の範囲の定義の単体テスト |
 | [packages/authz-context/](packages/authz-context/) | 各ホップが使う共通部品。JWTの検証、chain、JWTの発行、署名付きの呼び出し、エージェントからMCPサーバーを呼ぶ部品、トレースと構造化ログ |
-| [services/](services/) | 各Lambdaのハンドラー |
+| [services/](services/) | 各Lambdaのハンドラーと、サービスごとの委任の範囲の定義（`authz.ts`） |
 | [web/](web/) | デモの画面 |
 | [tests/](tests/) | 要件のIDにひも付けたシナリオテスト |
+
+## 守れるもの・守れないもの
+
+- **守れる**：ホップのFunction URLは公開の経路から到達できるが、許可した呼び出し元の実行roleの署名（SigV4）がなければ呼べない。
+  途中のホップやエージェントが乗っ取られても、ユーザーと取引の目的は変えられず、許されていない呼び出し先、宣言していないscope、
+  その取引の目的が許さない影響の大きい操作（デモでは凍結の解除）には届かない。受け渡すセッションやJWTが漏れても、それだけではどのホップも呼べない。
+- **守れない**：乗っ取られたホップは、処理中のリクエストについて、自分に許された範囲ではユーザーとして振る舞える。BFF、Pre Token Generationトリガー、
+  属性サービスのデータ、アカウントの管理者が侵害されると、その要素が決める値のとおりになる。実行環境から実行roleの認証情報とセッションの両方を
+  持ち出されると、有効期限内はそのホップとして呼べる。エージェントの子プロセスとの境界は、認証情報の隔離ではなく、任意のコードを実行させない設定である。
+
+要素ごとの詳細は[設計ガイド§5](docs/guide.md#5-この構成が守らないもの)にある。
 
 ## 前提条件
 
@@ -75,7 +75,7 @@ AWS上のマイクロサービスで、Authorization Context（誰の権限で�
 ```sh
 export AWS_REGION=ap-northeast-1
 npm install
-npm test                          # 共通部品の単体テスト
+npm test                          # 単体テスト（共通部品、Hopのテンプレート、委任の範囲の定義）
 npm run deploy                    # スタック Gekko08App をデプロイする（5分ほど）
 npm run test:scenario             # デプロイしたスタックに対するシナリオテスト（4〜5分。トレースの到着を待つ）
 npm run test:scenario:cloudtrail  # CloudTrailでの追跡も確かめる（最大15分ほどかかる）
@@ -105,8 +105,8 @@ aws cognito-idp admin-set-user-password --user-pool-id "$POOL" --username tanaka
 aws cloudformation describe-stacks --stack-name Gekko08App --query "Stacks[0].Outputs[?OutputKey=='WebUrl'].OutputValue" --output text
 ```
 
-シナリオテストは、専用のユーザー（`test-tokyo-manager`、`test-osaka-officer`）と、その人事データを自分で用意して使う。
-デモのユーザーのパスワードと所属には触れないので、テストを流したあとも、設定したパスワードでログインできる。
+シナリオテストは、専用のユーザー（`test-tokyo-manager`、`test-osaka-officer`）とその人事データ、専用の案件と口座（`TC-`、`TA-`で始まるもの）を
+自分で用意して使う。デモのデータには触れないので、テストを流したあとも、設定したパスワードでログインでき、デモの口座の状態も変わらない。
 
 ### 試す
 
@@ -150,22 +150,24 @@ bffが侵害されれば、どの目的でも刻める（[設計ガイド](docs/
 
 ### 凍結し直す
 
-解除は口座の状態を変える。デモを繰り返すときは、口座を凍結し直す。
+解除は口座の状態を変え、案件に解除の結果を残す。デモを繰り返すときは、口座を凍結し直し、案件の記録を消す（例はA-101とC-1001）。
 
 ```sh
+export AWS_REGION=ap-northeast-1
 ACCOUNTS=$(aws cloudformation describe-stacks --stack-name Gekko08App --query "Stacks[0].Outputs[?OutputKey=='AccountsTable'].OutputValue" --output text)
 aws dynamodb update-item --table-name "$ACCOUNTS" --key '{"accountId":{"S":"A-101"}}' \
   --update-expression 'SET #s = :f REMOVE unfrozenBy, unfrozenAt, unfreezeRequestId' \
   --expression-attribute-names '{"#s":"status"}' --expression-attribute-values '{":f":{"S":"frozen"}}'
+CASES=$(aws cloudformation describe-stacks --stack-name Gekko08App --query "Stacks[0].Outputs[?OutputKey=='CasesTable'].OutputValue" --output text)
+aws dynamodb update-item --table-name "$CASES" --key '{"caseId":{"S":"C-1001"}}' --update-expression 'REMOVE resolution'
 ```
-
-シナリオテストは、テスト専用の案件と口座（`TC-`、`TA-`で始まるもの）を実行ごとに用意し、デモのデータには触れない。
 
 ### 異動を試す
 
 人事データでyamadaの所属を変えると、ログインし直さなくても、次のリクエストから結果が変わる。
 
 ```sh
+export AWS_REGION=ap-northeast-1
 STAFF=$(aws cloudformation describe-stacks --stack-name Gekko08App --query "Stacks[0].Outputs[?OutputKey=='StaffTable'].OutputValue" --output text)
 aws dynamodb update-item --table-name "$STAFF" --key '{"userId":{"S":"yamada"}}' \
   --update-expression 'SET branch = :b' --expression-attribute-values '{":b":{"S":"osaka"}}'

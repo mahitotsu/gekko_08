@@ -56,7 +56,7 @@ export interface HopProps {
 
 /**
  * ホップ1つ分：Lambda関数（専用の実行role）、Function URL（AWS_IAM）、入口のresource policy、必要ならchain用role。
- * 呼び出し関係は`allowCaller`でつなぐ。
+ * 呼び出し関係は、`connectHops`が委任の範囲の定義を突き合わせてから、`allowCaller`でつなぐ。
  */
 export class Hop extends Construct {
   readonly hopName: string;

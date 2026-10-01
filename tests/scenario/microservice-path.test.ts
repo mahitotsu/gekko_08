@@ -137,7 +137,7 @@ describe('FR-5: ブラウザには認証情報を持たせない', () => {
     expect(r.body).toEqual({ username: USERS.tokyoManager, branch: 'tokyo', title: '支店長' });
   });
 
-  it('要約の応答にトークンもAWSの認証情報も含まない', async () => {
+  it('案件を開いた応答にトークンもAWSの認証情報も含まない', async () => {
     const r = await browserGet(`/api/cases/${T.tokyoCase}/summary`, manager);
     expect(r.text).not.toMatch(/eyJ[\w-]+\.eyJ/); // JWT
     expect(r.text).not.toMatch(/ASIA[A-Z0-9]{12,}/); // 一時的なアクセスキー

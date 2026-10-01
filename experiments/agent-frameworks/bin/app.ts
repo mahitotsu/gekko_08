@@ -1,6 +1,6 @@
 import * as cdk from 'aws-cdk-lib';
 import * as iam from 'aws-cdk-lib/aws-iam';
-import { BEDROCK_PROFILE, Gekko08AppStack } from '../../../infra/lib/app-stack';
+import { BEDROCK_PROFILE, Gekko08AppStack, PURPOSE } from '../../../infra/lib/app-stack';
 import { Hop } from '../../../infra/lib/constructs/hop';
 
 // 本体のスタック（Gekko08App）に、エージェントのフレームワークで作ったfraud-agentを2つ加えてデプロイする。
@@ -37,7 +37,6 @@ for (const agent of agents) {
     actions: ['bedrock:InvokeModel', 'bedrock:InvokeModelWithResponseStream'], resources: stack.bedrockResources,
   }));
   // 本体のfraud-agentと同じ委任の範囲
-  agent.provide({ 'agent:analyze': {} });
-  agent.allowCaller(stack.bff.asCaller(), [{ scope: 'agent:analyze' }]);
-  stack.fraudMcp.allowCaller(agent.asCaller(), [{ scope: 'mcp:tools' }]);
+  agent.allowCaller(stack.bff.asCaller(), { scope: 'agent:analyze', purposes: [PURPOSE.agentAnalysis] });
+  stack.fraudMcp.allowCaller(agent.asCaller(), { scope: 'mcp:tools', purposes: [PURPOSE.agentAnalysis] });
 }

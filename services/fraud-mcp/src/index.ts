@@ -8,7 +8,7 @@ const SUPPORTED_VERSIONS = ['2026-07-28', '2025-11-25', '2025-06-18'];
 const TOOLS = [
   {
     name: 'get_case',
-    description: '不正検知の案件を取得する。案件の概要、対象の口座ID、取引の一覧を返す。',
+    description: '凍結の見直しの案件を取得する。案件の概要、対象の口座ID、取引の一覧を返す。',
     inputSchema: { type: 'object', properties: { caseId: { type: 'string', description: '案件ID（例：C-1001）' } }, required: ['caseId'] },
   },
   {

@@ -13,6 +13,9 @@ Claude Agent SDKは、中継の通り道を変えて2つの構成で確かめた
 再現：この検証のあと、本体のfraud-agentをClaude Agent SDKで置き換え、bffのエージェントの実装を選ぶ機能を外した。
 この実験を動かすには、コミット`64c1cee`の時点の本体を使う。
 
+その後：デモの題材を口座の凍結解除に置き換え、目的による残高の制限をなくした（[デモのADR](../../docs/adr/20261001123029-demo-account-unfreeze.md)）。
+委任の範囲の宣言の形も変わった（[委任の範囲の定義のADR](../../docs/adr/20261001130745-delegation-definitions.md)）。下の残高の結果は、当時のデモでのものである。
+
 ## 構成
 
 | | Strands Agents 1.19.0（TypeScript） | Claude Agent SDK 0.3.286（TypeScript） |

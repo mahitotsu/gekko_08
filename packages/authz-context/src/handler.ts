@@ -57,7 +57,7 @@ function respond(status: number, body: unknown): LambdaFunctionURLResult {
 
 /**
  * ホップのLambdaハンドラーを作る。受信時の検証、次のホップの呼び出し、ログ、トレースを共通部品が行い、
- * 業務のコードには検証済みのsubjectだけを渡す。
+ * 業務のコードには、検証済みのsubject、呼び出し元、scopeだけを渡す（取引の目的は渡さない）。
  */
 export function createHopHandler(business: HopHandler, config: HopConfig = hopConfigFromEnv()) {
   initTelemetry(config.hop);
