@@ -59,17 +59,22 @@ mTLSで通信相手の身元を確かめ、Envoyサイドカーでアプリか�
 1. ユーザーはAmazon Cognitoにログインする。Pre Token Generationトリガーが、IDトークンに
    ユーザーの識別子（SourceIdentity）を載せる。
 2. サーバー側の入口（BFF）が、リクエストごとに、このIDトークンを`AssumeRoleWithWebIdentity`でAWSセッションに変換し、
-   取引の目的（画面での要約、エージェントによる分析など）をtransitive session tagとして刻む。SourceIdentityと
+   取引の目的（案件を開く、凍結を解除する、エージェントによる分析など）をtransitive session tagとして刻む。SourceIdentityと
    目的は、以降は誰にも書き換えられない。ブラウザには、Cognitoのトークンも、AWSの認証情報も渡さない。
 3. 各サービスの入口では、IAMが「どのサービスから来たか」を確かめる。受信側のresource policyで
    呼び出し元サービスの実行roleだけを許可し、それ以外は関数コードに届く前に403で拒否する。
 4. 呼び出し元は、刻まれたAuthorization Contextを載せた「次のサービス宛て」のJWTを
-   `sts:GetWebIdentityToken`でSTSに発行させ、リクエストに付ける。JWTの宛先とscope、およびJWTを発行できる取引の目的は、IAMが限る。
+   `sts:GetWebIdentityToken`でSTSに発行させ、リクエストに付ける。JWTの宛先とscope、および影響の大きい操作のscopeを発行できる取引の目的は、IAMが限る。
    受信側はSTSの署名を検証して、誰の代理か、何の取引か、何を許されているかを知る。途中のサービスやエージェントは、
    この値を変更も拡大もできない。
 5. 受信側は、検証した委任の範囲と、属性サービスから得たそのユーザーのアクセス権の両方が許すときだけ処理する。
    異動などの変更は、次のリクエストから効く。
 6. CloudTrailには、JWTの発行とセッションの受け渡しが元のユーザー（`sourceIdentity`）付きで記録される。
+
+`GetWebIdentityToken`（IAMのアウトバウンドIDフェデレーション）は、AWSのワークロードの身元を、OIDCに対応した外部のサービスに
+証明するための機能として提供されている。この参照実装は、これを**AWSの内側の、制約付きの委任**に使う。STSが署名し、宛先とscopeと
+取引の目的をIAMが限るJWTを、ホップ間で「このユーザーの代理として、この呼び出しを許されている」ことの証明にする。
+外部への身元の証明と同じ部品で、内側の委任も認可サーバーなしに組み立てられる、というのがこの参照実装の位置づけである。
 
 認可サーバーやSPIREのような常駐コンポーネントは持たない。認可の仕組みに使うのはCognito・STS・IAM・Lambda・CloudTrailで、
 デモの画面とデータにCloudFront・S3・DynamoDB・SSM Parameter Store、エージェントにAmazon Bedrock、
@@ -102,8 +107,8 @@ STSセッションへ刻み、以降は認可サーバーへ問い合わせな�
 JWTの署名はSTSが行うので、認可サーバーを運用する必要はない。
 
 Token Exchangeの「ホップごとに`scope`を絞る」性質は、認可サーバーの代わりにIAMのポリシーで再現する。
-呼び出し元と呼び出し先の組ごとに、JWTに付けられるscopeと、JWTを発行できる取引の目的をCDKで宣言すると、
-それ以外の値ではSTSがJWTを発行しない（[検証](../../experiments/scope-tags/RESULTS.md)）。
+APIを提供する側が提供するscopeを、使う側が付けたいscopeを宣言すると、合成のときに突き合わせてIAMのポリシーを生成し、
+それ以外の値ではSTSがJWTを発行しない。影響の大きい操作のscopeは、許した取引の目的のときだけ発行させられる（[検証](../../experiments/scope-tags/RESULTS.md)）。
 代わりに、絞り方は実行時の交換ではなく、デプロイ時の宣言で決まる。
 
 ### Q2. Amazon Bedrock AgentCore Identityを使えばよいのではないか。
