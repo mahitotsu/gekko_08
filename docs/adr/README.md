@@ -16,4 +16,4 @@
 | [トレースの収集先](20261001020115-telemetry-destination-cloudwatch.md) | トレースはOTLPでCloudWatch（Transaction Search）へ。メトリクスは出さず、ログから集計する | 有効（同日に改訂） |
 | [エージェントはClaude Agent SDK](20261001040729-fraud-agent-on-claude-agent-sdk.md) | Claude Codeを子プロセスで動かし、MCPは関数の中の中継から共通部品で呼ぶ | 有効 |
 | [トレースの送り方](20261001053646-telemetry-direct-export.md) | 関数の中のSDKが署名してX-RayのOTLPの受け口に直接送り、応答の前に送り切る | 有効（同日に改訂） |
-| [`SourceFunctionArn`の置き場所](20261001094443-source-function-arn-in-caller-identity-policy.md) | 呼び出し元の関数の限定は、受信側のresource policyではなく、呼び出し元の実行roleのidentity policyのDenyで行う | 提案 |
+| [`SourceFunctionArn`の置き場所](20261001094443-source-function-arn-in-caller-identity-policy.md) | 呼び出し元の関数の限定は、受信側のresource policyではなく、呼び出し元の実行roleのidentity policyのDenyで行う | 有効 |

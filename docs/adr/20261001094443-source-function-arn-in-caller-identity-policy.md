@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed (2026-10-01)。[多段伝播のADR](20260930064314-multi-hop-authorization-context-propagation.md)の決定1のうち、
+Accepted (2026-10-01)。[多段伝播のADR](20260930064314-multi-hop-authorization-context-propagation.md)の決定1のうち、
 `lambda:SourceFunctionArn`を受信側のresource policyで使う部分を置き換える。
 
 ## Context
