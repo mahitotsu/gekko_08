@@ -20,8 +20,8 @@ working backwardsの手法で、これから作る参照実装を「公開した
 
 （公開日未定）── マイクロサービスやAIエージェントが多段に呼び合うシステムでは、最初にログインした
 ユーザーの権限が、奥のサービスに届くまでのどこかで失われたり、すり替わったりしやすい。
-本日公開する参照実装は、「誰の代理で、どんな業務属性を持って処理しているか」
-（Authorization Context）をログイン時に一度だけ刻み、以降のすべてのホップで、AWSが署名した
+本日公開する参照実装は、「誰の代理で、何のための取引として処理しているか」
+（Authorization Context）を入口で一度だけ刻み、以降のすべてのホップで、AWSが署名した
 証明として確かめられるようにする構成を、`cdk deploy`ひとつで自分のAWSアカウントに再現できるようにする。
 
 **解決する課題**
@@ -31,7 +31,10 @@ working backwardsの手法で、これから作る参照実装を「公開した
 載せる（署名のない自己申告で、ネットワーク上の誰でも書き換えられる）、APIパラメータで対象ユーザーを
 指定する。どれも「手前のサービスが本当にそのユーザーの代理で呼んでいる」ことを保証できない。
 
-この問題はAIエージェントの登場で表に出てきた。エージェントは信頼できないデータに誘導されて、
+特殊詐欺にたとえると、「消防署の方から来ました」（どこから来たかの自己申告）や「息子さんの代理の者です」
+（誰の代理かの自己申告）を、確かめずに信じている状態である。
+
+この問題はAIエージェントの登場で表に出てきた。エージェントは、データに紛れ込んだ「本部の者です」のような口上に誘導されて、
 権限外のリクエストを作ってしまうことがある。守りをモデルの判断に頼るのではなく、構造的な
 認可境界に置く必要がある。つまり、**Requestはcallerが作ってよいが、Authorization Contextは
 callerに作らせない**。
@@ -48,19 +51,25 @@ mTLSで通信相手の身元を確かめ、Envoyサイドカーでアプリか�
 | 関心事 | 問い | この参照実装での担い手 |
 |---|---|---|
 | Workload Identity | 今、どのサービスと通信しているか | 各サービスのIAM role（SigV4署名で自動的に証明される） |
-| Authorization Context | 誰の代理で、どんな業務属性で処理しているか | STS SourceIdentity（書き換え不能）＋transitive session tags |
+| Authorization Context | 誰の代理で、何のための取引として、どこまで許されて処理しているか | STS SourceIdentity（書き換え不能）＋取引の目的（transitive session tag）＋ホップごとのscope（IAMが付けられる値を限る） |
+
+業務的なアクセス権（このユーザーはこのデータを扱ってよいか）はトークンに入れず、各サービスが判定のときに
+権威あるデータ源（人事データと権限マスタを読む属性サービス）から得る。
 
 1. ユーザーはAmazon Cognitoにログインする。Pre Token Generationトリガーが、IDトークンに
-   ユーザー識別子と業務属性（部署・テナントなど）を載せる。
-2. サーバー側の入口（BFF）が、このIDトークンを`AssumeRoleWithWebIdentity`で一度だけAWSセッションに変換する。
-   このときSourceIdentityとsession tagsが刻まれ、以降は誰にも書き換えられない。ブラウザには、
-   Cognitoのトークンも、AWSの認証情報も渡さない。
+   ユーザーの識別子（SourceIdentity）を載せる。
+2. サーバー側の入口（BFF）が、このIDトークンを`AssumeRoleWithWebIdentity`で一度だけAWSセッションに変換し、
+   取引の目的（画面での要約、エージェントによる分析など）をtransitive session tagとして刻む。SourceIdentityと
+   目的は、以降は誰にも書き換えられない。ブラウザには、Cognitoのトークンも、AWSの認証情報も渡さない。
 3. 各サービスの入口では、IAMが「どのサービスから来たか」を確かめる。受信側のresource policyで
    呼び出し元サービスの実行roleだけを許可し、それ以外は関数コードに届く前に403で拒否する。
 4. 呼び出し元は、刻まれたAuthorization Contextを載せた「次のサービス宛て」のJWTを
-   `sts:GetWebIdentityToken`でSTSに発行させ、リクエストに付ける。受信側はSTSの署名を検証して、
-   誰の代理か、どんな業務属性かを知る。途中のサービスやエージェントは、この値を書き換えられない。
-5. CloudTrailには、JWTの発行とセッションの受け渡しが元のユーザー（`sourceIdentity`）付きで記録される。
+   `sts:GetWebIdentityToken`でSTSに発行させ、リクエストに付ける。宛先・目的・scopeとして付けられる値はIAMが限る。
+   受信側はSTSの署名を検証して、誰の代理か、何の取引か、何を許されているかを知る。途中のサービスやエージェントは、
+   この値を変更も拡大もできない。
+5. 受信側は、検証した委任の範囲と、属性サービスから得たそのユーザーのアクセス権の両方が許すときだけ処理する。
+   異動などの変更は、次のリクエストから効く。
+6. CloudTrailには、JWTの発行とセッションの受け渡しが元のユーザー（`sourceIdentity`）付きで記録される。
 
 認可サーバーやSPIREのような常駐コンポーネントは持たない。使うのはCognito・STS・IAM・Lambda・
 CloudTrailだけで、費用はほぼ従量課金に収まる。
@@ -69,7 +78,7 @@ CloudTrailだけで、費用はほぼ従量課金に収まる。
 
 リポジトリをクローンして`cdk deploy`すると、ログインから多段のサービス呼び出しまで一式が
 立ち上がる。付属のシナリオでは、権限のあるユーザーの呼び出しは通り、権限のないユーザー・
-偽装したヘッダー・プロンプトインジェクションで誘導されたエージェントの呼び出しは、
+偽装したヘッダー・取引の目的に合わない呼び出し・「本部監査部の者です」と名乗る案件メモに誘導されたエージェントの呼び出しは、
 いずれも入口のIAMか、STSの署名を検証する受信側によって拒否されることを確かめられる。設計ガイドでは、各判断の根拠と、
 この構成が守らないものを説明している。
 
@@ -91,9 +100,10 @@ STSセッションへ刻み、以降は認可サーバーへ問い合わせな�
 「誰の代理か」と「自分宛てか」を、入口のIAMで「どのサービスから来たか」を確かめる。
 JWTの署名はSTSが行うので、認可サーバーを運用する必要はない。
 
-代わりに失うものもある。Token Exchangeの「ホップが進むほど`scope`を狭める」性質は、
-そのままの形では持っていない。権限はホップごとのIAM roleとpolicyの設計で絞る必要がある
-（[内部FAQ Q4](#q4-技術的に未解決なことは何か)）。
+Token Exchangeの「ホップごとに`scope`を絞る」性質は、認可サーバーの代わりにIAMのポリシーで再現する。
+呼び出し元と呼び出し先の組ごとに、JWTに付けられるscopeと、JWTを発行できる取引の目的をCDKで宣言すると、
+それ以外の値ではSTSがJWTを発行しない（[委任の範囲と業務的なアクセス権のADR](../adr/20260930150529-delegation-scope-and-entitlements.md)）。
+代わりに、絞り方は実行時の交換ではなく、デプロイ時の宣言で決まる。
 
 ### Q2. Amazon Bedrock AgentCore Identityを使えばよいのではないか。
 
@@ -110,8 +120,8 @@ JWTの署名はSTSが行うので、認可サーバーを運用する必要は�
 ### Q3. AWS公式ブログの「Propagate user authorization context in AI agents」と何が違うのか。
 
 2026年8月のそのブログは、Cognito＋Pre Token Generationのsession tags＋`AssumeRoleWithWebIdentity`＋
-`aws:PrincipalTag`という、この参照実装と同じ部品を使っている。部品の組み合わせが正しいことの
-公式な裏付けといえる。
+`aws:PrincipalTag`という、この参照実装に近い部品を使っている。部品の組み合わせが正しいことの
+公式な裏付けといえる。この参照実装は、業務的なアクセス権をsession tagsに入れず、トークンにはSourceIdentityと取引の目的だけを載せる。
 
 ただし、ブログが扱うのはエージェントがDynamoDBなどのAWSリソースを**直接**触る1ホップである。
 SourceIdentity、role chaining、自分たちのサービス同士の多段呼び出しは扱っていない。
@@ -148,15 +158,19 @@ SigV4では`SecretAccessKey`が通信路に乗らず、署名はリクエスト�
 
 エージェント → MCPサーバー → 内部サービス、という呼び出しは多段のマイクロサービス呼び出しの
 1ケースとして扱う。エージェントがどんなRequestを作っても、Authorization Context（SourceIdentityと
-session tags）はエージェント自身には変えられない。各サービスはSTSの署名で確かめた値だけを使うので、
-プロンプトインジェクションでエージェントの判断が揺らいでも、権限の境界は揺らがない。
+取引の目的）はエージェント自身には変えられない。各サービスはSTSの署名で確かめた値と、属性サービスから得たアクセス権だけを使うので、
+プロンプトインジェクションでエージェントの判断が揺らいでも、権限の境界は揺らがない。エージェントは「本部の者です」という口上に
+騙されることがあるが、口上はデータの中の文字列で、AWSが保証した値ではない。
+
+取引の目的によって、同じユーザーでも許す範囲を変えられる。付属のデモでは、支店長は画面からは口座の残高を見られるが、
+エージェントによる分析では、エージェントにも残高は返らない。
 
 ### Q7. Cognito以外のIdPやLambda以外のコンピュートでも使えるか。
 
 初版はCognito User PoolとLambdaを対象にする。
 
-- IdP：IAM OIDC providerとして登録でき、IDトークンに`https://aws.amazon.com/source_identity`と
-  `https://aws.amazon.com/tags`のクレームを載せられるIdPなら、原理的には置き換えられる。ただし初版では検証しない。
+- IdP：IAM OIDC providerとして登録でき、IDトークンに`https://aws.amazon.com/source_identity`の
+  クレームを載せられるIdPなら、原理的には置き換えられる。ただし初版では検証しない。
 - コンピュート：ECSなどはスコープ外。`GetWebIdentityToken`のECS固有クレームの有無などを
   改めて確かめる必要がある。
 - 呼び出し先：SigV4で認証できるエンドポイント（Lambda Function URL、API GatewayのIAM認可など）に限られる。
@@ -164,10 +178,32 @@ session tags）はエージェント自身には変えられない。各サー�
 ### Q8. この設計が守らないものは何か。
 
 - **権限の範囲内での誤った操作**：ユーザー本人に許されている操作を、エージェントが誤って実行することは防げない。
-- **業務属性の粒度が粗い場合の過剰な許可**：session tagsの設計が粗ければ、その粗さのまま許可される。
+  還付金詐欺で、本人がATMを操作させられるのと同じである。取引の目的とscopeで、操作できる範囲を狭めておくことはできる。
+- **委任の範囲やアクセス権の設計が粗い場合の過剰な許可**：目的・scope・権限マスタの設計が粗ければ、その粗さのまま許可される。
 - **権限の範囲内での大量アクセス**：レート制限や異常検知は別の仕組みで扱う。
-- **信頼の起点の侵害**：Cognito、Pre Token Generation Lambda、IAMの設定そのものが侵害された場合。
-  特にPre Token Generation Lambdaは、SourceIdentityとtagsの値を決める信頼の起点である。AWSはその値の正しさを検証しない。
+- **信頼の起点の侵害**：Cognito、Pre Token Generation Lambda、BFF、属性サービスのデータ、IAMの設定そのものが侵害された場合。
+  Pre Token Generation LambdaはSourceIdentityの値を、BFFは取引の目的を決める。AWSはその値の正しさを検証しない。
+  業務的なアクセス権は、属性サービスのデータがすべてを決める。
+
+### Q9. Amazon Verified PermissionsやCedar、AWS Verified Accessとどう関係するのか。
+
+競合ではなく、別の層を担うので組み合わせられる。この参照実装が担うのは、判定に使う値（誰の代理か、どのサービスから来たか、
+委任の範囲）を、多段の奥まで信頼できる形で届けることである。判定そのものと、社員が社内アプリに入る入口の制御は担わない。
+
+| サービス | 担う層 | この参照実装との関係 | 統合の形 | 位置づけ |
+|---|---|---|---|---|
+| Amazon Verified Permissions／Cedar | 判定（PDP）：この主体がこの操作をこのリソースに対してしてよいか | 協調。Cedarは入力が本物かどうかを保証しない。この参照実装が検証した値を入力にすれば、多段の奥のホップでも判定を任せられる | 各ホップのコードの判定をCedarのポリシーに移す。principalに`subject`、contextに`actor`・取引の目的・scope、エンティティに属性サービスのアクセス権を渡し、`IsAuthorized`に問い合わせるか、Cedarのライブラリで関数の中で評価する | 将来の拡張（[要件定義](../requirements.md)）。初版はコードで判定する |
+| Amazon Bedrock AgentCore Policy | エージェントのツール呼び出しの判定（Cedar） | 協調。AgentCore Gatewayの境界で判定する。この参照実装はその先、自分たちのサービス間の多段を扱う | AgentCoreでエージェントを動かす場合に併用する | 初版では扱わない |
+| AWS Verified Access | 社員が社内アプリに入る入口（VPNの代わり）。IdPとデバイスの状態をCedarのポリシーで判定し、署名したユーザーの主張（ES384のJWT、`x-amzn-ava-user-context`）をアプリに渡す | 協調。守るのは1ホップ目の手前までで、サービス間の多段は対象外 | 社員向けのシステムで、BFFの前段に置く。ただしBFFは、Cognitoのトークンを`AssumeRoleWithWebIdentity`に使う。Verified Accessが渡すJWTからSTSのセッションにつなぐ方法は未検証 | 初版では扱わない |
+
+Verified Permissionsは、CognitoやOIDCのトークンを渡すと、トークンの主張を主体や属性に対応づけて判定する。ただし判定するのは、
+渡されたトークンや値に基づく判断だけである。多段の奥のホップに、改ざんされていない「誰の代理か」を届けることは、
+利用者の側で作る必要がある（[内部FAQ Q2](#q2-既存のソリューションで足りているのではないか)の「中央の認可判定」）。
+この参照実装はその部分を埋めるので、Verified Permissionsを使うチームにとっても前提の部品になる。
+
+初版でCedarを使わないのは、主題（委任の範囲をAWSに強制させること）から見ると追加の要素になり、ポリシー言語と、
+Verified Permissionsなら判定ごとの費用が加わるためである（[委任の範囲と業務的なアクセス権のADR](../adr/20260930150529-delegation-scope-and-entitlements.md)）。
+どちらを選んでも、委任の範囲をIAMに強制させる部分は変わらない。
 
 ---
 
@@ -213,6 +249,8 @@ session tags）はエージェント自身には変えられない。各サー�
 | 中央の認可判定（PDP） | Amazon Verified Permissions、AgentCore Policy、OPA、Cerbos | 判定はするが、コンテキストの伝播は利用者任せ |
 | ワークロードIDのみ | SPIFFE/SPIRE、Istio ambient、Google Cloud Agent Identity | ユーザーのコンテキストは対象外 |
 
+中央の認可判定は、この参照実装と組み合わせられる（[外部FAQ Q9](#q9-amazon-verified-permissionsやcedaraws-verified-accessとどう関係するのか)）。
+
 AWS純正で考え方が最も近いのはIAM Identity CenterのTrusted Identity Propagationである。
 ただし対象は社員（workforce）ユーザーと、Redshift・S3 Access Grantsなどの対応サービスに限られ、
 Cognitoの顧客IDや自作のLambdaには使えない。
@@ -243,7 +281,7 @@ IETFのTransaction Tokensドラフト（-11、2026年7月）は、「信頼ド�
 実現性検証で確かめたのは1ホップ目までだった。受信側のLambdaは自分の実行roleで動くため、
 そのLambdaがさらに次を呼ぶとき、元のユーザーのSourceIdentityは自然には引き継がれない。
 偽装されずに引き継げるのはrole chainingだけだったため（[方式比較](../../experiments/multi-hop-propagation/RESULTS.md)）、
-aliceの属性を持つセッションを次のホップへ受け渡す。
+aliceの代理のセッションを次のホップへ受け渡す。
 
 受け渡すセッションで次のホップを直接呼ぶ形では、漏れると外から使え、侵害されたホップが次のホップを飛ばすこともできた。
 そこで、Token Exchangeと同じく「どのサービスから来たか（actor）」と「誰の代理か（subject）」を分けた。
@@ -255,16 +293,18 @@ aliceの属性を持つセッションを次のホップへ受け渡す。
 
 - **role chainingのセッションは最大1時間**：長時間のエージェント対話や非同期ジョブでは、どこかで
   再認証や再AssumeRoleが必要になる。
-- **session tagsの上限**：最大50個、値は単一値のみ。リソース単位の関係性のような細かい認可は
-  IAMだけでは表現しにくい。その部分はAmazon Verified PermissionsやCedarとの併用を検討する。
-- **ホップごとの`scope`の絞り込みがない**：Token Exchangeの「ホップが進むほど狭める」性質を、
-  roleとsession policyの設計でどう再現するか。
+- **業務的なアクセス権の判定は各ホップのコードにある**：アクセス権はトークンに入れず属性サービスから得るので、
+  session tagsの上限（最大50個、値は単一値のみ）には縛られない。代わりに、判定のたびに属性サービスへの問い合わせが加わり、
+  判定のロジックは各ホップに散らばる。ポリシーを1か所で管理したい場合のCedarとの統合は、将来の拡張とする（[外部FAQ Q9](#q9-amazon-verified-permissionsやcedaraws-verified-accessとどう関係するのか)）。
+- **ホップごとの`scope`の絞り込みは、デプロイ時の宣言で決まる**：IAMのポリシーで強制できることは確かめた
+  （[検証](../../experiments/scope-tags/RESULTS.md)）。Token Exchangeのように、実行時の状況に応じて絞ることはできない。
 - **STSへの呼び出しは毎ホップ残る**：認可サーバーへの往復はなくなるが、STSのスロットリングは見積もる必要がある。
 - **AWSへのロックイン**：AWS外との相互運用には、`GetWebIdentityToken`などでの変換が必要になる。
   受け手には「ユーザーは`sub`（roleのARN）ではなく`source_identity`で表される」と取り決めてもらう必要がある。
-- **ユーザーの属性による認可はアプリが行う**：入口のIAMはactorだけを確かめる。JWTの検証とABACを各サービスが
+- **業務的なアクセス権による認可はアプリが行う**：入口のIAMはactorだけを確かめる。JWTの検証を各サービスが
   正しく実装する必要があるので、参照実装で共通部品として提供する。
-- **レイテンシ**：1ホップあたり、ウォームで約0.5秒（chainとJWTの発行）増えた（最適化前の実測）。
+- **レイテンシ**：呼び出し先を持つホップ1つあたり、ウォームで約110ms（chainとJWTの発行）増える。画面からの1リクエストは、
+  取引の目的の刻印と属性サービスの呼び出しを含めて、中央値で約470msだった（[設計ガイド](../guide.md#6-レイテンシの実測)）。
 - **入口はBFF**：ブラウザには認証情報を持たせず、BFFがログインと`AssumeRoleWithWebIdentity`を扱う
   （[入口のADR](../adr/20260930083437-entry-via-bff.md)）。
 - **初版の範囲**：同期呼び出し・単一アカウント・AWS内部のホップ間に限る。非同期処理、複数アカウント、外部サービスへの
@@ -282,8 +322,7 @@ aliceの属性を持つセッションを次のホップへ受け渡す。
 
 - Lambda以外のコンピュート（ECSなど）。
 - Cognito以外のIdPの検証。
-- 業務RBACの持たせ方（ログイン時にsession tagsへ焼き込むか、各サービスがディレクトリを引き直すか）。
-  参照実装では1つの例を示すにとどめる。
+- 業務RBACの持たせ方の一般論。参照実装では、属性サービスが人事データと権限マスタを読む1つの例を示すにとどめる。
 - Pre Token Generation V1トリガー（V2を前提とする）。
 - 事業化、サポート、SLA。
 
@@ -317,6 +356,8 @@ aliceの属性を持つセッションを次のホップへ受け渡す。
 - [Implement on-behalf-of token exchange for multi-tenant agents with AgentCore Gateway](https://aws.amazon.com/blogs/machine-learning/implement-on-behalf-of-token-exchange-for-multi-tenant-agents-with-amazon-bedrock-agentcore-gateway/)（2026-07-13、検証済み）
 - [Propagate user authorization context in AI agents with Amazon Bedrock AgentCore](https://aws.amazon.com/blogs/security/propagate-user-authorization-context-in-ai-agents-with-amazon-bedrock-agentcore/)（2026-08-19、検証済み：1ホップ、SourceIdentityとrole chainingは扱っていない）
 - [AgentCore Policy GA](https://aws.amazon.com/about-aws/whats-new/2026/03/policy-amazon-bedrock-agentcore-generally-available/)（2026-03）
+- [Amazon Verified Permissions: identity sources](https://docs.aws.amazon.com/verifiedpermissions/latest/userguide/identity-sources.html)（2026-10-01に検証済み：CognitoとOIDCのトークンを主体と属性に対応づける）
+- [AWS Verified Access: user claims passing](https://docs.aws.amazon.com/verified-access/latest/ug/user-claims-passing.html)（2026-10-01に検証済み：`x-amzn-ava-user-context`にES384で署名したJWT）
 - [Well-Architected Agentic AI Lens AGENTSEC02-BP01](https://docs.aws.amazon.com/wellarchitected/latest/agentic-ai-lens/agentsec02-bp01.html)（検証済み）
 - [IAM Identity Center: Trusted identity propagation（identity-enhanced IAM role sessions）](https://docs.aws.amazon.com/singlesignon/latest/userguide/trustedidentitypropagation-identity-enhanced-iam-role-sessions.html)（検証済み）
 - [IAM outbound identity federation: token claims](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_providers_outbound_token_claims.html)（検証済み）

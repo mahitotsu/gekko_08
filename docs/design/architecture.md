@@ -309,7 +309,7 @@ bffのFunction URLを直接呼べうるが、セッションcookieがなけれ�
   yamadaは支店長なので残高も含まれる。他の支店の案件は、case-serviceが業務的なアクセス権で拒否する。
 - **エージェントの経路**：yamadaが案件の分析をfraud-agentに依頼する。
   - 目的が`agent-analysis`なので、account-serviceは、支店長のyamadaにも残高を返さない（委任の範囲による制限）。
-  - 案件の取引メモには、他の支店の口座（A-999）の参照を促す文言を混ぜておく。エージェントがそれに誘導されて口座A-999を要求しても、
+  - 案件の取引メモには、本部監査部を名乗って他の支店の口座（A-999）の参照を促す文言を混ぜておく。エージェントがそれに誘導されて口座A-999を要求しても、
     account-serviceが業務的なアクセス権で拒否する。
 - **異動**：人事データでyamadaの所属をosakaに変えると、次のリクエストから、tokyoの案件は拒否され、osakaの案件を開ける（FR-8）。
 - **エージェントとLLM**：fraud-agentはBedrockのConverse APIでClaude Haiku 4.5を呼び、ツールはfraud-mcpから取得する（MCPのtools/list・tools/call）。
