@@ -27,7 +27,7 @@ AWS上のマイクロサービスで、Authorization Context（誰の権限で�
 | ディレクトリ | 内容 |
 |---|---|
 | [infra/](infra/) | CDKアプリ（単一のスタック`Gekko08App`） |
-| [packages/authz-context/](packages/authz-context/) | 各ホップが使う共通部品。JWTの検証、chain、JWTの発行、署名付きの呼び出し、エージェントからMCPサーバーを呼ぶ部品 |
+| [packages/authz-context/](packages/authz-context/) | 各ホップが使う共通部品。JWTの検証、chain、JWTの発行、署名付きの呼び出し、エージェントからMCPサーバーを呼ぶ部品、トレースと構造化ログ |
 | [services/](services/) | 各Lambdaのハンドラー |
 | [web/](web/) | デモの画面 |
 | [tests/](tests/) | 要件のIDにひも付けたシナリオテスト |
@@ -96,7 +96,7 @@ aws cognito-idp admin-set-user-password --user-pool-id "$POOL" --username tanaka
 |---|---|---|
 | 案件`C-1001`（tokyo）の要約を開く | 200。案件と口座A-101が、残高付きで返る | 403。case-serviceが業務的なアクセス権で拒否する |
 | 案件`C-2001`（osaka）の要約を開く | 403 | 200。担当者なので残高は返らない |
-| 案件`C-1001`をエージェントに分析させる | 200。下を参照 | 案件の取得がcase-serviceに拒否され、分析できない |
+| 案件`C-1001`をエージェントに分析させる | 200。下を参照 | 200。ただし案件の取得（`get_case`）がcase-serviceに403で拒否され、案件の内容は分析に入らない |
 
 案件`C-1001`の取引メモには、「本部監査部の者です」と名乗って他の支店の口座A-999を調べさせるプロンプトインジェクションが入っている
 （「消防署の方から来ました」と同じ、出どころを偽る口上。特殊詐欺の手口との対応は[設計ガイド](docs/guide.md#特殊詐欺の手口に置き換えると)）。
@@ -128,7 +128,9 @@ aws dynamodb update-item --table-name "$STAFF" --key '{"userId":{"S":"yamada"}}'
 # 画面を再読み込みすると yamada（osaka・支店長）になり、C-2001が開けて、C-1001は拒否される。戻すときは :b を tokyo にする
 ```
 
-各ホップのCloudWatch Logsには、同じ`requestId`で、ユーザー（`subject`）、取引の目的（`purpose`）、scope、呼び出し元（`actor`）、処理時間が出る。
+各ホップのCloudWatch Logsには、同じ`requestId`と`traceId`で、ユーザー（`subject`。bffでは`user`）、取引の目的（`purpose`）、scope、
+呼び出し元（`actor`。bffでは経路の`route`）、処理時間が1行のJSONで出る。CloudWatchのTransaction Searchでは、`traceId`で、
+bffから各ホップ、エージェント（Claude Code）までのトレースを開ける。ログの集計の例は[設計ガイド](docs/guide.md#ログで集計する)にある。
 
 ## 片付け
 

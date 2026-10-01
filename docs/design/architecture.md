@@ -13,6 +13,9 @@
 - [BFFの公開とセッション](../adr/20260930093744-bff-hosting-and-session.md)
 - [実装言語はTypeScript](../adr/20260930093745-implementation-language-typescript.md)
 - [エージェントとMCPサーバーもLambdaのホップ](../adr/20260930093746-agent-and-mcp-on-lambda.md)
+- [エージェントはClaude Agent SDK、MCPは関数の中の中継から](../adr/20261001040729-fraud-agent-on-claude-agent-sdk.md)
+- [トレースの収集先はCloudWatch、メトリクスは出さない](../adr/20261001020115-telemetry-destination-cloudwatch.md)
+- [トレースは関数の中のSDKが署名して直接送る](../adr/20261001053646-telemetry-direct-export.md)
 
 ## 1. 要件との対応
 
@@ -23,15 +26,15 @@
 | FR-3（ユーザーと目的は入口で確定し、変更も拡大もできない） | SourceIdentityとtransitive session tagの`purpose`。刻める目的とscopeはIAMで限る。業務的なアクセス権は属性サービスが持つ（§3、§5、§6） |
 | FR-4（ホップを飛ばせない） | 入口は直前のホップの実行roleだけを許可（§4、§5） |
 | FR-5（パブリッククライアントに認証情報を持たせない） | BFFとセッションcookie（§3） |
-| FR-6（処理を元のユーザーとリクエストに結びつけて追跡） | リクエストIDの引き継ぎ、構造化ログ、`RoleSessionName`（§7） |
+| FR-6（処理を元のユーザーとリクエストに結びつけて追跡） | リクエストIDの引き継ぎ、構造化ログ、`RoleSessionName`、トレース（§7） |
 | FR-7（デモ） | 不正検知シナリオ（§8） |
 | FR-8（業務的なアクセス権の変更が次のリクエストから反映） | 属性サービスが判定のたびに人事データと権限マスタを読む（§6） |
-| NFR-1・NFR-2（サーバーレス、常駐コンポーネントなし） | Lambda、DynamoDB、Cognito、CloudFront、S3だけで構成（§2） |
+| NFR-1・NFR-2（サーバーレス、常駐コンポーネントなし） | Lambda、DynamoDB、Cognito、CloudFront、S3、SSM Parameter Store、Amazon Bedrock、CloudWatch（Logs、Transaction Search）だけで構成（§2、§7） |
 | NFR-3（レイテンシの実測と公開） | 各ホップの処理時間のログと、シナリオテストでの集計（§10） |
 | NFR-4（`cdk deploy`で再現） | 単一のCDKスタックと、デプロイ時の前提条件の確認（§9、§11） |
 | SR-1（受け渡す認証情報が漏れても呼べない） | chain用roleは次のchainとJWTの発行だけ。入口は実行roleだけを許可（§4、§5） |
 | SR-2（他の主体が許可されていないホップを呼べない） | 入口のresource policyのDeny（§5） |
-| SR-3（認証情報をログ・LLMに入れない） | 共通部品が認証情報をヘッダーだけで扱い、ログに出さない。エージェントはヘッダーをモデルに渡さない（§6、§8） |
+| SR-3（認証情報をログ・トレース・LLMに入れない） | 共通部品が認証情報をヘッダーだけで扱い、ログにもスパンにも出さない。エージェントの子プロセスには認証情報を渡さない（§6、§7、§8） |
 
 ## 2. 全体構成
 
@@ -86,7 +89,7 @@ IDトークンには、Pre Token Generation V2トリガーが`https://aws.amazon
 
 ### リクエストごとの処理
 
-1. cookieのセッションIDでセッションを読む。IDトークンの期限が切れていれば、リフレッシュトークンで更新する。
+1. cookieのセッションIDでセッションを読む。IDトークンの期限の60秒前を過ぎていれば、リフレッシュトークンで更新する。更新に失敗したら、セッションを消す。
 2. リクエストIDを発行する（§7）。
 3. IDトークンで`AssumeRoleWithWebIdentity`を呼び、federated roleのセッションを得る（`RoleSessionName`＝リクエストID）。
    このセッションにSourceIdentityが刻まれる。
@@ -259,13 +262,16 @@ bffのFunction URLを直接呼べうるが、セッションcookieがなけれ�
 
 **受信時**
 
-1. `x-authz-context`のJWTを検証する。`iss`＝自アカウントのSTS発行者、`aud`＝自分、`exp`、署名（JWKSはメモリにキャッシュし、未知の`kid`のときだけ取り直す）。
-2. `sub`が「入口のIAMが確かめた呼び出し元の実行role」に対応するchain用roleであることを確かめる。対応表（実行role名 → 呼び出し元のホップ名と
+1. `x-request-id`があり、形式（`^[\w+=,.@-]{2,64}$`。`RoleSessionName`に使えるもの）に合うことを確かめる。合わなければ400を返す。
+2. 入口のIAMが確かめた呼び出し元の実行roleが、対応表にあることを確かめる。なければ403を返す。
+3. `x-authz-context`のJWTを検証する。署名はES384だけを受け付け、`iss`＝自アカウントのSTS発行者、`aud`＝自分、`exp`・`iat`・`sub`があることを確かめる
+   （JWKSはメモリにキャッシュし、10分ごとか、未知の`kid`のときに取り直す。未知の`kid`による取り直しは30秒に1回まで）。
+4. `sub`が「入口のIAMが確かめた呼び出し元の実行role」に対応するchain用roleであることを確かめる。対応表（実行role名 → 呼び出し元のホップ名と
    chain用roleのARN）はデプロイ時に環境変数で渡す。
-3. `https://sts.amazonaws.com/`名前空間から、subject（`source_identity`）、取引の目的（`principal_tags.purpose`）、scope（`request_tags.scope`）を
+5. `https://sts.amazonaws.com/`名前空間から、subject（`source_identity`）、取引の目的（`principal_tags.purpose`）、scope（`request_tags.scope`）を
    取り出す。どれかが欠けていれば拒否する（scopeのないJWTは何も許さない）。
-4. subject、呼び出し元のホップ名（actor）、目的、scopeを業務のコードに渡す。ヘッダーや引数に含まれるユーザー情報は使わない。
-5. 検証に失敗したら401を返す。
+6. subject、呼び出し元のホップ名（actor）、目的、scopeを業務のコードに渡す。ヘッダーや引数に含まれるユーザー情報は使わない。
+7. 3〜5の検証に失敗したら401を返す。業務のコードが例外を投げたら500を返す。
 
 **送信時**：§4の手順を行う。呼び出し先ごとのscopeは設定から付け、業務のコードは選ばない。STSクライアントとJWKSはLambdaの実行環境ごとに使い回す。
 
@@ -275,7 +281,8 @@ bffのFunction URLを直接呼べうるが、セッションcookieがなけれ�
 - `startMcpRelay`（中継型）：`127.0.0.1`で受けたMCPのメッセージを、送信時の手順でそのまま呼び出し先へ転送する。MCPクライアントを差し替えられず、
   固定のヘッダーしか付けられないフレームワーク（Claude Agent SDK）に使う。認可の判断はせず、MCPのプロトコルも解釈しない
   （`initialize`などにも呼び出し先が応える）。受け取った`traceparent`を転送するときのコンテキストにし、自分のスパンは作らない。
-- どちらも、メッセージとその応答を業務のコードに知らせる（fraud-agentはツールの呼び出しの記録に使う）。
+- どちらも、呼び出し先が受け付けたメッセージ（200か202）とその応答を業務のコードに知らせる（fraud-agentはツールの呼び出しの記録に使う）。
+  呼び出し先の入口で拒否された（401や403）呼び出しは知らせない。中継は、POST以外には405を、転送に失敗したら502のJSON-RPCのエラーを返す。
 
 **トレース**：受信と送信のスパンを作り、`traceparent`を引き継ぐ。応答を返す前に送り切る（§7）。
 
@@ -317,9 +324,9 @@ OpenTelemetryで出し、CloudWatchのTransaction Searchに集める（[収集�
 
 | スパン | 作る場所 | 種類 | 主な属性 |
 |---|---|---|---|
-| `bff` | bff | SERVER | `authz.route`、`authz.purpose`、`authz.request_id`、`enduser.id`、`http.response.status_code` |
+| `bff` | bff | SERVER | `authz.hop`、`authz.route`、`authz.purpose`、`authz.request_id`、`enduser.id`、`http.response.status_code` |
 | `assume (sts:AssumeRoleWithWebIdentity)`、`stamp purpose (sts:AssumeRole)` | bff | INTERNAL | — |
-| `<ホップ名>` | 共通部品の受信 | SERVER | `authz.inbound`（`accepted`／`rejected`）、`authz.reject_reason`、`authz.actor`、`authz.purpose`、`authz.scope`、`enduser.id`、`authz.request_id`、`http.response.status_code` |
+| `<ホップ名>` | 共通部品の受信 | SERVER | `authz.hop`、`authz.inbound`（`accepted`／`rejected`）、`authz.reject_reason`、`authz.actor`、`authz.purpose`、`authz.scope`、`enduser.id`、`authz.request_id`、`http.response.status_code` |
 | `call <呼び出し先>` | 共通部品の送信 | CLIENT | `authz.target`、`authz.request_id`、`http.response.status_code` |
 | `chain (sts:AssumeRole)`、`mint JWT (sts:GetWebIdentityToken)` | 共通部品の送信 | INTERNAL | — |
 | `<サービス>.<操作>`（`DynamoDB.GetItem`、`STS.AssumeRole`など） | 共通部品の`traceAwsClient`を付けたAWS SDKのクライアント | CLIENT | `rpc.system`（`aws-api`）、`rpc.service`、`rpc.method`、`aws.dynamodb.table_names`、`aws.request_id`、`http.response.status_code` |
@@ -338,6 +345,7 @@ OpenTelemetryで出し、CloudWatchのTransaction Searchに集める（[収集�
   接続の処理（`initialize`、`tools/list`）はClaude Codeのスパンの外で行われるので、fraud-agentの受信のスパンの子になる。
 - **ログ**：構造化ログに、その時点のスパンのトレースID（`traceId`）を入れる。
 - **メトリクスは出さない**：認可の判定の件数や処理時間は、構造化ログ（`handled`と`rejected`）からLogs Insightsで集計する（[収集先のADR](../adr/20261001020115-telemetry-destination-cloudwatch.md)）。
+- **量**：2026-10-01の実測では、1リクエストあたり、案件の要約で32スパン・約27KB、エージェントの分析（ツールの呼び出し3回）で56スパン・約47KB。
 - **入れないもの**：認証情報（JWT、受け渡すセッション）、リクエストとレスポンスの本文、プロンプト、ツールの入出力。業務のコードは属性を加えない。
 - **有効化**：CDKが、bffと各ホップに環境変数`AUTHZ_TELEMETRY=cloudwatch`と、`xray:PutTraceSegments`の権限を付ける。環境変数がなければ、
   OTelのAPIは何もしない（単体テストなど）。
@@ -362,20 +370,21 @@ OpenTelemetryで出し、CloudWatchのTransaction Searchに集める（[収集�
     エージェントのループを回し、Bedrockを呼び、中継をMCPサーバーとして呼ぶ。
   - **中継**：分析のたびに、親が`startMcpRelay`（§6）で`127.0.0.1`の中継を立て、Claude Codeには`fraud`という名前のHTTPのMCPサーバーとして渡す。
     中継は、受けたメッセージを送信時の手順（§4）でfraud-mcpへ転送する。分析が終わったら閉じる。
-  - **子プロセスに渡すもの**：環境変数は引き継がず、モデル用のroleの認証情報（§5）、リージョン、書き込める場所（`/tmp`）、Bedrockを使う設定だけを渡す。
-    受け取ったJWT、受け渡されたセッション、chainのセッション、実行roleの認証情報は渡さない。モデル用のroleの認証情報は実行環境ごとに使い回し、
-    期限の10分前に引き受け直す。
+  - **子プロセスに渡すもの**：環境変数は引き継がず、次のものだけを渡す。モデル用のroleの認証情報（§5）、リージョン、`PATH`と`LANG`、
+    書き込める場所（`HOME`と`CLAUDE_CONFIG_DIR`を`/tmp`の下に）、Bedrockを使う設定とモデル、必須でない通信と自動更新を止める設定、
+    クライアントの名前、トレースの設定（§7）。受け取ったJWT、受け渡されたセッション、chainのセッション、実行roleの認証情報は渡さない。
+    モデル用のroleは、セッション名を`fraud-agent-model`、期間を3600秒として引き受け、実行環境ごとに使い回し、期限の10分前に引き受け直す。
   - **子プロセスの制限**：組み込みのツール（Bash、Readなど）は無効にし、中継のツール（`mcp__fraud__*`）だけを許可なしで使わせる（それ以外は拒否）。
     設定ファイルを読まず、セッションを保存しない。Anthropicへの必須でない通信と自動更新を止める。
   - **モデル**：Claude Haiku 4.5を、日本国内の推論プロファイル（`jp.anthropic.claude-haiku-4-5-20251001-v1:0`、東京・大阪）で呼ぶ。
     補助的な処理に使う小さいモデルも同じにする。1回の分析のターンは最大8回。
   - **応答**：分析の結果と、ツールの呼び出しの記録（ツール名、引数、呼び出し先のHTTPステータス）を返す。記録は中継が知らせるメッセージから取る。
-    エージェントが最後まで終わらなかったら502を返す。
+    エージェントが最後まで終わらなかったら502を返す。Claude Codeが異常終了したら、標準エラー出力の末尾（2,000文字）をログに出し、500を返す。
   - **関数**：メモリは1024MB。成果物（展開後）は約246MBで、そのうち実行ファイルが約241MB。合成のときに大きさを確かめ、255,000,000バイトを
-    超えたら失敗させる（zipの上限は250MiB）。超えたら、コンテナイメージに切り替える。
+    超えたら失敗させる（関数とレイヤーを合わせた展開後の上限は250MiB）。超えたら、コンテナイメージに切り替える。
 - **MCPの実装**：fraud-mcpはStreamable HTTPのステートレスなサーバーで、SSEを使わずJSONで応答する。ツールは`get_case`（case-service）と
   `get_account`（account-service）の2つで、呼び出し先のホップの結果（HTTPステータスを含む）をそのまま返す。認可の判断はしない。
-  プロトコルの版は`2026-07-28`・`2025-11-25`・`2025-06-18`に応じる。
+  プロトコルの版は`2026-07-28`・`2025-11-25`・`2025-06-18`に応じる。`ping`にも応え、通知には本文なしの202を返す。
 - **タイムアウト**：CloudFrontのオリジンの応答待ちは既定の上限の60秒で、bffのLambdaも60秒、fraud-agentは55秒とする。
   他のホップは30秒。
 - **MCPの認可についての注記**：MCPの仕様では認可は任意で、HTTPではOAuthに従うことが推奨される。この参照実装のfraud-mcpはOAuthではなく、
@@ -383,15 +392,20 @@ OpenTelemetryで出し、CloudWatchのTransaction Searchに集める（[収集�
 
 ## 9. CDKの構成
 
-npmのワークスペースで次のように分ける。
+npmのワークスペース（`infra`、`packages/*`、`services/*`、`tests`）と、静的なフロントエンドで次のように分ける。
 
 | ディレクトリ | 内容 |
 |---|---|
 | `infra/` | CDKアプリ（単一のスタック`Gekko08App`） |
-| `packages/authz-context/` | 受信側・送信側の共通部品（§6） |
+| `packages/authz-context/` | 受信側・送信側の共通部品、MCPの部品、トレース（§6、§7） |
 | `services/<名前>/` | 各Lambdaのハンドラー（bff、case-service、account-service、entitlement-service、fraud-agent、fraud-mcp、pretoken） |
-| `web/` | 静的なフロントエンド |
+| `web/` | 静的なフロントエンド（ワークスペースではない） |
 | `tests/` | シナリオテスト（§10） |
+| `experiments/` | 実機の検証（検証記録とその構成。本体からは参照しない） |
+
+Lambdaの関数の既定値（`NodeFunction`）は、Node.js 24、arm64、メモリ512MB、タイムアウト30秒、ログの保持1週間、ログの形式はJSON（アプリのログのレベルはINFO）、
+esbuildでESMの1ファイルにまとめ、AWS SDKも同梱し、ソースマップを付ける。`Gekko08AppStack`は、検証で構成を足せるように、`issuer`・`bff`・`fraudMcp`・
+`bedrockResources`を公開する。
 
 主なConstruct：
 
@@ -417,7 +431,7 @@ Cognito User Poolのカスタム属性`custom:branch`は使わない。User Pool
 
 | 要件 | テストの内容 |
 |---|---|
-| FR-1 | 各ホップが正しいsubject・actor・目的・scopeを受け取る。宛先の違うJWT、改ざんしたJWT、JWTなし、期限切れのJWT、呼び出し元と`sub`の合わないJWT、目的やscopeのないJWTは401。不正なJWTは入口を通して送れないため、STSが実際に発行したJWTを改変し、ホップと同じ共通部品の検証に発行者の実際のJWKSで通して確かめる |
+| FR-1 | 各ホップが正しいsubject・actor・目的・scopeを受け取る。宛先の違うJWT、改ざんしたJWT、JWTなし、期限切れのJWT、呼び出し元と`sub`の合わないJWT、scopeのないJWTは401（目的のないJWTは共通部品の単体テストで確かめる）。不正なJWTは入口を通して送れないため、STSが実際に発行したJWTを改変し、ホップと同じ共通部品の検証に発行者の実際のJWKSで通して確かめる |
 | FR-2 | 業務的なアクセス権のない案件や口座は拒否される。自己申告のヘッダーや引数で別のユーザーを名乗っても、結果が変わらない |
 | FR-3 | chainの途中でSourceIdentityや目的を変えられない。定めていない目的を刻めない。新しいtagのキーを加えられない。目的に合わない下流のJWTや、宣言していないscopeを発行できない |
 | FR-4 | 途中のホップを飛ばした呼び出しが403 |
@@ -462,7 +476,7 @@ NFR-3のテストは、集計結果を`tests/out-latency.json`（git管理外）
 
 | クォータ（既定値→上限） | 効く場所 | 上限の目安 |
 |---|---|---|
-| STSのリクエスト数：600件/秒（アカウント・リージョンごと、`AssumeRole`などで共有。引き上げはサポートに依頼） | bffの目的の刻印と、各ホップのchain | エージェントの経路では1リクエストで`AssumeRole`が5〜6回。アカウント全体でおよそ毎秒100〜120リクエスト |
+| STSのリクエスト数：600件/秒（アカウント・リージョンごと、`AssumeRole`などで共有。引き上げはサポートに依頼） | bffの目的の刻印と、各ホップのchain | マイクロサービスの経路では1リクエストで`AssumeRole`の系統（`AssumeRoleWithWebIdentity`を含む）が4回で、アカウント全体でおよそ毎秒150リクエスト。エージェントの経路では「3＋2×ツールの呼び出し回数」（bffで2回、fraud-agentのchainで1回、`tools/call`ごとにfraud-mcpと呼び出し先のchainで2回）で、ツールの呼び出しが3回なら9回、およそ毎秒65リクエスト |
 | CloudFormationのリソース数：1スタック500個 | 1ホップで約8〜10個 | 単一スタックで40〜50ホップ前後 |
 | Lambdaの環境変数：合計4KB | 受信側の`sub`の対応表 | 呼び出し元が十数個を超えるホップ |
 | roleの信頼ポリシー：2,048文字→8,192文字 | chain用roleの信頼ポリシーに呼び出し元を列挙 | 呼び出し元10個前後（引き上げて40個前後） |

@@ -130,11 +130,11 @@ export const handler = createHopHandler(async (body, { call, requestId }) => {
         if (m.subtype === 'success') analysis = m.result;
       }
     }
+    // Claude Codeは終了するときに残りのスパンを送る。届くのを待つ（転送の完了は、応答の前に共通部品が待つ）
+    await otlp?.settle();
   } catch (e) {
     log('error', 'agent failed', { hop: 'fraud-agent', requestId, error: (e as Error).message, stderr: stderr.join('').slice(-2000) });
     throw e;
-    // Claude Codeは終了するときに残りのスパンを送る。届くのを待つ（転送の完了は、応答の前に共通部品が待つ）
-    await otlp?.settle();
   } finally {
     await relay.close();
     await otlp?.close();

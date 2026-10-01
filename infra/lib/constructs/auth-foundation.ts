@@ -13,7 +13,7 @@ export interface AuthFoundationProps {
 
 /**
  * Cognito User Pool（Essentials、マネージドログイン）、Pre Token Generation V2、IAM OIDC provider、bffのfederated role。
- * ユーザー識別子と業務属性は、ログイン時にIDトークンへ一度だけ刻む（IdPのADR）。
+ * IDトークンにはユーザー識別子（SourceIdentity）だけを刻む。業務的なアクセス権はトークンに入れない（委任の範囲と業務的なアクセス権のADR）。
  */
 export class AuthFoundation extends Construct {
   readonly userPool: cognito.UserPool;

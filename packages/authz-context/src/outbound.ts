@@ -39,7 +39,7 @@ export function decodeSession(header: string | undefined): SessionCredentials | 
 export type Timings = Record<string, number>;
 
 export interface CallerOptions {
-  /** 受け取ったchainのセッション（bffではfederated roleのセッション） */
+  /** 受け取ったchainのセッション（bffでは目的用のroleのセッション） */
   session: SessionCredentials;
   /** 自分のchain用role。bffのようにsessionをそのまま使う場合は省く */
   chainRoleArn?: string;

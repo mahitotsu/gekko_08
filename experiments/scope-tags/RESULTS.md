@@ -11,7 +11,7 @@ IAM roleだけのスタックに対して実行した。
 ## 構成
 
 - **E0**：`GetWebIdentityToken`を、宛先`ForAllValues:StringEquals`（＋`Null`）、`sts:SigningAlgorithm`＝ES384、`sts:DurationSeconds`≦300で許すrole。
-- **E1（形A：ホップごとのscope）**：`GetWebIdentityToken`は宛先`ForAnyValue:StringEquals`（参照実装の本体と同じ書き方）で許す。
+- **E1（形A：ホップごとのscope）**：`GetWebIdentityToken`は宛先`ForAnyValue:StringEquals`（当時の参照実装の本体と同じ書き方）で許す。
   `sts:TagGetWebIdentityToken`は、宛先ごとに文を分け、宛先を`ForAllValues`で1つに限り、tagのキーを`scope`だけ、値を1つに限って許す
   （case-service宛ては`case:summary`、account-service宛ては`account:read`）。
 - **E2（形B：取引の目的）**：User（ログイン時のfederated roleのセッションに相当。SourceIdentity＝yamada、transitive tag `branch`＝tokyo）→
@@ -28,7 +28,7 @@ IAM roleだけのスタックに対して実行した。
   複数の宛先へのtag付けは拒否された。
 - 形B：取引の目的をtransitive session tagとして刻め、下流のすべてのJWTの`principal_tags`に入り、途中で上書きできなかった。
   目的によって、下流が発行できるJWTの宛先をIAMで変えられた。
-- **参照実装の本体の宛先の条件に穴があった。** `ForAnyValue:StringEquals`では、許した宛先に外部の宛先を混ぜたJWTを発行できた。
+- **当時の参照実装の本体の宛先の条件に穴があった**（本体は`ForAllValues`＋`Null`に直した）。 `ForAnyValue:StringEquals`では、許した宛先に外部の宛先を混ぜたJWTを発行できた。
   `ForAllValues:StringEquals`と`Null`の組み合わせなら拒否できた。
 
 ## 観測した事実

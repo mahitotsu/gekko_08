@@ -11,3 +11,6 @@
   - 緊急または重要で、丁寧に議論したうえで積んでおくべきと判断したとき
 
 ## 作業の予定
+
+- OSSとして公開する前に、Claude Agent SDKとClaude Codeの利用条件を確かめる（参照実装は実行ファイルを配らず、合成のときにnpmのレジストリから取得する。
+  [Claude Agent SDKのADR](docs/adr/20261001040729-fraud-agent-on-claude-agent-sdk.md)の「引き受けること」）

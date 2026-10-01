@@ -13,7 +13,7 @@ export class AuthzError extends Error {
 export interface CallerEntry {
   /** 呼び出し元のホップ名 */
   hop: string;
-  /** JWTの`sub`として期待する、呼び出し元のchain用role（bffではfederated role）のARN */
+  /** JWTの`sub`として期待する、呼び出し元のchain用role（bffでは目的用のrole）のARN */
   sub: string;
 }
 
