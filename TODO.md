@@ -11,3 +11,41 @@
   - 緊急または重要で、丁寧に議論したうえで積んでおくべきと判断したとき
 
 ## 作業の予定
+
+外部のレビュー（2026-10-01）を受けた作業。上から順に進める。
+
+1. **【最優先】`lambda:SourceFunctionArn`を、文書どおりの使い方に移す（SR-2）**。公式の文書は「resource-based policyでは使えない」と明記している
+   （[Using source function ARN](https://docs.aws.amazon.com/lambda/latest/dg/permissions-source-function-arn.html)）。今の`Hop`は、受信側のresource policyの
+   `DenyOtherFunctions`でこのキーを使っており、実機で効いたのは文書にない挙動。
+   1. 検証（`experiments/`）
+      - 今もresource policyの条件として効くか。
+      - 呼び出し元の実行roleのidentity policyに、「呼び出し元の関数でなければDeny」（`ArnNotEquals`）を置く形で、同じ実行roleを持つ別の関数からの
+        呼び出しが拒否されるか。同じアカウントではresource policyの許可だけで呼べるので、identity policyに書くのは許可の条件ではなくDenyにする。
+      - 実行環境の外に持ち出した実行roleの認証情報（キーが付かない）で呼んだときに、そのDenyで拒否されるか。拒否されれば、設計ガイド§5の
+        「持ち出された認証情報」の未確認の点も片付く。
+      - これまでの攻撃（同じroleの別の関数、ホップの飛ばし、漏れたchainのセッション、広い権限の別の主体、宛先違い、改ざん、自己申告）が、
+        すべて拒否されたままであること。
+   2. ADR：Function URLとIAMのADR、多段伝播のADRの該当部分を改訂する。
+   3. 実装：`Hop.allowCaller()`が、呼び出し元の実行roleにDenyを生成し、受信側の`DenyOtherFunctions`を外す。
+   4. テスト：同じ実行roleを持つ別の関数からの呼び出しを、シナリオテスト（SR-2）に入れるかを決める（テスト用の関数がスタックに要る）。
+   5. 文書：設計書§5、設計ガイド§3・§5。
+2. **`Hop`のセキュリティの回帰テスト**。CDKのテンプレートに対する単体テストで、入口のDeny（呼び出し元の限定、1のDeny）、宛先の
+   `ForAllValues`＋`Null`、scopeの`aws:TagKeys`と`aws:RequestTag/scope`、目的の条件、chain用roleの信頼で許すtagのキー、`sub`の対応表を確かめる。
+   条件をわざと壊すと（`ForAnyValue`にする、Denyを消す、`TagKeys`の制限を外す、`sub`の照合を外すなど）テストが失敗することも確かめる。
+3. **STSの上限の記述を直す**（設計書§11、設計ガイド§6）。毎秒600件を共有するのは`AssumeRole`などで、`AssumeRoleWithWebIdentity`と
+   `GetWebIdentityToken`は一覧にない（[IAM and AWS STS quotas](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_iam-quotas.html)）。
+   経路ごとの回数を`AssumeRole`と`GetWebIdentityToken`に分けて数え直す。`GetWebIdentityToken`の上限は、Service Quotasで確かめ、なければ負荷試験で目安を得るかを決める。
+4. **守れるもの・守れないものを一覧にする**（設計ガイド§5を組み直す）。侵害された要素（ホップ、BFF、属性サービス、エージェントの子プロセス、
+   共通部品と同じプロセスのアプリ、実行環境の外に持ち出した認証情報、アカウントの管理者）ごとに、できることとできないことを並べる。
+   エージェントの子プロセスは「認証情報の隔離ではなく、能力の隔離（任意のコードを実行させない）」と明記する。Function URLは公開の経路から
+   到達できるが、SigV4の署名なしでは呼べないことも書く。READMEの冒頭近くに要約を置き、設計ガイドへリンクする。
+5. **価値と代償の伝え方を整える**。
+   - PRFAQ：IAMのアウトバウンドIDフェデレーションを、外部への身元の証明だけでなく、AWSの内側の制約付き委任に使う、という位置づけを書く。
+   - 設計ガイド§2：要素の対応（SourceIdentity＝subject、実行role＝actor、JWTの`aud`＝受信側、transitive tag＝取引の目的、JWTの`request_tags`＝scope、
+     属性サービス＝今の業務的なアクセス権）を1つの表にする。
+   - 設計ガイド§6：運用は軽いが、レイテンシは軽くない（呼び出し先を持つホップごとに約150ms）というトレードオフを書く。
+6. **監査の手順を書く**（設計ガイド§6）。CloudTrailのイベント（`RoleSessionName`＝リクエストID、`sourceIdentity`）、ログ、トレースを突き合わせて、
+   誰の代理の、どの取引の、どの呼び出しだったかを追う照会の例。
+7. **要件の「将来の拡張」に加えるかを決める**（プロジェクトオーナーの判断）。
+   - 子プロセスを使わない高保証のエージェント構成（親のプロセスがモデルを直接呼ぶ直接型。子プロセスと同じOSのユーザーで動く境界を避ける）。
+   - BFFの高保証の構成（BFFが侵害されても、定めた目的のどれででも呼べる、という範囲を狭める。目的ごとに入口を分けるなど）。
