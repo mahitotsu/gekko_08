@@ -544,7 +544,7 @@ Resource, Condition）の組に分けて比べるので、文のまとめ方が�
 
 | クォータ（既定値→上限） | 効く場所 | 上限の目安 |
 |---|---|---|
-| STSのリクエスト数：600件/秒（アカウント・リージョンごと、`AssumeRole`などで共有。引き上げはサポートに依頼） | bffの目的の刻印と、各ホップのchain | マイクロサービスの経路（案件を開く、凍結を解除する）では1リクエストで`AssumeRole`の系統（`AssumeRoleWithWebIdentity`を含む）が4回で、アカウント全体でおよそ毎秒150リクエスト。エージェントの経路では「3＋2×ツールの呼び出し回数」（bffで2回、fraud-agentのchainで1回、`tools/call`ごとにfraud-mcpと呼び出し先のchainで2回）で、ツールの呼び出しが3回なら9回、およそ毎秒65リクエスト |
+| STSのリクエスト数：600件/秒（アカウント・リージョンごと。`AssumeRole`、`GetCallerIdentity`など6つの操作で共有。引き上げはサポートに依頼） | bffの目的の刻印と、各ホップのchain（`AssumeRole`） | 案件を開く取引と凍結を解除する取引では1リクエストで`AssumeRole`が3回（bffの目的の刻印、case-serviceとaccount-serviceのchain）で、アカウント全体でおよそ毎秒200リクエスト。エージェントの経路では「2＋2×ツールの呼び出し回数」（bffの目的の刻印、fraud-agentのchain、`tools/call`ごとにfraud-mcpと呼び出し先のchain）で、ツールの呼び出しが3回なら8回、およそ毎秒75リクエスト |
 | CloudFormationのリソース数：1スタック500個 | 1ホップで約8〜10個 | 単一スタックで40〜50ホップ前後 |
 | Lambdaの環境変数：合計4KB | 受信側の`sub`の対応表 | 呼び出し元が十数個を超えるホップ |
 | roleの信頼ポリシー：2,048文字→8,192文字 | chain用roleの信頼ポリシーに呼び出し元を列挙 | 呼び出し元10個前後（引き上げて40個前後） |
@@ -552,4 +552,14 @@ Resource, Condition）の組に分けて比べるので、文のまとめ方が�
 | roleのインラインポリシー：合計10,240文字 | chain用roleの権限（呼び出し先ごとに「2＋目的の制限があるscopeの数」の文） | 呼び出し先が十数個 |
 | Lambdaのresource policy：20KB | 入口のresource policy | 呼び出し元50個前後 |
 
-`GetWebIdentityToken`のリクエスト数のクォータは文書に記載がない。
+`AssumeRoleWithWebIdentity`と`GetWebIdentityToken`は、600件/秒を共有する操作の一覧に入っていない。両者のリクエスト数のクォータは、文書にもService Quotasにも
+記載がない（2026-10-01に確認。Service QuotasにはSTSの項目がない）。参照実装での1リクエストあたりの回数は次のとおり（2026-10-01のトレースで数えた）。
+
+| 経路 | `AssumeRoleWithWebIdentity` | `AssumeRole` | `GetWebIdentityToken` |
+|---|---|---|---|
+| 本人の表示 | 1 | 1 | 1 |
+| 案件を開く、凍結を解除する | 1 | 3 | 4（各ホップの呼び出し先ごとに1回） |
+| エージェントの分析（ツールの呼び出しn回） | 1 | 2＋2n | 5＋3n（MCPのメッセージごとに1回。ツールの呼び出しのほかに、接続の処理で4回前後） |
+
+`GetWebIdentityToken`は、ホップへの呼び出しのたびに発行するので、`AssumeRole`より回数が多い。上限が文書にない以上、`AssumeRole`の上限から求めた
+目安より先に、`GetWebIdentityToken`のスロットリングが起きる可能性は否定できない。
