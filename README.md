@@ -45,7 +45,8 @@ AWS上のマイクロサービスで、Authorization Context（誰の権限で�
 
 - Amazon BedrockでClaude Haiku 4.5を使えること。アカウントによっては、Anthropicのモデルを初めて使う前に利用目的の申請が必要になる
   （Bedrockのコンソールのモデルカタログから行う）。参照実装は日本国内の推論プロファイル（東京・大阪）で呼ぶので、
-  ap-northeast-1にデプロイする。
+  スタックのリージョンはap-northeast-1に固定している（[infra/lib/app-stack.ts](infra/lib/app-stack.ts)の`REGION`）。
+  シナリオテストも同じリージョンを使う。このREADMEのAWS CLIのコマンドのために、`AWS_REGION`も設定しておく。
 - CloudWatchのTransaction Searchが有効であること。トレースの受け口を使うのに要る、アカウント全体の設定で、参照実装は自動では有効にしない。
   手順は[Enable Transaction Search](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/Enable-TransactionSearch.html)にある。
   トレースの送信に失敗しても、各ホップの処理は失敗させない。

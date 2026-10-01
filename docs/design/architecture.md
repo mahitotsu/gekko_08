@@ -449,7 +449,7 @@ npmのワークスペース（`infra`、`packages/*`、`services/*`、`tests`）
 
 | ディレクトリ | 内容 |
 |---|---|
-| `infra/` | CDKアプリ（単一のスタック`Gekko08App`）と、`Hop`のテンプレートの単体テスト（`infra/test/`。§10） |
+| `infra/` | CDKアプリ（単一のスタック`Gekko08App`。リージョンはap-northeast-1に固定する）と、`Hop`のテンプレートの単体テスト（`infra/test/`。§10） |
 | `packages/authz-context/` | 受信側・送信側の共通部品、MCPの部品、トレース（§6、§7） |
 | `services/<名前>/` | 各Lambdaのハンドラー（bff、case-service、account-service、entitlement-service、fraud-agent、fraud-mcp、pretoken）と、委任の範囲の定義（`authz.ts`。§4） |
 | `web/` | 静的なフロントエンド（ワークスペースではない） |
