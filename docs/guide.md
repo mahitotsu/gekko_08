@@ -195,32 +195,36 @@ Token Exchangeでは、認可サーバーがトークンを交換するたびに
   価値は、ワークロードの鍵そのものを守るk8sのサイドカーより小さい。
 - テストのために、アプリクライアントで`ADMIN_USER_PASSWORD_AUTH`を有効にしている。呼ぶにはIAMの権限が要り、ブラウザからは使えないが、
   本番で使うなら無効にしてよい。
-- 各ホップのログには、ユーザーの識別子と取引の目的が出る。個人情報の扱いは、自分のシステムの方針に合わせる。
+- 各ホップのログとトレースのスパン（`enduser.id`）には、ユーザーの識別子と取引の目的が出る。個人情報の扱いは、自分のシステムの方針に合わせる。
 - 業務的なアクセス権の判定を1か所に集めたい場合は、各ホップのコードの判定を、Amazon Verified Permissions（Cedar）のような判定サービスに
   任せる選択肢がある（[§8](#8-将来の拡張の方向)）。委任の範囲をIAMに強制させる部分は変わらない。
 
 ## 6. レイテンシの実測
 
 2026-10-01、ap-northeast-1、Lambda（Node.js 24、arm64、512MB）で、マイクロサービスの経路（bff → case-service → account-service、
-case-serviceとaccount-serviceはそれぞれ属性サービスも呼ぶ）を10回呼んだときのウォームの値（ミリ秒）。シナリオテストのNFR-3が集計する。
+case-serviceとaccount-serviceはそれぞれ属性サービスも呼ぶ）を10回呼んだときのウォームの値（ミリ秒）。トレースを有効にした状態で測った。
+シナリオテストのNFR-3が集計する。
 
 | 場所 | 処理 | 中央値 | 90パーセンタイル |
 |---|---|---|---|
-| bff | `AssumeRoleWithWebIdentity` | 18 | 19 |
-| bff | 取引の目的を刻むchain（`AssumeRole`） | 51 | 54 |
-| bff | JWTの発行（`GetWebIdentityToken`） | 40 | 54 |
-| 各ホップ | JWTの検証 | 1〜2 | 2 |
-| case-service・account-service | chain（`AssumeRole`） | 58〜62 | 64〜176 |
-| case-service・account-service | JWTの発行（1回あたり） | 約45 | 約60 |
-| entitlement-service | 処理全体（検証とDynamoDBの読み出し2回） | 12 | 15 |
-| bff | 処理全体（画面からの1リクエスト） | 470 | 547 |
+| bff | `AssumeRoleWithWebIdentity` | 15 | 17 |
+| bff | 取引の目的を刻むchain（`AssumeRole`） | 55 | 69 |
+| bff | JWTの発行（`GetWebIdentityToken`） | 42 | 48 |
+| 各ホップ | JWTの検証 | 1〜2 | 2〜16 |
+| case-service・account-service | chain（`AssumeRole`） | 53〜67 | 68〜85 |
+| case-service・account-service | JWTの発行（1回あたり） | 約40〜45 | 約55〜60 |
+| entitlement-service | 処理全体（検証とDynamoDBの読み出し2回） | 10 | 19 |
+| bff | 処理全体（画面からの1リクエスト。bff自身のトレースの送信は含まない） | 626 | 712 |
 
 - 呼び出し先を持つホップの追加は、ウォームでおよそ110ms（chain約60ms、JWTの発行約45ms、検証数ms）。呼び出し先を持たない終端のホップは検証だけで、数ms。
 - 取引の目的を刻むことで、bffに約50msが加わる。
 - 属性サービスの呼び出しは、呼ぶ側のJWTの発行（約45ms）と属性サービスの処理（約12ms）とネットワークで、1回あたりおよそ60〜80ms。
   chainは次のホップの呼び出しと共有する。
 - 画面からの1リクエストは、業務的なアクセス権をトークンで運んでいたとき（中央値222ms）から、目的の刻印と属性サービスの呼び出し2回で
-  約250ms増えた。
+  約250ms増えた（470ms）。
+- トレースの送信は、各ホップが応答を返す前に行うので、ホップの呼び出し1回あたり約40ms（ウォーム）、呼び出し元から見た時間が延びる
+  （[送り方のADR](adr/20261001053646-telemetry-direct-export.md)）。画面からの1リクエスト（ホップの呼び出し5回）では、bffの処理全体が
+  470msから626msになり、これにbff自身の送信（約40ms）が加わる。
 - コールドスタート直後は、JWTの検証に発行者のJWKSの取得が加わり、約340msかかった。
 - エージェントの経路では、モデルの呼び出し（Claude Haiku 4.5）が1回あたり約1〜5秒かかり、認可の処理の追加は相対的に小さい。
   fraud-agentはClaude Codeを子プロセスとして起動するので、1回の分析（ツールの呼び出し3回）は全体で約10〜12秒、最大メモリは約500MBだった

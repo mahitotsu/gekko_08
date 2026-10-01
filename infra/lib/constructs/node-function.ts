@@ -1,5 +1,6 @@
 import * as path from 'node:path';
 import * as cdk from 'aws-cdk-lib';
+import * as iam from 'aws-cdk-lib/aws-iam';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as nodejs from 'aws-cdk-lib/aws-lambda-nodejs';
 import * as logs from 'aws-cdk-lib/aws-logs';
@@ -42,4 +43,13 @@ export class NodeFunction extends nodejs.NodejsFunction {
       },
     });
   }
+}
+
+/**
+ * 共通部品のトレースを有効にする。関数の中のSDKが、実行roleで署名してCloudWatchのOTLPの受け口に送る（送り方のADR）。
+ * トレースの受け口が認可するアクションは`xray:PutTraceSegments`（experiments/otel-export）
+ */
+export function enableTelemetry(fn: lambda.Function): void {
+  fn.addEnvironment('AUTHZ_TELEMETRY', 'cloudwatch');
+  fn.addToRolePolicy(new iam.PolicyStatement({ actions: ['xray:PutTraceSegments'], resources: ['*'] }));
 }

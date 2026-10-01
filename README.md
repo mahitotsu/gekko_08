@@ -46,6 +46,14 @@ AWS上のマイクロサービスで、Authorization Context（誰の権限で�
 - Amazon BedrockでClaude Haiku 4.5を使えること。アカウントによっては、Anthropicのモデルを初めて使う前に利用目的の申請が必要になる
   （Bedrockのコンソールのモデルカタログから行う）。参照実装は日本国内の推論プロファイル（東京・大阪）で呼ぶので、
   ap-northeast-1にデプロイする。
+- CloudWatchのTransaction Searchが有効であること。トレースの受け口を使うのに要る、アカウント全体の設定で、参照実装は自動では有効にしない。
+  手順は[Enable Transaction Search](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/Enable-TransactionSearch.html)にある。
+  トレースの送信に失敗しても、各ホップの処理は失敗させない。
+
+  ```sh
+  aws xray get-trace-segment-destination   # Destination が CloudWatchLogs、Status が ACTIVE か確かめる
+  ```
+
 - デプロイのときにnpmのレジストリにつながること。エージェント（fraud-agent）は[Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk/overview)で動き、
   Lambda用のClaude Code（linux-arm64の実行ファイル、約241MB）を合成のときにレジストリから取得して関数に同梱する。
   Claude Agent SDKとClaude Codeは、Anthropicの利用条件に従う。

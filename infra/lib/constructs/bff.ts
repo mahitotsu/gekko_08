@@ -7,7 +7,7 @@ import * as ssm from 'aws-cdk-lib/aws-ssm';
 import { Construct } from 'constructs';
 import type { AuthFoundation } from './auth-foundation';
 import { PURPOSE_TAG, type HopCaller, type HopTarget } from './hop';
-import { NodeFunction } from './node-function';
+import { enableTelemetry, NodeFunction } from './node-function';
 
 /**
  * 入口のBFF：Lambda関数、Function URL（AWS_IAM、CloudFrontのOACからだけ呼ぶ）、セッションのテーブル。
@@ -47,6 +47,7 @@ export class Bff extends Construct {
       },
     });
     this.sessions.grantReadWriteData(this.fn);
+    enableTelemetry(this.fn);
     this.fn.addToRolePolicy(new iam.PolicyStatement({
       actions: ['ssm:GetParameter'],
       resources: [this.configParamName, this.secretParamName].map((n) => stack.formatArn({ service: 'ssm', resource: 'parameter', resourceName: n.slice(1) })),

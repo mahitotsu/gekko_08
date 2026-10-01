@@ -165,7 +165,7 @@ entitlement-serviceは呼び出し先を持たないので、chain用roleを持�
 
 | 種類 | 個数 | 権限 |
 |---|---|---|
-| 実行role | Lambda関数ごとに1つ | 自分のデータ（DynamoDB）へのアクセス、ログ出力。fraud-agentはモデル用のroleの引き受け、bffはセッションのテーブルとSSMのパラメータ。ホップの呼び出しには権限を付けない（呼び出し先のresource policyで許可する） |
+| 実行role | Lambda関数ごとに1つ | 自分のデータ（DynamoDB）へのアクセス、ログ出力、トレースの送信（`xray:PutTraceSegments`。§7）。fraud-agentはモデル用のroleの引き受け、bffはセッションのテーブルとSSMのパラメータ。ホップの呼び出しには権限を付けない（呼び出し先のresource policyで許可する） |
 | モデル用のrole | 1つ（fraud-agent） | Bedrockのモデルの呼び出し（`bedrock:InvokeModel`・`bedrock:InvokeModelWithResponseStream`）だけ。fraud-agentの実行roleが引き受け、その認証情報だけをClaude Codeの子プロセスに渡す |
 | federated role | 1つ | 目的用のroleへの`sts:AssumeRole`・`sts:TagSession`・`sts:SetSourceIdentity`だけ |
 | 目的用のrole | 1つ | bffの呼び出し先のchain用roleへのchainと、JWTの発行（§4の表のとおり） |
@@ -277,7 +277,9 @@ bffのFunction URLを直接呼べうるが、セッションcookieがなけれ�
   （`initialize`などにも呼び出し先が応える）。受け取った`traceparent`を転送するときのコンテキストにし、自分のスパンは作らない。
 - どちらも、メッセージとその応答を業務のコードに知らせる（fraud-agentはツールの呼び出しの記録に使う）。
 
-**ログ**：リクエストID、ホップ名、呼び出し元のホップ名（actor）と実行role名、subject、目的、scope、JWTの`sub`、判定結果、処理時間を構造化ログに出す。
+**トレース**：受信と送信のスパンを作り、`traceparent`を引き継ぐ。応答を返す前に送り切る（§7）。
+
+**ログ**：リクエストID、トレースID、ホップ名、呼び出し元のホップ名（actor）と実行role名、subject、目的、scope、JWTの`sub`、判定結果、処理時間を構造化ログに出す。
 認証情報、JWT、cookieはログに出さない。
 
 ### 属性サービス（entitlement-service）
@@ -306,6 +308,29 @@ bffのFunction URLを直接呼べうるが、セッションcookieがなけれ�
 - `AssumeRoleWithWebIdentity`と各chainの`RoleSessionName`をリクエストIDにする。CloudTrailの`AssumeRole`・`GetWebIdentityToken`のイベントには、
   セッション名（＝リクエストID）とSourceIdentity（＝ユーザー識別子）が記録される。
 - ログとCloudTrailを、リクエストIDとユーザー識別子で突き合わせられる。
+
+### トレース
+
+OpenTelemetryで出し、CloudWatchのTransaction Searchに集める（[収集先のADR](../adr/20261001020115-telemetry-destination-cloudwatch.md)）。
+関数の中のSDKが、実行roleで署名してX-RayのOTLPの受け口（`https://xray.<region>.amazonaws.com/v1/traces`）に直接送り、
+応答を返す前に送り切る（[送り方のADR](../adr/20261001053646-telemetry-direct-export.md)）。送れなくても、ホップの処理は失敗させない（待つのは2秒まで）。
+
+| スパン | 作る場所 | 種類 | 主な属性 |
+|---|---|---|---|
+| `bff` | bff | SERVER | `authz.route`、`authz.purpose`、`authz.request_id`、`enduser.id`、`http.response.status_code` |
+| `assume (sts:AssumeRoleWithWebIdentity)`、`stamp purpose (sts:AssumeRole)` | bff | INTERNAL | — |
+| `<ホップ名>` | 共通部品の受信 | SERVER | `authz.inbound`（`accepted`／`rejected`）、`authz.reject_reason`、`authz.actor`、`authz.purpose`、`authz.scope`、`enduser.id`、`authz.request_id`、`http.response.status_code` |
+| `call <呼び出し先>` | 共通部品の送信 | CLIENT | `authz.target`、`authz.request_id`、`http.response.status_code` |
+| `chain (sts:AssumeRole)`、`mint JWT (sts:GetWebIdentityToken)` | 共通部品の送信 | INTERNAL | — |
+
+- **引き継ぎ**：送信のスパンの`traceparent`を、ホップへのリクエストのヘッダーに付ける。受信側はそれを親にする。`traceparent`を受け入れるのは、
+  入口のIAMで呼び出し元を確かめたホップの間だけで、bffはブラウザから届いた`traceparent`を使わず、新しいトレースを始める。
+- **中継**：fraud-agentの中継（§6）は自分のスパンを作らず、受け取った`traceparent`を転送するときのコンテキストにする。Claude Codeのテレメトリを
+  送らない今は、fraud-mcpへの送信のスパンはfraud-agentの受信のスパンの子になる。
+- **ログ**：構造化ログに、その時点のスパンのトレースID（`traceId`）を入れる。
+- **入れないもの**：認証情報（JWT、受け渡すセッション）、リクエストとレスポンスの本文。業務のコードは属性を加えない。
+- **有効化**：CDKが、bffと各ホップに環境変数`AUTHZ_TELEMETRY=cloudwatch`と、`xray:PutTraceSegments`の権限を付ける。環境変数がなければ、
+  OTelのAPIは何もしない（単体テストなど）。
 
 ## 8. デモのシナリオ（FR-7）
 
@@ -387,15 +412,16 @@ Cognito User Poolのカスタム属性`custom:branch`は使わない。User Pool
 | FR-3 | chainの途中でSourceIdentityや目的を変えられない。定めていない目的を刻めない。新しいtagのキーを加えられない。目的に合わない下流のJWTや、宣言していないscopeを発行できない |
 | FR-4 | 途中のホップを飛ばした呼び出しが403 |
 | FR-5 | ブラウザに返す応答とcookieに、トークンも認証情報も含まれない |
-| FR-6 | 1回のリクエストを、各ホップのログとCloudTrailでリクエストIDとユーザーから追える |
+| FR-6 | 1回のリクエストを、各ホップのログとCloudTrailでリクエストIDとユーザーから追える。マイクロサービスとエージェントの経路が、それぞれ1つのトレースにつながり（各ホップの受信のスパンが直前のホップの送信のスパンの子になる）、受信のスパンに検証した呼び出し元・目的・scope・ユーザーが入る。ブラウザから届いた`traceparent`は引き継がない |
 | FR-7 | エージェントが誘導されて他の支店の口座を要求しても拒否される。エージェントの分析では、支店長にも残高が返らない。自分の支店の案件は分析できる。モデルの判断は毎回変わりうるので、誘導されたかどうかではなく、誘導されても他の支店のデータや残高が応答に現れないことを確かめる |
 | FR-8 | 人事データで所属を変えると、次のリクエストから結果が変わる |
 | NFR-3 | 各ホップの処理時間（chain、JWTの発行、検証）を集計して公開する |
 | SR-1 | 受け渡したchainのセッションで、どのホップも呼べない。内部のホップ以外を宛先に含むJWTを作れない |
 | SR-2 | 許可していない主体（広い権限を持つroleを含む）が各ホップを呼ぶと403 |
-| SR-3 | 各ホップのログに、認証情報・JWT・cookieが含まれない |
+| SR-3 | 各ホップのログとトレースのスパンに、認証情報・JWT・cookieが含まれない |
 
-FR-6・SR-3・NFR-3のテストは、各ホップの構造化ログをCloudWatch Logsから読んで確かめる。FR-6のうちCloudTrailの確認は、イベントが届くまでに
+FR-6・SR-3・NFR-3のテストは、各ホップの構造化ログをCloudWatch Logsから読んで確かめる。トレースは、Transaction Searchのロググループ
+`aws/spans`をトレースID（bffのログにある）で引いて確かめる。スパンが届くまでに数十秒〜数分かかる。FR-6のうちCloudTrailの確認は、イベントが届くまでに
 最大15分ほどかかるため、`npm run test:scenario:cloudtrail`のときだけ実行する。CloudTrailのイベントは、`Username`（＝`RoleSessionName`＝リクエストID）で引ける。
 NFR-3のテストは、集計結果を`tests/out-latency.json`（git管理外）に書く。
 
@@ -410,6 +436,8 @@ NFR-3のテストは、集計結果を`tests/out-latency.json`（git管理外）
   `GetOutboundWebIdentityFederationInfo`を呼び、無効ならデプロイを失敗させて有効化の手順（`EnableOutboundWebIdentityFederation`）を示す。
   有効なら、アカウント固有の発行者URL（`IssuerIdentifier`）を取得して、各ホップにJWTの`iss`として渡す。
 - **Amazon Bedrockのモデル**：アカウントによっては、Claudeのモデルを使う前に利用の申請が必要になる。手順はREADMEに書く。
+- **CloudWatch Transaction Search**：トレースの受け口を使うには、アカウント単位で有効にしておく必要がある（スパンの送り先をCloudWatch Logsにし、
+  X-RayがロググループにPutLogEventsできるresource policyを置く）。アカウント全体の設定なので、参照実装は自動で有効にしない。手順はREADMEに書く。
 - **npmのレジストリ**：合成のときに、Claude Code（linux-arm64の実行ファイル）をnpmのレジストリから取得する。開発機の`node_modules`には、
   開発機のプラットフォーム向けしか入らないため。取得したものは一時ディレクトリに版ごとに置き、次からは使い回す。
 

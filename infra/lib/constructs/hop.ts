@@ -2,7 +2,7 @@ import * as cdk from 'aws-cdk-lib';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import { Construct } from 'constructs';
-import { NodeFunction, type NodeFunctionProps } from './node-function';
+import { enableTelemetry, NodeFunction, type NodeFunctionProps } from './node-function';
 
 /** 取引の目的を運ぶtransitive session tagのキー。chainで引き継ぎ、途中で変えられない */
 export const PURPOSE_TAG = 'purpose';
@@ -102,6 +102,7 @@ export class Hop extends Construct {
       },
     });
     this.execRole = this.fn.role!;
+    enableTelemetry(this.fn);
     this.url = this.fn.addFunctionUrl({ authType: lambda.FunctionUrlAuthType.AWS_IAM });
 
     const actions = ['lambda:InvokeFunctionUrl', 'lambda:InvokeFunction'];

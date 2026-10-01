@@ -1,7 +1,9 @@
 import { Sha256 } from '@aws-crypto/sha256-js';
 import { AssumeRoleCommand, GetWebIdentityTokenCommand, STSClient } from '@aws-sdk/client-sts';
 import { defaultProvider } from '@aws-sdk/credential-provider-node';
+import { SpanKind, SpanStatusCode } from '@opentelemetry/api';
 import { SignatureV4 } from '@smithy/signature-v4';
+import { ATTR, injectTraceContext, tracer } from './telemetry';
 import { HEADER_CONTEXT, HEADER_REQUEST_ID, HEADER_SESSION, type CallResult, type SessionCredentials, type Target } from './types';
 
 const region = () => process.env.AWS_REGION!;
@@ -53,13 +55,28 @@ export interface CallOptions {
 
 export type Call = (target: string, body: unknown, options?: CallOptions) => Promise<CallResult>;
 
-async function timed<T>(timings: Timings, key: string, f: () => Promise<T>): Promise<T> {
-  const t0 = performance.now();
-  try {
-    return await f();
-  } finally {
-    timings[key] = (timings[key] ?? 0) + Math.round(performance.now() - t0);
+/** 時間を測る（NFR-3）。spanNameがあれば、同じ区切りでスパンも作る */
+async function timed<T>(timings: Timings, key: string, f: () => Promise<T>, spanName?: string): Promise<T> {
+  if (!spanName) {
+    const t0 = performance.now();
+    try {
+      return await f();
+    } finally {
+      timings[key] = (timings[key] ?? 0) + Math.round(performance.now() - t0);
+    }
   }
+  return tracer().startActiveSpan(spanName, async (span) => {
+    const t0 = performance.now();
+    try {
+      return await f();
+    } catch (e) {
+      span.setStatus({ code: SpanStatusCode.ERROR });
+      throw e;
+    } finally {
+      timings[key] = (timings[key] ?? 0) + Math.round(performance.now() - t0);
+      span.end();
+    }
+  });
 }
 
 /** 次のホップを呼ぶ関数を作る。chainは1回のリクエストで1度だけ行う。 */
@@ -74,11 +91,27 @@ export function createCaller(opts: CallerOptions): Call {
         DurationSeconds: 900,
       }));
       return { accessKeyId: c!.AccessKeyId!, secretAccessKey: c!.SecretAccessKey!, sessionToken: c!.SessionToken! };
-    });
+    }, 'chain (sts:AssumeRole)');
     return chained;
   };
 
-  return async (name, body, options = {}) => {
+  return (name, body, options = {}) => tracer().startActiveSpan(`call ${name}`, {
+    kind: SpanKind.CLIENT, attributes: { [ATTR.target]: name, [ATTR.requestId]: opts.requestId },
+  }, async (span) => {
+    try {
+      const r = await send(name, body, options);
+      span.setAttribute(ATTR.status, r.status);
+      if (r.status >= 500) span.setStatus({ code: SpanStatusCode.ERROR });
+      return r;
+    } catch (e) {
+      span.setStatus({ code: SpanStatusCode.ERROR });
+      throw e;
+    } finally {
+      span.end();
+    }
+  });
+
+  async function send(name: string, body: unknown, options: CallOptions): Promise<CallResult> {
     const target = opts.targets[name];
     if (!target) throw new Error(`unknown target: ${name}`);
     const session = await chain();
@@ -90,7 +123,7 @@ export function createCaller(opts: CallerOptions): Call {
         Tags: [{ Key: 'scope', Value: target.scope }],
       }));
       return r.WebIdentityToken!;
-    });
+    }, 'mint JWT (sts:GetWebIdentityToken)');
 
     const url = new URL(target.url);
     const payload = JSON.stringify(body ?? {});
@@ -102,6 +135,8 @@ export function createCaller(opts: CallerOptions): Call {
       [HEADER_REQUEST_ID]: opts.requestId,
     };
     if (target.forwardSession) headers[HEADER_SESSION] = encodeSession(session);
+    // 送信のスパンを、呼び出し先の受信のスパンの親にする
+    injectTraceContext(headers);
     // 呼び出しは自分の実行roleで署名する。入口のIAMはこれで呼び出し元（actor）を確かめる
     const signed = await execSigner().sign({
       method: 'POST', protocol: url.protocol, hostname: url.hostname, path: url.pathname, headers, body: payload,
@@ -117,5 +152,5 @@ export function createCaller(opts: CallerOptions): Call {
       }
       return { status: res.status, body: parsed };
     });
-  };
+  }
 }

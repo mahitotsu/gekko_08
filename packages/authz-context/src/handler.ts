@@ -1,7 +1,9 @@
+import { SpanKind, SpanStatusCode, type Span } from '@opentelemetry/api';
 import type { LambdaFunctionURLEvent, LambdaFunctionURLResult } from 'aws-lambda';
 import { AuthzError, verifyInbound, type CallerEntry, type VerifyOptions } from './inbound';
 import { log } from './log';
 import { createCaller, decodeSession, type Call, type Timings } from './outbound';
+import { ATTR, flushTelemetry, inboundContext, initTelemetry, tracer } from './telemetry';
 import { HEADER_CONTEXT, HEADER_REQUEST_ID, HEADER_SESSION, type CallResult, type Subject, type Target } from './types';
 
 /** 環境変数で渡すホップの設定。CDKの`Hop`が設定する。 */
@@ -50,11 +52,30 @@ function respond(status: number, body: unknown): LambdaFunctionURLResult {
 }
 
 /**
- * ホップのLambdaハンドラーを作る。受信時の検証、次のホップの呼び出し、ログを共通部品が行い、
+ * ホップのLambdaハンドラーを作る。受信時の検証、次のホップの呼び出し、ログ、トレースを共通部品が行い、
  * 業務のコードには検証済みのsubjectだけを渡す。
  */
 export function createHopHandler(business: HopHandler, config: HopConfig = hopConfigFromEnv()) {
-  return async (event: LambdaFunctionURLEvent): Promise<LambdaFunctionURLResult> => {
+  initTelemetry(config.hop);
+  const handle = createHandle(business, config);
+  return (event: LambdaFunctionURLEvent): Promise<LambdaFunctionURLResult> =>
+    // 呼び出し元のtraceparentを親にする。このホップを呼べるのは、入口のIAMが確かめた呼び出し元だけ
+    tracer().startActiveSpan(config.hop, { kind: SpanKind.SERVER, attributes: { [ATTR.hop]: config.hop } }, inboundContext(event.headers ?? {}), async (span) => {
+      try {
+        const res = await handle(event, span);
+        const status = typeof res === 'object' ? res.statusCode ?? 200 : 200;
+        span.setAttribute(ATTR.status, status);
+        if (status >= 500) span.setStatus({ code: SpanStatusCode.ERROR });
+        return res;
+      } finally {
+        span.end();
+        await flushTelemetry();
+      }
+    });
+}
+
+function createHandle(business: HopHandler, config: HopConfig) {
+  return async (event: LambdaFunctionURLEvent, span: Span): Promise<LambdaFunctionURLResult> => {
     const t0 = performance.now();
     const timings: Timings = {};
     const headers = event.headers ?? {};
@@ -62,9 +83,14 @@ export function createHopHandler(business: HopHandler, config: HopConfig = hopCo
     // 入口のIAM（AWS_IAM認証）が確かめた呼び出し元。型定義にないため、形を明示して読む
     const actorArn = (event.requestContext as { authorizer?: { iam?: { userArn?: string } } }).authorizer?.iam?.userArn;
     const base = { hop: config.hop, requestId, actorArn };
+    if (requestId) span.setAttribute(ATTR.requestId, requestId);
+    const reject = (status: number, reason: string) => {
+      span.setAttributes({ [ATTR.inbound]: 'rejected', [ATTR.rejectReason]: reason });
+      log('warn', 'rejected', { ...base, status, reason });
+    };
 
     if (!requestId || !REQUEST_ID.test(requestId)) {
-      log('warn', 'rejected', { ...base, status: 400, reason: 'invalid request id' });
+      reject(400, 'invalid request id');
       return respond(400, { error: 'invalid request id' });
     }
 
@@ -74,10 +100,14 @@ export function createHopHandler(business: HopHandler, config: HopConfig = hopCo
       verified = await verifyInbound(headers[HEADER_CONTEXT], actorArn, config);
     } catch (e) {
       const status = e instanceof AuthzError ? e.status : 401;
-      log('warn', 'rejected', { ...base, status, reason: (e as Error).message });
+      reject(status, (e as Error).message);
       return respond(status, { error: status === 403 ? 'forbidden' : 'unauthorized' });
     }
     timings.verifyMs = Math.round(performance.now() - tv);
+    span.setAttributes({
+      [ATTR.inbound]: 'accepted', [ATTR.actor]: verified.actor, [ATTR.purpose]: verified.purpose, [ATTR.scope]: verified.scope,
+      [ATTR.enduser]: verified.subject.id,
+    });
 
     const session = decodeSession(headers[HEADER_SESSION]);
     const call: Call = config.chainRoleArn && session

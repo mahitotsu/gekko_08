@@ -14,7 +14,6 @@
 
 - 標準形式（OpenTelemetry）でトレースとメトリクスを出力する（FR-6・NFR-3の強化）。収集先は[ADR](docs/adr/20261001020115-telemetry-destination-cloudwatch.md)、送り方は[ADR](docs/adr/20261001053646-telemetry-direct-export.md)（関数の中のSDKが署名して直接送る）。
   次の順に進め、各ステップを要件のIDにひも付けたシナリオテストで確かめる。
-  1. Lambdaの実行とHTTP通信：受信と送信のスパン、`traceparent`の引き継ぎ、検証の結果（actor、目的、scope、拒否の理由）の属性。subjectを属性に入れるかを決める
   2. AWS SDKの呼び出し（STS、DynamoDB）とエージェント。Claude Codeのテレメトリ（`claude_code.*`）をホップのスパンにつなぐ
      （[検証](experiments/agent-frameworks/RESULTS.md)）。プロンプトや応答の本文は既定で記録しない（SR-3）
   3. メトリクス：認可の判定の件数（ホップ、許可・拒否、拒否の理由ごと）と、各処理の時間

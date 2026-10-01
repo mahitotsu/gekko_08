@@ -212,6 +212,8 @@ export async function eventually<T>(f: () => Promise<T | undefined>, timeoutMs: 
 export interface HandledLog {
   hop: string;
   requestId: string;
+  /** ログを出したときのスパンのトレースID */
+  traceId?: string;
   status: number;
   /** 呼び出し元のホップ名 */
   actor?: string;
@@ -240,4 +242,24 @@ export async function handledLogs(requestIds: string[], hops: HopName[], startTi
     }
     return requestIds.every((id) => hops.every((h) => byId[id][h])) ? byId : undefined;
   }, 90_000, 5000);
+}
+
+/** CloudWatch Transaction Searchのスパン（ロググループ`aws/spans`の1件） */
+export interface SpanRecord {
+  traceId: string;
+  spanId: string;
+  parentSpanId?: string;
+  name: string;
+  kind: string;
+  attributes: Record<string, unknown>;
+  resource: { attributes: Record<string, unknown> };
+  status?: { code: string };
+}
+
+/** トレースのスパンを、expectedの数だけ揃うまで待って返す。スパンの到着には数十秒〜数分かかる */
+export async function traceSpans(traceId: string, startTime: number, ready: (spans: SpanRecord[]) => boolean): Promise<SpanRecord[]> {
+  return eventually(async () => {
+    const spans = (await readLogs('aws/spans', startTime, `{ $.traceId = "${traceId}" }`)).map((m) => JSON.parse(m) as SpanRecord);
+    return ready(spans) ? spans : undefined;
+  }, 300_000, 10_000);
 }
