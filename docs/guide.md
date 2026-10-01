@@ -328,6 +328,68 @@ filter message = "handled" and hop = "case-service"
 - ログの`traceId`で、Transaction Searchのトレースを開ける。
 - 常に見張る（アラームを出す）には、ロググループのメトリクスフィルターを加える。
 
+### 監査で追う
+
+「誰の代理の、どの取引の、どの呼び出しだったか」は、リクエストIDを軸に、業務のデータ、ログ、CloudTrail、トレースを突き合わせて追う。
+例として、「口座A-101の凍結を、誰が、どの取引で解除したか」を追う。
+
+1. **業務のデータからリクエストIDを得る。** account-serviceは、解除したユーザー（`unfrozenBy`）とリクエストID（`unfreezeRequestId`）を口座に記録する。
+
+   ```sh
+   export AWS_REGION=ap-northeast-1
+   ACCOUNTS=$(aws cloudformation describe-stacks --stack-name Gekko08App --query "Stacks[0].Outputs[?OutputKey=='AccountsTable'].OutputValue" --output text)
+   aws dynamodb get-item --table-name "$ACCOUNTS" --key '{"accountId":{"S":"A-101"}}' \
+     --projection-expression 'unfrozenBy, unfrozenAt, unfreezeRequestId'
+   ```
+
+2. **ログで、各ホップが何を受け取ったかを見る。** Logs Insightsで、bffと各ホップのロググループ（`Gekko08App-*FunctionLogs*`）を選び、リクエストIDで引く。
+
+   ```
+   fields @timestamp, hop, route, user, subject.id, actor, purpose, scope, status, traceId
+   | filter requestId = "<リクエストID>" and message = "handled"
+   | sort @timestamp asc
+   ```
+
+   bffの行に経路（`route`＝`case-unfreeze`）と取引の目的、各ホップの行に検証したユーザー（`subject.id`）・呼び出し元（`actor`）・目的・scopeが出る。
+   ログはアプリが書くものなので、次のCloudTrailで、AWSの側の記録と照らし合わせる。
+
+3. **CloudTrailで、AWSが記録した事実と照らし合わせる。** chainとJWTの発行の`RoleSessionName`はリクエストIDなので、CloudTrailの`Username`で引ける
+   （届くまでに最大15分ほどかかる。`lookup-events`で引けるのは90日まで）。
+
+   ```sh
+   aws cloudtrail lookup-events --lookup-attributes AttributeKey=Username,AttributeValue=<リクエストID> \
+     --query "Events[].CloudTrailEvent" --output text
+   ```
+
+   2026-10-01に解除の取引を引くと、次のイベントが出た（いずれも`userIdentity.sessionContext.sourceIdentity`はユーザー）。
+
+   | イベント | 呼んだ主体（`userIdentity.arn`のrole） | 主な`requestParameters` |
+   |---|---|---|
+   | `AssumeRole` | federated role | `roleArn`＝目的用のrole、`tags`＝`purpose: account-unfreeze`（transitive） |
+   | `GetWebIdentityToken` | 目的用のrole | `audience`＝case-service、`tags`＝`scope: case:unfreeze` |
+   | `AssumeRole` | 目的用のrole | `roleArn`＝case-serviceのchain用role |
+   | `GetWebIdentityToken` | case-serviceのchain用role | `audience`＝account-service、`tags`＝`scope: account:unfreeze` |
+   | `AssumeRole`、`GetWebIdentityToken` | case-service、account-serviceのchain用role | 属性サービス宛て（`scope: entitlements:read`） |
+
+   取引の目的はbffの`AssumeRole`の`tags`に、各ホップが下流に渡した委任の範囲は`GetWebIdentityToken`の`audience`と`tags`に、AWSの記録として残る。
+   ログに書かれた目的とscopeが、これと一致することを確かめる。
+
+4. **トレースで、呼び出しの順序と結果を見る。** ログの`traceId`で、Transaction Searchのトレースを開く（[トレースを見る](#トレースを見る)）。
+
+補足：
+
+- 「あるユーザーが期間内に何をしたか」は、ログを`subject.id`（bffでは`user`）で引く。CloudTrailの`lookup-events`は`sourceIdentity`で絞れないので、
+  CloudTrailで引くなら、CloudTrail LakeやAthenaで`userIdentity.sessionContext.sourceIdentity`を条件にする。
+- 影響の大きい操作が想定外の取引で行われていないかは、ログで定期的に確かめられる。参照実装では、次の照会の結果は常に空（0件）になるはずである
+  （IAMが発行させず、共通部品も受け付けない）。2026-10-01に、シナリオテストのあとのログで空であることを確かめた。
+
+  ```
+  filter message = "handled" and scope = "account:unfreeze" and purpose != "account-unfreeze"
+  | stats count(*)
+  ```
+
+- 入口のIAMで拒否された呼び出しは、関数のログにもCloudTrailのこれらのイベントにも出ない（Lambdaのデータイベントを記録していれば、そこに出る）。
+
 ### レイテンシの実測
 
 2026-10-01、ap-northeast-1、Lambda（Node.js 24、arm64、512MB）で、マイクロサービスの経路（bff → case-service → account-service、
