@@ -4,7 +4,7 @@ import { AuthzError, verifyInbound, type CallerEntry, type VerifyOptions } from 
 import { log } from './log';
 import { createCaller, decodeSession, type Call, type Timings } from './outbound';
 import { ATTR, flushTelemetry, inboundContext, initTelemetry, tracer } from './telemetry';
-import { HEADER_CONTEXT, HEADER_REQUEST_ID, HEADER_SESSION, type CallResult, type Subject, type Target } from './types';
+import { HEADER_CONTEXT, HEADER_REQUEST_ID, HEADER_SESSION, type CallResult, type Provides, type Subject, type Target } from './types';
 
 /** 環境変数で渡すホップの設定。CDKの`Hop`が設定する。 */
 export interface HopConfig {
@@ -12,6 +12,8 @@ export interface HopConfig {
   audience: string;
   issuer: string;
   callers: Record<string, CallerEntry>;
+  /** 提供側の定義（受信時の照合に使う） */
+  provides: Provides;
   chainRoleArn?: string;
   targets: Record<string, Target>;
   /** JWTの署名鍵の取得。テストでだけ差し替える */
@@ -24,6 +26,7 @@ export function hopConfigFromEnv(env = process.env): HopConfig {
     audience: env.HOP_AUDIENCE!,
     issuer: env.AUTHZ_ISSUER!,
     callers: JSON.parse(env.AUTHZ_CALLERS ?? '{}'),
+    provides: JSON.parse(env.AUTHZ_PROVIDES ?? '{}'),
     chainRoleArn: env.AUTHZ_CHAIN_ROLE || undefined,
     targets: JSON.parse(env.AUTHZ_TARGETS ?? '{}'),
   };
@@ -33,9 +36,10 @@ export interface HopContext {
   subject: Subject;
   /** 呼び出し元のホップ名。入口のIAMが確かめた実行roleと、JWTを作ったroleの両方が一致している */
   actor: string;
-  /** 取引の目的 */
-  purpose: string;
-  /** 呼び出し元がこのホップに付けたscope */
+  /**
+   * 呼び出し元がこのホップに付けたscope。目的との組み合わせはIAMと共通部品が守るので、業務のコードはscopeだけで判断する。
+   * 取引の目的は渡さない（業務のコードは目的を使わない。設計書§4）
+   */
   scope: string;
   requestId: string;
   /** 次のホップを呼ぶ。呼び出し先がないホップでは使えない */
@@ -117,8 +121,8 @@ function createHandle(business: HopHandler, config: HopConfig) {
     let result: CallResult;
     try {
       const raw = event.isBase64Encoded ? Buffer.from(event.body ?? '', 'base64').toString() : event.body;
-      const { subject, actor, purpose, scope } = verified;
-      result = await business(raw ? JSON.parse(raw) : {}, { subject, actor, purpose, scope, requestId, call });
+      const { subject, actor, scope } = verified;
+      result = await business(raw ? JSON.parse(raw) : {}, { subject, actor, scope, requestId, call });
     } catch (e) {
       log('error', 'handler failed', { ...base, error: (e as Error).name, detail: (e as Error).message });
       result = { status: 500, body: { error: 'internal error' } };

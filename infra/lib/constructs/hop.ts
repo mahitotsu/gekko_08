@@ -1,6 +1,7 @@
 import * as cdk from 'aws-cdk-lib';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
+import type { Provides } from '@gekko08/authz-context';
 import { Construct } from 'constructs';
 import { enableTelemetry, NodeFunction, type NodeFunctionProps } from './node-function';
 
@@ -19,16 +20,16 @@ class TrustAddedLater extends iam.ArnPrincipal {
 export interface HopTarget {
   url: string;
   audience: string;
-  scope: string;
+  /** JWTに付けられるscope */
+  scopes: string[];
   forwardSession: boolean;
 }
 
-/** 呼び出し元に許す委任の範囲 */
-export interface Delegation {
-  /** 呼び出し元がこのホップ宛てのJWTに付けるscope */
+/** 呼び出し元がこのホップ宛てのJWTに付けられるscope */
+export interface DelegatedScope {
   scope: string;
-  /** このホップ宛てのJWTを発行できる取引の目的 */
-  purposes: string[];
+  /** このscopeを付けられる取引の目的。省くと、どの取引でも付けられる */
+  purposes?: string[];
 }
 
 /** 他のホップを呼ぶ側。bffも、目的用のroleをchain用roleとして同じ形で扱う */
@@ -70,6 +71,7 @@ export class Hop extends Construct {
   private readonly callerFunctions = new Map<iam.IRole, lambda.IFunction[]>();
   private readonly callers: Record<string, { hop: string; sub: string }> = {};
   private readonly targets: Record<string, HopTarget> = {};
+  private provides: Provides = {};
 
   constructor(scope: Construct, id: string, props: HopProps) {
     super(scope, id);
@@ -97,6 +99,7 @@ export class Hop extends Construct {
         HOP_AUDIENCE: this.audience,
         AUTHZ_ISSUER: props.issuer,
         AUTHZ_CALLERS: cdk.Lazy.string({ produce: () => stack.toJsonString(this.callers) }),
+        AUTHZ_PROVIDES: cdk.Lazy.string({ produce: () => stack.toJsonString(this.provides) }),
         AUTHZ_TARGETS: cdk.Lazy.string({ produce: () => stack.toJsonString(this.targets) }),
         ...(this.chainRole ? { AUTHZ_CHAIN_ROLE: this.chainRole.roleArn } : {}),
         ...props.environment,
@@ -149,11 +152,20 @@ export class Hop extends Construct {
     };
   }
 
+  /** 提供側の定義を、受信時の照合に使う設定として渡す（設計書§6） */
+  provide(provides: Provides): void {
+    this.provides = provides;
+  }
+
   /**
-   * callerからこのホップへの呼び出しを許す。入口、JWTの`sub`の対応、chainとJWTの発行の権限、委任の範囲（scopeと目的）を
-   * まとめて設定する
+   * callerからこのホップへの呼び出しを許す。入口、JWTの`sub`の対応、chainとJWTの発行の権限、委任の範囲（scopeと、目的の制限）を
+   * まとめて設定する。組ごとに1回だけ呼ぶ（`connectHops`が、委任の範囲の定義を突き合わせてから呼ぶ）
    */
-  allowCaller(caller: HopCaller, delegation: Delegation): void {
+  allowCaller(caller: HopCaller, scopes: DelegatedScope[]): void {
+    if (this.callers[caller.execRole.roleName]) {
+      throw new Error(`${caller.hopName} is already allowed to call ${this.hopName}`);
+    }
+    if (scopes.length === 0) throw new Error(`${caller.hopName} -> ${this.hopName}: no scopes`);
     this.callerRoles.push(caller.execRole);
     this.guardCallerFunction(caller);
     this.callers[caller.execRole.roleName] = { hop: caller.hopName, sub: caller.chainRole.roleArn };
@@ -163,26 +175,35 @@ export class Hop extends Construct {
       'ForAllValues:StringEquals': { 'sts:IdentityTokenAudience': [this.audience] },
       Null: { 'sts:IdentityTokenAudience': 'false' },
     };
-    // callerのchain用roleは、許された目的の取引でだけ、このホップ宛てのJWTを、共通部品が発行する形（ES384、有効期間300秒以下）で発行できる
+    const tagConditions = (stringEquals: Record<string, unknown>) => ({
+      'ForAllValues:StringEquals': { ...onlyThisAudience['ForAllValues:StringEquals'], 'aws:TagKeys': ['scope'] },
+      Null: onlyThisAudience.Null,
+      StringEquals: stringEquals,
+    });
+    // callerのchain用roleは、このホップ宛てのJWTを、共通部品が発行する形（ES384、有効期間300秒以下）で発行できる
     caller.chainRole.addToPrincipalPolicy(new iam.PolicyStatement({
       actions: ['sts:GetWebIdentityToken'],
       resources: ['*'],
       conditions: {
         ...onlyThisAudience,
-        StringEquals: { 'sts:SigningAlgorithm': 'ES384', [`aws:PrincipalTag/${PURPOSE_TAG}`]: delegation.purposes },
+        StringEquals: { 'sts:SigningAlgorithm': 'ES384' },
         NumericLessThanEquals: { 'sts:DurationSeconds': 300 },
       },
     }));
-    // このホップ宛てのJWTに付けられるのは、宣言したscopeだけ
-    caller.chainRole.addToPrincipalPolicy(new iam.PolicyStatement({
-      actions: ['sts:TagGetWebIdentityToken'],
-      resources: ['*'],
-      conditions: {
-        'ForAllValues:StringEquals': { ...onlyThisAudience['ForAllValues:StringEquals'], 'aws:TagKeys': ['scope'] },
-        Null: onlyThisAudience.Null,
-        StringEquals: { 'aws:RequestTag/scope': delegation.scope },
-      },
-    }));
+    // 付けられるのは、宣言したscopeだけ。目的の制限がないscopeは1つの文に、目的の制限があるscopeは、許した目的の取引でだけ付けられる文にする
+    // （experiments/scope-tagsのE4）
+    const open = scopes.filter((s) => !s.purposes).map((s) => s.scope);
+    if (open.length > 0) {
+      caller.chainRole.addToPrincipalPolicy(new iam.PolicyStatement({
+        actions: ['sts:TagGetWebIdentityToken'], resources: ['*'], conditions: tagConditions({ 'aws:RequestTag/scope': open }),
+      }));
+    }
+    for (const s of scopes.filter((x) => x.purposes)) {
+      caller.chainRole.addToPrincipalPolicy(new iam.PolicyStatement({
+        actions: ['sts:TagGetWebIdentityToken'], resources: ['*'],
+        conditions: tagConditions({ 'aws:RequestTag/scope': s.scope, [`aws:PrincipalTag/${PURPOSE_TAG}`]: s.purposes }),
+      }));
+    }
 
     if (this.chainRole) {
       const principal = new iam.ArnPrincipal(caller.chainRole.roleArn);
@@ -200,7 +221,7 @@ export class Hop extends Construct {
       }));
     }
 
-    caller.addTarget(this.hopName, { url: this.url.url, audience: this.audience, scope: delegation.scope, forwardSession: !!this.chainRole });
+    caller.addTarget(this.hopName, { url: this.url.url, audience: this.audience, scopes: scopes.map((s) => s.scope), forwardSession: !!this.chainRole });
   }
 
   /**

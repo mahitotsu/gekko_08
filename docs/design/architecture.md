@@ -481,6 +481,8 @@ Cognito User Poolのカスタム属性`custom:branch`は使わない。User Pool
 
 テストは、デモのユーザーとは別の専用のユーザー（`test-tokyo-manager`はtokyo・支店長、`test-osaka-officer`はosaka・担当者）を使い、Cognitoのユーザーと人事データの行を
 テストの実行ごとに用意する。パスワードは実行のたびにランダムな値にし、異動のテストもこの人事データだけを書き換える。
+案件と口座も、テスト専用のもの（`TC-`、`TA-`で始まるもの。デモのデータと同じ形）を実行ごとに凍結した状態で用意し、デモのデータには触れない。
+凍結の解除のテストは、解除のテストだけが使う案件と口座を、テストごとに凍結し直して使う。
 
 マネージドログインはブラウザを必要とするので、テストでは`ADMIN_USER_PASSWORD_AUTH`でIDトークンを得て、bffの`/api/callback`と同じ形の
 セッションをテーブルに書き、そのcookieでCloudFrontからbffを呼ぶ。`ADMIN_USER_PASSWORD_AUTH`はIAMの権限

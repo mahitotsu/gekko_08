@@ -1,7 +1,7 @@
 import { writeFileSync } from 'node:fs';
 import { CloudTrailClient, LookupEventsCommand } from '@aws-sdk/client-cloudtrail';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { browserGet, eventually, type HandledLog, handledLogs, hopLogGroups, type HopName, loginSession, readLogs, USERS } from './helpers';
+import { browserGet, eventually, type HandledLog, handledLogs, hopLogGroups, type HopName, loginSession, provisionTestData, readLogs, TEST_DATA as T, USERS } from './helpers';
 
 // 追跡（FR-6）、ログに認証情報を入れない（SR-3）、処理時間の実測（NFR-3）。
 // ログはCloudWatch Logsから読む。到着に数秒〜数十秒かかる
@@ -16,16 +16,17 @@ let logsById: Awaited<ReturnType<typeof handledLogs>>;
 
 beforeAll(async () => {
   startTime = Date.now() - 5000;
+  await provisionTestData();
   const manager = await loginSession('tokyoManager');
   const summary = async (caseId: string) => {
     const r = await browserGet(`/api/cases/${caseId}/summary`, manager);
     expect(r.body.requestId).toBeTypeOf('string');
     return r.body.requestId as string;
   };
-  allowedId = await summary('C-1001');
-  deniedId = await summary('C-2001'); // case-serviceが業務的なアクセス権で拒否する
+  allowedId = await summary(T.tokyoCase);
+  deniedId = await summary(T.osakaCase); // case-serviceが業務的なアクセス権で拒否する
   latencyIds = [];
-  for (let i = 0; i < LATENCY_SAMPLES; i++) latencyIds.push(await summary('C-1001'));
+  for (let i = 0; i < LATENCY_SAMPLES; i++) latencyIds.push(await summary(T.tokyoCase));
   logsById = await handledLogs([allowedId, ...latencyIds], HOPS, startTime);
 }, 240_000);
 

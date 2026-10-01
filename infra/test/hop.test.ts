@@ -15,6 +15,12 @@ const INVOKE = ['lambda:InvokeFunctionUrl', 'lambda:InvokeFunction'];
 const CHAIN = ['sts:AssumeRole', 'sts:TagSession', 'sts:SetSourceIdentity'];
 const ISSUE = ['sts:GetWebIdentityToken', 'sts:TagGetWebIdentityToken'];
 
+/** 提供側の定義（受信時の照合の設定） */
+const PROVIDES = {
+  front: { 'front:call': {} },
+  leaf: { 'leaf:read': {}, 'leaf:list': {}, 'leaf:write': { purposes: ['p-a'], callers: ['front'] }, 'leaf:direct': { purposes: ['p-a', 'p-b'] } },
+};
+
 /** 呼び出し関係：origin（bffに相当する、Hopではない呼び出し元）→ front → leaf、origin → leaf */
 function buildFixture() {
   // バンドルを飛ばす（テンプレートだけを見る）
@@ -34,9 +40,11 @@ function buildFixture() {
 
   const front = new Hop(stack, 'Front', { hopName: 'front', entry, issuer: 'https://issuer.example', callsOthers: true });
   const leaf = new Hop(stack, 'Leaf', { hopName: 'leaf', entry, issuer: 'https://issuer.example', callsOthers: false });
-  front.allowCaller(origin, { scope: 'front:call', purposes: ['p-a', 'p-b'] });
-  leaf.allowCaller(front.asCaller(), { scope: 'leaf:read', purposes: ['p-a'] });
-  leaf.allowCaller(origin, { scope: 'leaf:direct', purposes: ['p-b'] });
+  front.provide(PROVIDES.front);
+  leaf.provide(PROVIDES.leaf);
+  front.allowCaller(origin, [{ scope: 'front:call' }]);
+  leaf.allowCaller(front.asCaller(), [{ scope: 'leaf:read' }, { scope: 'leaf:list' }, { scope: 'leaf:write', purposes: ['p-a'] }]);
+  leaf.allowCaller(origin, [{ scope: 'leaf:direct', purposes: ['p-a', 'p-b'] }]);
 
   const template: Json = Template.fromStack(stack).toJSON();
   return { stack, template, origin, front, leaf, originTargets };
@@ -58,12 +66,12 @@ function callersOf(f: Fixture, hop: Hop): HopCaller[] {
   return [];
 }
 
-/** 呼び出し先の組（このchain用roleがJWTを発行できる相手） */
-function targetsOf(f: Fixture, caller: HopCaller): { hop: Hop; scope: string; purposes: string[] }[] {
+/** 呼び出し先の組（このchain用roleがJWTを発行できる相手）。open：目的の制限がないscope、bound：目的の制限があるscope */
+function targetsOf(f: Fixture, caller: HopCaller): { hop: Hop; open: string[]; bound: { scope: string; purposes: string[] }[] }[] {
   if (caller.hopName === 'origin') {
-    return [{ hop: f.front, scope: 'front:call', purposes: ['p-a', 'p-b'] }, { hop: f.leaf, scope: 'leaf:direct', purposes: ['p-b'] }];
+    return [{ hop: f.front, open: ['front:call'], bound: [] }, { hop: f.leaf, open: [], bound: [{ scope: 'leaf:direct', purposes: ['p-a', 'p-b'] }] }];
   }
-  if (caller.hopName === 'front') return [{ hop: f.leaf, scope: 'leaf:read', purposes: ['p-a'] }];
+  if (caller.hopName === 'front') return [{ hop: f.leaf, open: ['leaf:read', 'leaf:list'], bound: [{ scope: 'leaf:write', purposes: ['p-a'] }] }];
   return [];
 }
 
@@ -109,31 +117,30 @@ function checkCallerGuard(f: Fixture, hop: Hop): string[] {
 }
 
 /**
- * JWTの発行：宛先はForAllValues＋Nullで呼び出し先だけ、ES384、300秒以下、許された目的のときだけ。
- * 付けられるtagはキーscopeだけで、値は宣言したscopeだけ
+ * JWTの発行：宛先はForAllValues＋Nullで呼び出し先だけ、ES384、300秒以下。付けられるtagはキーscopeだけで、値は宣言したscopeだけ。
+ * 目的の制限があるscopeは、許した目的の取引でだけ付けられ、目的の制限がない文には混ざらない
  */
 function checkIssuance(f: Fixture, caller: HopCaller): string[] {
   const issuing = (a: Atom) => ISSUE.includes(a.action) || a.action === '*' || a.action === 'sts:*';
   const actual = atoms(roleStatements(f.template, roleId(f, caller.chainRole))).filter(issuing);
-  const expected = atoms(targetsOf(f, caller).flatMap(({ hop, scope, purposes }) => {
+  const expected = atoms(targetsOf(f, caller).flatMap(({ hop, open, bound }) => {
     const aud = { 'sts:IdentityTokenAudience': [hop.audience] };
     const notNull = { 'sts:IdentityTokenAudience': 'false' };
+    const tag = (stringEquals: Record<string, unknown>) => ({
+      Effect: 'Allow', Action: 'sts:TagGetWebIdentityToken', Resource: '*',
+      Condition: { 'ForAllValues:StringEquals': { ...aud, 'aws:TagKeys': ['scope'] }, Null: notNull, StringEquals: stringEquals },
+    });
     return [
       {
         Effect: 'Allow', Action: 'sts:GetWebIdentityToken', Resource: '*',
         Condition: {
           'ForAllValues:StringEquals': aud, Null: notNull,
-          StringEquals: { 'sts:SigningAlgorithm': 'ES384', [`aws:PrincipalTag/${PURPOSE_TAG}`]: purposes },
+          StringEquals: { 'sts:SigningAlgorithm': 'ES384' },
           NumericLessThanEquals: { 'sts:DurationSeconds': 300 },
         },
       },
-      {
-        Effect: 'Allow', Action: 'sts:TagGetWebIdentityToken', Resource: '*',
-        Condition: {
-          'ForAllValues:StringEquals': { ...aud, 'aws:TagKeys': ['scope'] }, Null: notNull,
-          StringEquals: { 'aws:RequestTag/scope': scope },
-        },
-      },
+      ...(open.length ? [tag({ 'aws:RequestTag/scope': open })] : []),
+      ...bound.map((b) => tag({ 'aws:RequestTag/scope': b.scope, [`aws:PrincipalTag/${PURPOSE_TAG}`]: b.purposes })),
     ];
   }));
   return diffAtoms(`${caller.hopName} issuance`, actual, expected);
@@ -163,6 +170,13 @@ function checkChainTrust(f: Fixture, hop: Hop): string[] {
   return diffAtoms(`${hop.hopName} trust`, atoms(doc.Statement), expected);
 }
 
+/** 受信時の照合の設定：提供側の定義がそのまま渡る */
+function checkProvides(f: Fixture, hop: Hop): string[] {
+  const env = f.template.Resources[fnId(f, hop.fn)].Properties.Environment.Variables.AUTHZ_PROVIDES;
+  const expected = r(f, f.stack.toJsonString(hop === f.front ? PROVIDES.front : PROVIDES.leaf));
+  return canonical(env) === canonical(expected) ? [] : [`${hop.hopName} provides: ${canonical(env)}`];
+}
+
 /** `sub`の対応表：呼び出し元の実行roleごとに、JWTの`sub`になるべきchain用role */
 function checkCallersMap(f: Fixture, hop: Hop): string[] {
   const env = f.template.Resources[fnId(f, hop.fn)].Properties.Environment.Variables.AUTHZ_CALLERS;
@@ -181,6 +195,7 @@ const checks: Record<string, (f: Fixture) => string[]> = {
   chainRoleScope: (f) => callers(f).flatMap((c) => checkChainRoleScope(f, c)),
   chainTrust: (f) => hops(f).flatMap((h) => checkChainTrust(f, h)),
   callersMap: (f) => hops(f).flatMap((h) => checkCallersMap(f, h)),
+  provides: (f) => hops(f).flatMap((h) => checkProvides(f, h)),
 };
 
 describe('Hopのテンプレート', () => {
@@ -192,7 +207,7 @@ describe('Hopのテンプレート', () => {
     expect(checks.callerGuard(fixture)).toEqual([]);
   });
 
-  it('JWTの発行：宛先（ForAllValues＋Null）、ES384、300秒以下、目的、scopeのキーと値を限る', () => {
+  it('JWTの発行：宛先（ForAllValues＋Null）、ES384、300秒以下、scopeのキーと値、目的の制限があるscopeの目的を限る', () => {
     expect(checks.issuance(fixture)).toEqual([]);
   });
 
@@ -206,6 +221,15 @@ describe('Hopのテンプレート', () => {
 
   it('subの対応表：呼び出し元の実行roleごとに、そのchain用roleを対応させる', () => {
     expect(checks.callersMap(fixture)).toEqual([]);
+  });
+
+  it('受信時の照合の設定：提供側の定義を渡す', () => {
+    expect(checks.provides(fixture)).toEqual([]);
+  });
+
+  it('同じ組を2回つなぐと失敗する', () => {
+    const f = buildFixture();
+    expect(() => f.leaf.allowCaller(f.front.asCaller(), [{ scope: 'leaf:read' }])).toThrow(/already allowed/);
   });
 
   it('呼び出し先を持たないホップはchain用roleを持たない', () => {
@@ -305,14 +329,21 @@ const mutations: { name: string; check: keyof typeof checks; mutate: (f: Fixture
     }),
   },
   {
-    name: '目的の条件を外す', check: 'issuance',
-    mutate: (f, t) => issuanceStatements(f, t, f.origin.chainRole).forEach((s: Json) => { delete s.Condition.StringEquals[`aws:PrincipalTag/${PURPOSE_TAG}`]; }),
+    name: '目的の制限があるscopeから目的の条件を外す', check: 'issuance',
+    mutate: (f, t) => issuanceStatements(f, t, f.front.chainRole!).forEach((s: Json) => { delete s.Condition.StringEquals?.[`aws:PrincipalTag/${PURPOSE_TAG}`]; }),
   },
   {
-    name: '目的を加える', check: 'issuance',
+    name: '目的の制限があるscopeに目的を加える', check: 'issuance',
     mutate: (f, t) => issuanceStatements(f, t, f.front.chainRole!).forEach((s: Json) => {
       const k = `aws:PrincipalTag/${PURPOSE_TAG}`;
-      if (s.Condition.StringEquals[k]) s.Condition.StringEquals[k] = [...list(s.Condition.StringEquals[k]), 'p-b'];
+      if (s.Condition.StringEquals?.[k]) s.Condition.StringEquals[k] = [...list(s.Condition.StringEquals[k]), 'p-b'];
+    }),
+  },
+  {
+    name: '目的の制限があるscopeを制限のない文に混ぜる', check: 'issuance',
+    mutate: (f, t) => issuanceStatements(f, t, f.front.chainRole!).forEach((s: Json) => {
+      const v = s.Condition.StringEquals?.['aws:RequestTag/scope'];
+      if (Array.isArray(v)) s.Condition.StringEquals['aws:RequestTag/scope'] = [...v, 'leaf:write'];
     }),
   },
   {
@@ -349,6 +380,13 @@ const mutations: { name: string; check: keyof typeof checks; mutate: (f: Fixture
     mutate: (f, t) => {
       const vars = t.Resources[fnId(f, f.leaf.fn)].Properties.Environment.Variables;
       vars.AUTHZ_CALLERS = replaceDeep(vars.AUTHZ_CALLERS, r(f, f.front.chainRole!.roleArn), OTHER_ROLE);
+    },
+  },
+  {
+    name: '受信時の照合の設定から目的の制限を外す', check: 'provides',
+    mutate: (f, t) => {
+      const vars = t.Resources[fnId(f, f.leaf.fn)].Properties.Environment.Variables;
+      vars.AUTHZ_PROVIDES = replaceDeep(vars.AUTHZ_PROVIDES, r(f, f.stack.toJsonString(PROVIDES.leaf)), JSON.stringify({ ...PROVIDES.leaf, 'leaf:write': {} }));
     },
   },
   {

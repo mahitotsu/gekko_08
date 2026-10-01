@@ -23,6 +23,7 @@ beforeAll(async () => {
   config = {
     hop: 'case-service', audience: 'aud-case', issuer: ISSUER, targets: {},
     callers: { 'bff-exec': { hop: 'bff', sub: CHAIN } },
+    provides: { 'case:summary': {} },
     keys: createLocalJWKSet({ keys: [jwk] }),
   };
   token = await new SignJWT({ 'https://sts.amazonaws.com/': { source_identity: 'yamada', principal_tags: { purpose: 'case-summary' }, request_tags: { scope: 'case:summary' } } })

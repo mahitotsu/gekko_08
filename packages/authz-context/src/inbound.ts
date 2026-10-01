@@ -1,5 +1,5 @@
 import { createRemoteJWKSet, jwtVerify, type JWTVerifyGetKey } from 'jose';
-import type { Subject } from './types';
+import type { Provides, Subject } from './types';
 
 const STS_NAMESPACE = 'https://sts.amazonaws.com/';
 
@@ -22,6 +22,8 @@ export interface VerifyOptions {
   audience: string;
   /** 入口のIAMが確かめた呼び出し元の実行role名 → 呼び出し元のホップ */
   callers: Record<string, CallerEntry>;
+  /** 提供側の定義。届いたscopeと目的・呼び出し元の組み合わせを照らし合わせる */
+  provides: Provides;
   /** 署名鍵の取得。テストでは差し替える */
   keys?: JWTVerifyGetKey;
 }
@@ -105,5 +107,10 @@ export async function verifyInbound(token: string | undefined, callerArn: string
   const purpose = tagValue(ns?.principal_tags?.purpose);
   const scope = tagValue(ns?.request_tags?.scope);
   if (!purpose || !scope) throw new AuthzError(401, 'authorization context lacks delegation scope');
+  // IAMが発行させない組み合わせ。IAMの設定の誤りや手での変更を、提供側の定義で止める
+  const rule = opts.provides[scope];
+  if (!rule) throw new AuthzError(403, 'scope is not provided');
+  if (rule.purposes && !rule.purposes.includes(purpose)) throw new AuthzError(403, 'scope is not allowed for the purpose');
+  if (rule.callers && !rule.callers.includes(caller.hop)) throw new AuthzError(403, 'scope is not allowed for the caller');
   return { subject: { id }, purpose, scope, actor: caller.hop, actorRole, tokenSub: payload.sub };
 }

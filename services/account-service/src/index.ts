@@ -1,9 +1,15 @@
-import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocumentClient, GetCommand } from '@aws-sdk/lib-dynamodb';
+import { ConditionalCheckFailedException, DynamoDBClient } from '@aws-sdk/client-dynamodb';
+import { DynamoDBDocumentClient, GetCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { createHopHandler, traceAwsClient, type Call } from '@gekko08/authz-context';
 
 const db = DynamoDBDocumentClient.from(traceAwsClient(new DynamoDBClient({})));
 const TABLE = process.env.ACCOUNTS_TABLE!;
+
+// 操作ごとに必要なscope（委任の範囲）と業務的なアクセス権。目的との組み合わせはIAMと共通部品が守るので、ここではscopeだけを見る
+const OPERATIONS: Record<string, { scope: string; permission: string }> = {
+  get: { scope: 'account:read', permission: 'account:view' },
+  unfreeze: { scope: 'account:unfreeze', permission: 'account:unfreeze' },
+};
 
 interface Entitlements { branch: string; title: string; permissions: string[] }
 
@@ -13,10 +19,11 @@ async function entitlementsOf(call: Call): Promise<Entitlements | undefined> {
   return r.status === 200 ? (r.body as Entitlements) : undefined;
 }
 
-// 口座の参照。委任の範囲が操作を許し、かつ業務的なアクセス権が口座を許すときだけ返す。
-// 残高は、取引の目的が画面での要約で、かつ残高を見る権限があるときだけ含める
-export const handler = createHopHandler(async (body, { scope, purpose, call }) => {
-  if (scope !== 'account:read') return { status: 403, body: { error: 'forbidden', reason: 'scope does not allow the action' } };
+// 口座の参照と凍結の解除。委任の範囲が操作を許し、かつ業務的なアクセス権が口座を許すときだけ行う
+export const handler = createHopHandler(async (body, { subject, scope, requestId, call }) => {
+  const action = typeof body.action === 'string' ? body.action : 'get';
+  const op = Object.hasOwn(OPERATIONS, action) ? OPERATIONS[action] : undefined;
+  if (!op || op.scope !== scope) return { status: 403, body: { error: 'forbidden', reason: 'scope does not allow the action' } };
   const accountId = typeof body.accountId === 'string' ? body.accountId : undefined;
   if (!accountId) return { status: 400, body: { error: 'accountId is required' } };
 
@@ -24,11 +31,25 @@ export const handler = createHopHandler(async (body, { scope, purpose, call }) =
     db.send(new GetCommand({ TableName: TABLE, Key: { accountId } })),
     entitlementsOf(call),
   ]);
-  if (!ent || !ent.permissions.includes('account:view')) return { status: 403, body: { error: 'forbidden', reason: 'no entitlement' } };
+  if (!ent || !ent.permissions.includes(op.permission)) return { status: 403, body: { error: 'forbidden', reason: 'no entitlement' } };
   if (!Item) return { status: 404, body: { error: 'not found' } };
   if (Item.branch !== ent.branch) return { status: 403, body: { error: 'forbidden', reason: 'branch mismatch' } };
+  if (action === 'get') return { status: 200, body: { account: Item } };
 
-  const { balance, ...account } = Item;
-  const showBalance = purpose === 'case-summary' && ent.permissions.includes('account:balance');
-  return { status: 200, body: { account: showBalance ? { ...account, balance } : account } };
+  // 凍結を解除し、誰が（subject）、いつ、どのリクエストで解除したかを記録する
+  try {
+    const { Attributes } = await db.send(new UpdateCommand({
+      TableName: TABLE,
+      Key: { accountId },
+      UpdateExpression: 'SET #status = :active, unfrozenBy = :by, unfrozenAt = :at, unfreezeRequestId = :rid',
+      ConditionExpression: '#status = :frozen',
+      ExpressionAttributeNames: { '#status': 'status' },
+      ExpressionAttributeValues: { ':active': 'active', ':frozen': 'frozen', ':by': subject.id, ':at': new Date().toISOString(), ':rid': requestId },
+      ReturnValues: 'ALL_NEW',
+    }));
+    return { status: 200, body: { account: Attributes } };
+  } catch (e) {
+    if (e instanceof ConditionalCheckFailedException) return { status: 409, body: { error: 'conflict', reason: 'account is not frozen' } };
+    throw e;
+  }
 });

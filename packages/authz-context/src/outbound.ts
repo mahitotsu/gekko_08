@@ -49,6 +49,8 @@ export interface CallerOptions {
 }
 
 export interface CallOptions {
+  /** JWTに付けるscope。呼び出し先に付けられるscopeが1つだけなら省ける */
+  scope?: string;
   /** 追加のヘッダー（MCPの`Accept`など）。認可に関わるヘッダーは上書きできない */
   headers?: Record<string, string>;
 }
@@ -114,13 +116,16 @@ export function createCaller(opts: CallerOptions): Call {
   async function send(name: string, body: unknown, options: CallOptions): Promise<CallResult> {
     const target = opts.targets[name];
     if (!target) throw new Error(`unknown target: ${name}`);
+    // 利用側の定義にないscopeは、STSを呼ばずに失敗させる。目的に合わないscopeはIAMが拒否する
+    const scope = options.scope ?? (target.scopes.length === 1 ? target.scopes[0] : undefined);
+    if (!scope || !target.scopes.includes(scope)) throw new Error(`scope ${options.scope ?? '(unspecified)'} is not declared for ${name}`);
     const session = await chain();
     const token = await timed(opts.timings, 'mintMs', async () => {
       const r = await stsWith(session).send(new GetWebIdentityTokenCommand({
         Audience: [target.audience],
         SigningAlgorithm: 'ES384',
         DurationSeconds: 300,
-        Tags: [{ Key: 'scope', Value: target.scope }],
+        Tags: [{ Key: 'scope', Value: scope }],
       }));
       return r.WebIdentityToken!;
     }, 'mint JWT (sts:GetWebIdentityToken)');

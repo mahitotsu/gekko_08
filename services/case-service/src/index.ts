@@ -1,14 +1,15 @@
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocumentClient, GetCommand } from '@aws-sdk/lib-dynamodb';
+import { DynamoDBDocumentClient, GetCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { createHopHandler, traceAwsClient, type Call } from '@gekko08/authz-context';
 
 const db = DynamoDBDocumentClient.from(traceAwsClient(new DynamoDBClient({})));
 const TABLE = process.env.CASES_TABLE!;
 
-// 操作ごとに必要なscope（委任の範囲）。scopeは呼び出し元と宛先の組ごとにIAMが限る
+// 操作ごとに必要なscope（委任の範囲）。目的との組み合わせはIAMと共通部品が守るので、ここではscopeだけを見る
 const REQUIRED_SCOPE: Record<string, string> = {
-  summary: 'case:summary', // 画面からの要約（口座の情報を含む）
+  summary: 'case:summary', // 画面から案件を開く（口座の凍結の状態を含む）
   get: 'case:read', // エージェントのツールからの取得（案件だけ）
+  unfreeze: 'case:unfreeze', // 画面からの凍結の解除の依頼
 };
 
 interface Entitlements { branch: string; title: string; permissions: string[] }
@@ -19,9 +20,10 @@ async function entitlementsOf(call: Call): Promise<Entitlements | undefined> {
   return r.status === 200 ? (r.body as Entitlements) : undefined;
 }
 
-// 不正検知の案件と取引の参照。委任の範囲が操作を許し、かつ業務的なアクセス権が案件を許すときだけ返す
-export const handler = createHopHandler(async (body, { scope, call }) => {
-  if (!REQUIRED_SCOPE[body.action] || REQUIRED_SCOPE[body.action] !== scope) {
+// 凍結の見直しの案件。委任の範囲が操作を許し、かつ業務的なアクセス権が案件を許すときだけ行う
+export const handler = createHopHandler(async (body, { subject, scope, requestId, call }) => {
+  const action = typeof body.action === 'string' && Object.hasOwn(REQUIRED_SCOPE, body.action) ? body.action : undefined;
+  if (!action || REQUIRED_SCOPE[action] !== scope) {
     return { status: 403, body: { error: 'forbidden', reason: 'scope does not allow the action' } };
   }
   const caseId = typeof body.caseId === 'string' ? body.caseId : undefined;
@@ -35,8 +37,23 @@ export const handler = createHopHandler(async (body, { scope, call }) => {
   if (!Item) return { status: 404, body: { error: 'not found' } };
   if (Item.branch !== ent.branch) return { status: 403, body: { error: 'forbidden', reason: 'branch mismatch' } };
 
-  if (body.action === 'get') return { status: 200, body: { case: Item } };
-  const account = await call('account-service', { accountId: Item.accountId });
-  if (account.status !== 200) return { status: account.status, body: { error: 'account lookup failed', account: account.body } };
-  return { status: 200, body: { case: Item, account: (account.body as { account: unknown }).account } };
+  if (action === 'get') return { status: 200, body: { case: Item } };
+  if (action === 'summary') {
+    const account = await call('account-service', { action: 'get', accountId: Item.accountId }, { scope: 'account:read' });
+    if (account.status !== 200) return { status: account.status, body: { error: 'account lookup failed', account: account.body } };
+    return { status: 200, body: { case: Item, account: (account.body as { account: unknown }).account } };
+  }
+
+  // 凍結の解除はaccount-serviceが判定する（解除の権限、支店、凍結中か）。解除できたら、結果を案件に記録する。
+  // 口座の解除のあとに書くので、案件への記録に失敗しても口座は解除されたままになる
+  const account = await call('account-service', { action: 'unfreeze', accountId: Item.accountId }, { scope: 'account:unfreeze' });
+  if (account.status !== 200) return { status: account.status, body: { error: 'unfreeze failed', account: account.body } };
+  const { Attributes } = await db.send(new UpdateCommand({
+    TableName: TABLE,
+    Key: { caseId },
+    UpdateExpression: 'SET resolution = :r',
+    ExpressionAttributeValues: { ':r': { result: 'unfrozen', by: subject.id, at: new Date().toISOString(), requestId } },
+    ReturnValues: 'ALL_NEW',
+  }));
+  return { status: 200, body: { case: Attributes, account: (account.body as { account: unknown }).account } };
 });

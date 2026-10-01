@@ -11,11 +11,18 @@ import { Hop } from './constructs/hop';
 import { REPO_ROOT, type NodeFunctionProps } from './constructs/node-function';
 import { OutboundFederationCheck } from './constructs/outbound-federation-check';
 import { WebFrontend } from './constructs/web-frontend';
+import { connectHops } from './delegation';
+import { authz as accountServiceAuthz } from '../../services/account-service/authz';
+import { authz as bffAuthz, PURPOSES } from '../../services/bff/authz';
+import { authz as caseServiceAuthz } from '../../services/case-service/authz';
+import { authz as entitlementServiceAuthz } from '../../services/entitlement-service/authz';
+import { authz as fraudAgentAuthz } from '../../services/fraud-agent/authz';
+import { authz as fraudMcpAuthz } from '../../services/fraud-mcp/authz';
 
 const BEDROCK_MODEL = 'anthropic.claude-haiku-4-5-20251001-v1:0';
 
-/** 取引の目的。bffが経路ごとに決めて刻む（設計書§3） */
-export const PURPOSE = { profile: 'profile', caseSummary: 'case-summary', agentAnalysis: 'agent-analysis' } as const;
+/** 委任の範囲の定義。各サービスが自分の`authz.ts`に書く（設計書§4） */
+export const DELEGATION_DEFINITIONS = [bffAuthz, caseServiceAuthz, accountServiceAuthz, entitlementServiceAuthz, fraudAgentAuthz, fraudMcpAuthz];
 export const BEDROCK_PROFILE = `jp.${BEDROCK_MODEL}`;
 
 // Lambdaの関数とレイヤーを合わせた展開後の上限は250MiB（262,144,000バイト）。上限に近づいたら合成を失敗させる
@@ -70,12 +77,12 @@ export class Gekko08AppStack extends cdk.Stack {
       hopName: 'account-service', entry: 'services/account-service/src/index.ts', issuer, callsOthers: true,
       environment: { ACCOUNTS_TABLE: data.accounts.tableName },
     });
-    data.accounts.grantReadData(accountService.fn);
+    data.accounts.grantReadWriteData(accountService.fn);
     const caseService = new Hop(this, 'CaseService', {
       hopName: 'case-service', entry: 'services/case-service/src/index.ts', issuer, callsOthers: true,
       environment: { CASES_TABLE: data.cases.tableName },
     });
-    data.cases.grantReadData(caseService.fn);
+    data.cases.grantReadWriteData(caseService.fn);
     const fraudMcp = new Hop(this, 'FraudMcp', {
       hopName: 'fraud-mcp', entry: 'services/fraud-mcp/src/index.ts', issuer, callsOthers: true,
     });
@@ -109,22 +116,13 @@ export class Gekko08AppStack extends cdk.Stack {
     const callbackUrl = `${web.origin}/api/callback`;
     const auth = new AuthFoundation(this, 'Auth', { callbackUrl, logoutUrl: `${web.origin}/` });
 
-    bff.connect(auth, Object.values(PURPOSE));
+    bff.connect(auth, Object.values(PURPOSES));
 
-    // 呼び出し関係と委任の範囲（設計書§4）。scopeと発行できる目的はIAMが強制する
-    const { profile, caseSummary, agentAnalysis } = PURPOSE;
-    // マイクロサービスの経路：bff → case-service → account-service
-    caseService.allowCaller(bff.asCaller(), { scope: 'case:summary', purposes: [caseSummary] });
-    accountService.allowCaller(caseService.asCaller(), { scope: 'account:read', purposes: [caseSummary] });
-    // エージェントの経路：bff → fraud-agent → fraud-mcp → case-service または account-service
-    fraudAgent.allowCaller(bff.asCaller(), { scope: 'agent:analyze', purposes: [agentAnalysis] });
-    fraudMcp.allowCaller(fraudAgent.asCaller(), { scope: 'mcp:tools', purposes: [agentAnalysis] });
-    caseService.allowCaller(fraudMcp.asCaller(), { scope: 'case:read', purposes: [agentAnalysis] });
-    accountService.allowCaller(fraudMcp.asCaller(), { scope: 'account:read', purposes: [agentAnalysis] });
-    // 属性サービス：業務的なアクセス権を判定するホップと、表示用のbff
-    entitlementService.allowCaller(bff.asCaller(), { scope: 'entitlements:read', purposes: [profile] });
-    entitlementService.allowCaller(caseService.asCaller(), { scope: 'entitlements:read', purposes: [caseSummary, agentAnalysis] });
-    entitlementService.allowCaller(accountService.asCaller(), { scope: 'entitlements:read', purposes: [caseSummary, agentAnalysis] });
+    // 呼び出し関係と委任の範囲（設計書§4）。定義を突き合わせ、IAMと共通部品の設定を生成する
+    connectHops(Object.values(PURPOSES), DELEGATION_DEFINITIONS, {
+      bff, 'case-service': caseService, 'account-service': accountService, 'entitlement-service': entitlementService,
+      'fraud-agent': fraudAgent, 'fraud-mcp': fraudMcp,
+    });
 
     bff.writeSettings(auth, callbackUrl);
 
@@ -135,6 +133,8 @@ export class Gekko08AppStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'FederatedRoleArn', { value: auth.federatedRole.roleArn });
     new cdk.CfnOutput(this, 'PurposeRoleArn', { value: bff.asCaller().chainRole.roleArn });
     new cdk.CfnOutput(this, 'StaffTable', { value: data.staff.tableName });
+    new cdk.CfnOutput(this, 'CasesTable', { value: data.cases.tableName });
+    new cdk.CfnOutput(this, 'AccountsTable', { value: data.accounts.tableName });
     new cdk.CfnOutput(this, 'Issuer', { value: issuer });
     for (const hop of [caseService, accountService, entitlementService, fraudAgent, fraudMcp]) {
       const key = hop.hopName.replace(/(^|-)(\w)/g, (_, __, c: string) => c.toUpperCase());

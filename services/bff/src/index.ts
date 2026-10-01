@@ -6,6 +6,7 @@ import { AssumeRoleCommand, AssumeRoleWithWebIdentityCommand, STSClient } from '
 import { ATTR, createCaller, flushTelemetry, initTelemetry, log, traceAwsClient, tracer, type Call, type Target, type Timings } from '@gekko08/authz-context';
 import { ROOT_CONTEXT, SpanKind, SpanStatusCode, type Span } from '@opentelemetry/api';
 import type { LambdaFunctionURLEvent, LambdaFunctionURLResult } from 'aws-lambda';
+import { PURPOSES } from '../authz';
 
 initTelemetry('bff');
 const db = DynamoDBDocumentClient.from(traceAwsClient(new DynamoDBClient({})));
@@ -230,21 +231,29 @@ async function withChain<T>(s: Session, requestId: string, purpose: string, timi
 }
 
 const CASE_SUMMARY = /^\/api\/cases\/([\w-]{1,64})\/summary$/;
+const CASE_UNFREEZE = /^\/api\/cases\/([\w-]{1,64})\/unfreeze$/;
 
 interface HopRoute {
   name: string;
   /** 取引の目的。bffが経路ごとに決める */
   purpose: string;
   target: string;
+  /** 最初のホップに付けるscope */
+  scope: string;
   body: unknown;
 }
 
 /** ホップを呼ぶ経路。ブラウザから受け取るのは案件IDだけで、ユーザーの情報も目的も受け取らない */
 function hopRoute(event: LambdaFunctionURLEvent): HopRoute | undefined {
   const method = event.requestContext.http.method;
-  if (method === 'GET' && event.rawPath === '/api/me') return { name: 'me', purpose: 'profile', target: 'entitlement-service', body: {} };
+  if (method === 'GET' && event.rawPath === '/api/me') {
+    return { name: 'me', purpose: PURPOSES.profile, target: 'entitlement-service', scope: 'entitlements:read', body: {} };
+  }
   const m = method === 'GET' ? event.rawPath.match(CASE_SUMMARY) : null;
-  if (m) return { name: 'case-summary', purpose: 'case-summary', target: 'case-service', body: { action: 'summary', caseId: m[1] } };
+  if (m) return { name: 'case-summary', purpose: PURPOSES.caseSummary, target: 'case-service', scope: 'case:summary', body: { action: 'summary', caseId: m[1] } };
+  // 凍結の解除は、この経路でだけ目的`account-unfreeze`を刻む。エージェントの取引からは解除のscopeを発行できない
+  const u = method === 'POST' ? event.rawPath.match(CASE_UNFREEZE) : null;
+  if (u) return { name: 'case-unfreeze', purpose: PURPOSES.accountUnfreeze, target: 'case-service', scope: 'case:unfreeze', body: { action: 'unfreeze', caseId: u[1] } };
   if (method === 'POST' && event.rawPath === '/api/agent') {
     let caseId: unknown;
     try {
@@ -253,7 +262,9 @@ function hopRoute(event: LambdaFunctionURLEvent): HopRoute | undefined {
     } catch {
       return undefined;
     }
-    if (typeof caseId === 'string' && /^[\w-]{1,64}$/.test(caseId)) return { name: 'agent', purpose: 'agent-analysis', target: 'fraud-agent', body: { caseId } };
+    if (typeof caseId === 'string' && /^[\w-]{1,64}$/.test(caseId)) {
+      return { name: 'agent', purpose: PURPOSES.agentAnalysis, target: 'fraud-agent', scope: 'agent:analyze', body: { caseId } };
+    }
   }
   return undefined;
 }
@@ -290,7 +301,7 @@ async function handle(event: LambdaFunctionURLEvent, span: Span): Promise<Lambda
     span.setAttributes({ [ATTR.requestId]: requestId, [ATTR.purpose]: route.purpose, [ATTR.enduser]: s.username, 'authz.route': route.name });
     const t0 = performance.now();
     const timings: Timings = {};
-    const r = await withChain(s, requestId, route.purpose, timings, (call) => call(route.target, route.body));
+    const r = await withChain(s, requestId, route.purpose, timings, (call) => call(route.target, route.body, { scope: route.scope }));
     log('info', 'handled', {
       hop: 'bff', requestId, route: route.name, purpose: route.purpose, user: s.username, status: r.status,
       timings: { ...timings, totalMs: Math.round(performance.now() - t0) },

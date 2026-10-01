@@ -197,7 +197,7 @@ SigV4では`SecretAccessKey`が通信路に乗らず、署名はリクエスト�
 
 | サービス | 担う層 | この参照実装との関係 | 統合の形 | 位置づけ |
 |---|---|---|---|---|
-| Amazon Verified Permissions／Cedar | 判定（PDP）：この主体がこの操作をこのリソースに対してしてよいか | 協調。Cedarは入力が本物かどうかを保証しない。この参照実装が検証した値を入力にすれば、多段の奥のホップでも判定を任せられる | 各ホップのコードの判定をCedarのポリシーに移す。principalに`subject`、contextに`actor`・取引の目的・scope、エンティティに属性サービスのアクセス権を渡し、`IsAuthorized`に問い合わせるか、Cedarのライブラリで関数の中で評価する | 将来の拡張とする。初版はコードで判定する |
+| Amazon Verified Permissions／Cedar | 判定（PDP）：この主体がこの操作をこのリソースに対してしてよいか | 協調。Cedarは入力が本物かどうかを保証しない。この参照実装が検証した値を入力にすれば、多段の奥のホップでも判定を任せられる | 各ホップのコードの判定をCedarのポリシーに移す。principalに`subject`、contextに`actor`・scope、エンティティに属性サービスのアクセス権を渡し、`IsAuthorized`に問い合わせるか、Cedarのライブラリで関数の中で評価する | 将来の拡張とする。初版はコードで判定する |
 | Amazon Bedrock AgentCore Policy | エージェントのツール呼び出しの判定（Cedar） | 協調。AgentCore Gatewayの境界で判定する。この参照実装はその先、自分たちのサービス間の多段を扱う | AgentCoreでエージェントを動かす場合に併用する | 初版では扱わない |
 | AWS Verified Access | 社員が社内アプリに入る入口（VPNの代わり）。IdPとデバイスの状態をCedarのポリシーで判定し、署名したユーザーの主張（ES384のJWT、`x-amzn-ava-user-context`）をアプリに渡す | 協調。守るのは1ホップ目の手前までで、サービス間の多段は対象外 | 社員向けのシステムで、BFFの前段に置く。ただしBFFは、Cognitoのトークンを`AssumeRoleWithWebIdentity`に使う。Verified Accessが渡すJWTからSTSのセッションにつなぐ方法は未検証 | 初版では扱わない |
 

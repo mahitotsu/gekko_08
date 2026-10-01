@@ -41,4 +41,12 @@ $('summary-form').addEventListener('submit', async (e) => {
   $('result').textContent = `${res.status}\n${JSON.stringify(await res.json(), null, 2)}`;
 });
 
+// 凍結の解除。bffはこの操作でだけ、目的「凍結を解除する」（account-unfreeze）を刻む
+$('unfreeze').addEventListener('click', async () => {
+  const caseId = $('case-id').value;
+  if (!$('summary-form').reportValidity() || !confirm(`案件${caseId}の口座の凍結を解除しますか`)) return;
+  const res = await post(`/api/cases/${encodeURIComponent(caseId)}/unfreeze`);
+  $('result').textContent = `${res.status}\n${JSON.stringify(await res.json(), null, 2)}`;
+});
+
 show();

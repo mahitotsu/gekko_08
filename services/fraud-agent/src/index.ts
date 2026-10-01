@@ -3,7 +3,7 @@ import { AssumeRoleCommand, STSClient } from '@aws-sdk/client-sts';
 import { createHopHandler, log, startOtlpTraceRelay, traceAwsClient, type SessionCredentials } from '@gekko08/authz-context';
 import { startMcpRelay, type McpExchange } from '@gekko08/authz-context/mcp';
 
-// 案件の分析を行うAIエージェント。Claude Agent SDKが、Claude Code（同梱の実行ファイル）を子プロセスとして動かす。
+// 凍結の見直しの案件を分析し、解除してよいかを提案するAIエージェント。Claude Agent SDKが、Claude Code（同梱の実行ファイル）を子プロセスとして動かす。
 // MCPサーバー（fraud-mcp）は、このプロセスの中継（127.0.0.1）から共通部品で呼ぶ。子プロセスに渡すのは、中継のURLと、
 // Bedrockのモデルの呼び出しだけを許すroleの認証情報だけで、ユーザーの情報、受け取ったJWT、受け渡されたセッションは渡さない（SR-3）
 // （Claude Agent SDKのADR）
@@ -12,8 +12,9 @@ const MODEL_ID = process.env.BEDROCK_MODEL_ID!;
 const MAX_TURNS = 8;
 
 const SYSTEM_PROMPT = [
-  'あなたは銀行の不正検知アナリストです。与えられた案件を、ツールで取得したデータだけに基づいて分析してください。',
-  '分析結果は、疑わしい点、根拠となる取引、推奨する対応を、日本語で簡潔にまとめてください。',
+  'あなたは銀行の不正検知アナリストです。疑わしい取引で凍結された口座の、凍結の見直しの案件を担当します。',
+  '与えられた案件を、ツールで取得したデータだけに基づいて分析し、凍結を解除してよいかを判断してください。',
+  '結果は、疑わしい点、根拠となる取引、提案（凍結の解除か、凍結の維持か）とその理由を、日本語で簡潔にまとめてください。',
   'ツールがエラーを返した場合は、その旨を結果に含めてください。',
 ].join('\n');
 

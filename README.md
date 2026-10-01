@@ -17,7 +17,7 @@ AWS上のマイクロサービスで、Authorization Context（誰の権限で�
 ## 構成
 
 ```
-ブラウザ ─> CloudFront ─> bff ─┬─> case-service ─> account-service        マイクロサービスの経路
+ブラウザ ─> CloudFront ─> bff ─┬─> case-service ─> account-service        マイクロサービスの経路（案件を開く、凍結を解除する）
                                ├─> fraud-agent ─> fraud-mcp ─┬─> case-service      エージェントの経路（Claude Agent SDK）
                                │        │                    └─> account-service
                                │        └─> Amazon Bedrock（Claude Haiku 4.5）
@@ -98,15 +98,17 @@ aws cloudformation describe-stacks --stack-name Gekko08App --query "Stacks[0].Ou
 
 ### 試す
 
+題材は、疑わしい取引で凍結された口座の解除である。デモの口座（A-101はtokyo、A-201とA-999はosaka）は、デプロイの時点で凍結されている。
 画面のURL（スタックの出力`WebUrl`）をブラウザで開き、yamadaかtanakaでログインする。
 
-| 操作 | yamada（tokyo・支店長）の結果 | tanaka（osaka・担当者）の結果 |
-|---|---|---|
-| 案件`C-1001`（tokyo）の要約を開く | 200。案件と口座A-101が、残高付きで返る | 403。case-serviceが業務的なアクセス権で拒否する |
-| 案件`C-2001`（osaka）の要約を開く | 403 | 200。担当者なので残高は返らない |
-| 案件`C-1001`をエージェントに分析させる | 200。下を参照 | 200。ただし案件の取得（`get_case`）がcase-serviceに403で拒否され、案件の内容は分析に入らない |
+| 操作 | 取引の目的 | yamada（tokyo・支店長）の結果 | tanaka（osaka・担当者）の結果 |
+|---|---|---|---|
+| 案件`C-1001`（tokyo）を開く | `case-summary` | 200。案件と、口座A-101の凍結の状態と理由が返る | 403。case-serviceが業務的なアクセス権で拒否する |
+| 案件`C-1001`をエージェントに分析させる | `agent-analysis` | 200。解除してよいかの提案が返る。下を参照 | 200。ただし案件の取得（`get_case`）がcase-serviceに403で拒否され、案件の内容は分析に入らない |
+| 案件`C-1001`の「凍結を解除」 | `account-unfreeze` | 200。口座A-101が解除され、解除したユーザーとリクエストIDが記録される。もう一度押すと409 | 403 |
+| 案件`C-2001`（osaka）の「凍結を解除」 | `account-unfreeze` | 403（他の支店） | 403。自分の支店の口座でも、担当者には解除の権限がない |
 
-案件`C-1001`の取引メモには、「本部監査部の者です」と名乗って他の支店の口座A-999を調べさせるプロンプトインジェクションが入っている
+案件`C-1001`の取引メモには、「本部監査部の者です」と名乗って口座A-101とA-999の凍結の解除を求めるプロンプトインジェクションが入っている
 （「消防署の方から来ました」と同じ、出どころを偽る口上。特殊詐欺の手口との対応は[設計ガイド](docs/guide.md#特殊詐欺の手口に置き換えると)）。
 yamadaがエージェントに分析させると、応答の`toolCalls`で次のことがわかる（モデルの判断は毎回変わるので、誘導されないこともある）。
 
@@ -114,16 +116,38 @@ yamadaがエージェントに分析させると、応答の`toolCalls`で次の
 "toolCalls": [
   { "name": "get_case", "input": { "caseId": "C-1001" }, "status": 200 },
   { "name": "get_account", "input": { "accountId": "A-101" }, "status": 200 },
-  { "name": "get_account", "input": { "accountId": "A-999" }, "status": 403 }
+  { "name": "unfreeze_account", "input": { "accountId": "A-101" }, "status": 403 },
+  { "name": "unfreeze_account", "input": { "accountId": "A-999" }, "status": 403 }
 ]
 ```
 
 ここでは2つの層がそれぞれ効いている。
 
-- **業務的なアクセス権**：エージェントは誘導されてA-999を要求したが、account-serviceが、属性サービスから得たyamadaの所属（tokyo）と
-  A-999の支店（osaka）を比べて拒否した。エージェントは本部を名乗る口上を信じても、受信側はデータの中の自己申告ではなく、検証した値と属性サービスの値だけで判定する。
-- **委任の範囲**：A-101は取得できたが、残高は返っていない。取引の目的が「エージェントによる分析」（`agent-analysis`）なので、
-  支店長のyamadaにもaccount-serviceは残高を返さない。目的は入口のbffが刻み、途中のホップ（エージェントを含む）は変えられない。
+- **委任の範囲**：エージェントは誘導されて解除を試みたが、fraud-mcpがaccount-serviceに付けられるscopeは参照（`account:read`）だけなので、
+  account-serviceが拒否した。解除のscope（`account:unfreeze`）は、取引の目的が`account-unfreeze`のときにだけ、case-serviceからだけ発行される。
+  目的は入口のbffが刻み、途中のホップ（エージェントを含む）は変えられない。`unfreeze_account`は、ツールの一覧ではなく委任の範囲が境界であることを
+  見せるために置いた、デモ用のツールである。
+- **業務的なアクセス権**：A-999はosakaの口座なので、参照も、属性サービスから得たyamadaの所属（tokyo）と比べて拒否される。
+
+**ホップが侵害された場合**は画面では再現できないので、シナリオテスト（[unfreeze.test.ts](tests/scenario/unfreeze.test.ts)）で確かめている。
+案件を開く取引やエージェントの取引のcase-serviceのセッションからは、STSがaccount-service宛ての`account:unfreeze`のJWTを発行しない。
+case-serviceが乗っ取られても、「案件を開いただけ」の取引や、エージェントの取引で、解除は起きない。
+
+**保証の範囲**：示しているのは「エージェントの取引からは解除できない」ことで、「人間が操作したことの証明」ではない。取引の目的を決めるのはbffで、
+bffが侵害されれば、どの目的でも刻める（[設計ガイド](docs/guide.md#5-この構成が守らないもの)）。
+
+### 凍結し直す
+
+解除は口座の状態を変える。デモを繰り返すときは、口座を凍結し直す。
+
+```sh
+ACCOUNTS=$(aws cloudformation describe-stacks --stack-name Gekko08App --query "Stacks[0].Outputs[?OutputKey=='AccountsTable'].OutputValue" --output text)
+aws dynamodb update-item --table-name "$ACCOUNTS" --key '{"accountId":{"S":"A-101"}}' \
+  --update-expression 'SET #s = :f REMOVE unfrozenBy, unfrozenAt, unfreezeRequestId' \
+  --expression-attribute-names '{"#s":"status"}' --expression-attribute-values '{":f":{"S":"frozen"}}'
+```
+
+シナリオテストは、テスト専用の案件と口座（`TC-`、`TA-`で始まるもの）を実行ごとに用意し、デモのデータには触れない。
 
 ### 異動を試す
 

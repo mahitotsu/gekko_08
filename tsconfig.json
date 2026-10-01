@@ -10,6 +10,6 @@
     "resolveJsonModule": true,
     "noEmit": true
   },
-  "include": ["infra", "packages/*/src", "packages/*/test", "services/*/src", "tests"],
+  "include": ["infra", "packages/*/src", "packages/*/test", "services/*/src", "services/*/authz.ts", "tests"],
   "exclude": ["**/node_modules", "**/cdk.out"]
 }

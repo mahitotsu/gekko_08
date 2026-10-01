@@ -15,6 +15,7 @@ beforeAll(async () => {
   config = {
     hop: 'case-service', audience: 'aud-case', issuer: ISSUER, targets: {},
     callers: { 'bff-exec': { hop: 'bff', sub: CHAIN } },
+    provides: { 'case:summary': {} },
     keys: createLocalJWKSet({ keys: [jwk] }),
   };
   token = await new SignJWT({ 'https://sts.amazonaws.com/': { source_identity: 'yamada', principal_tags: { purpose: 'case-summary' }, request_tags: { scope: 'case:summary' } } })
@@ -31,15 +32,16 @@ const event = (headers: Record<string, string>, userArn = 'arn:aws:sts::12345678
 const statusOf = (r: LambdaFunctionURLResult) => (r as { statusCode: number }).statusCode;
 
 describe('createHopHandler', () => {
-  it('業務のコードに、検証済みのsubject・呼び出し元のホップ名・委任の範囲だけを渡す', async () => {
-    let got: Omit<HopContext, 'call'> | undefined;
-    const handler = createHopHandler(async (body, { subject, actor, purpose, scope, requestId }) => {
-      got = { subject, actor, purpose, scope, requestId };
+  it('業務のコードに、検証済みのsubject・呼び出し元のホップ名・scopeだけを渡す。取引の目的は渡さない', async () => {
+    let got: Record<string, unknown> | undefined;
+    const handler = createHopHandler(async (body, ctx: HopContext) => {
+      const { call: _call, ...rest } = ctx;
+      got = rest;
       return { status: 200, body: { caseId: body.caseId } };
     }, config);
     const r = await handler(event({ 'x-authz-context': token, 'x-request-id': 'req-1', 'x-user': 'tanaka' }));
     expect(statusOf(r)).toBe(200);
-    expect(got).toEqual({ subject: { id: 'yamada' }, actor: 'bff', purpose: 'case-summary', scope: 'case:summary', requestId: 'req-1' });
+    expect(got).toEqual({ subject: { id: 'yamada' }, actor: 'bff', scope: 'case:summary', requestId: 'req-1' });
   });
 
   it('検証に失敗したら、業務のコードを呼ばない', async () => {

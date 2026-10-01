@@ -8,7 +8,7 @@
 </head>
 <body>
   <main>
-    <h1>不正検知デモ</h1>
+    <h1>口座の凍結解除デモ</h1>
     <section id="signed-out" hidden>
       <p>ログインしていません。</p>
       <a class="button" href="/api/login">ログイン</a>
@@ -17,7 +17,8 @@
       <p><span id="who"></span> <button id="logout" type="button">ログアウト</button></p>
       <form id="summary-form">
         <label>案件ID <input id="case-id" value="C-1001" required pattern="[\w-]{1,64}"></label>
-        <button type="submit">要約を開く</button>
+        <button type="submit">案件を開く</button>
+        <button id="unfreeze" type="button">凍結を解除</button>
       </form>
       <form id="agent-form">
         <label>案件ID <input id="agent-case-id" value="C-1001" required pattern="[\w-]{1,64}"></label>

@@ -2,6 +2,8 @@ import { AuthzError, verifyInbound, type VerifyOptions } from '@gekko08/authz-co
 import type { AwsCredentialIdentity } from '@smithy/types';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { chainTo, mintJwt, type Outputs, purposeSession, stackOutputs, USERS } from './helpers';
+import { authz as accountServiceAuthz } from '../../services/account-service/authz';
+import { authz as caseServiceAuthz } from '../../services/case-service/authz';
 
 // FR-1：各ホップの受信側の検証を、STSが実際に発行したJWTと発行者の実際のJWKSで確かめる。
 // デプロイしたホップの入口は直前のホップしか通れないため、不正なJWTはホップと同じ共通部品（verifyInbound）に直接渡す
@@ -12,8 +14,13 @@ let chained: AwsCredentialIdentity;
 // 入口のIAMが確かめた呼び出し元に相当する値
 const callerArn = (role: string) => `arn:aws:sts::123456789012:assumed-role/${role}/fn`;
 // 対応表は「実行role名 → chain用roleのARN」で書き、ホップ名は実行role名で代える
+// 提供側の定義は、ホップと同じもの（呼び出し元の制限は、ホップ名の代わりの実行role名では照合できないので外す）
+const providesFor = (audience: string) => Object.fromEntries(Object.entries(
+  (audience === o.CaseServiceAudience ? caseServiceAuthz : accountServiceAuthz).provides!,
+).map(([scope, { purposes }]) => [scope, { purposes }]));
 const optsFor = (audience: string, callers: Record<string, string>): VerifyOptions => ({
   issuer: o.Issuer, audience, callers: Object.fromEntries(Object.entries(callers).map(([role, sub]) => [role, { hop: role, sub }])),
+  provides: providesFor(audience),
 });
 
 async function rejectedWith(p: Promise<unknown>, status: number) {

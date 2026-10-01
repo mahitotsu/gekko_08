@@ -12,7 +12,11 @@ let sign: (payload: JWTPayload, over?: { alg?: string; aud?: string; exp?: strin
 beforeAll(async () => {
   const { privateKey, publicKey } = await generateKeyPair('ES384');
   const jwk = { ...(await exportJWK(publicKey)), kid: 'k1', alg: 'ES384' };
-  opts = { issuer: ISSUER, audience: 'aud-account', callers: { 'case-exec': { hop: 'case-service', sub: CHAIN } }, keys: createLocalJWKSet({ keys: [jwk] }) };
+  opts = {
+    issuer: ISSUER, audience: 'aud-account', callers: { 'case-exec': { hop: 'case-service', sub: CHAIN } },
+    provides: { 'account:read': {}, 'account:unfreeze': { purposes: ['account-unfreeze'], callers: ['case-service'] } },
+    keys: createLocalJWKSet({ keys: [jwk] }),
+  };
   sign = (payload, over = {}) => new SignJWT(payload)
     .setProtectedHeader({ alg: 'ES384', kid: 'k1' })
     .setIssuer(over.iss ?? ISSUER)
@@ -76,6 +80,18 @@ describe('verifyInbound', () => {
   it('委任の範囲（目的かscope）が欠けたJWTを拒否する', async () => {
     await rejected(verifyInbound(await sign(ns({ principal_tags: {} })), CALLER_ARN, opts), 401);
     await rejected(verifyInbound(await sign(ns({ request_tags: undefined })), CALLER_ARN, opts), 401);
+  });
+
+  it('提供側の定義にないscopeを拒否する', async () => {
+    await rejected(verifyInbound(await sign(ns({ request_tags: { scope: 'account:delete' } })), CALLER_ARN, opts), 403);
+  });
+
+  it('目的の制限があるscopeは、許された目的と呼び出し元のときだけ受け付ける', async () => {
+    const unfreeze = (purpose: string) => ns({ principal_tags: { purpose }, request_tags: { scope: 'account:unfreeze' } });
+    expect((await verifyInbound(await sign(unfreeze('account-unfreeze')), CALLER_ARN, opts)).scope).toBe('account:unfreeze');
+    await rejected(verifyInbound(await sign(unfreeze('case-summary')), CALLER_ARN, opts), 403);
+    const otherCaller = { ...opts, callers: { 'case-exec': { hop: 'fraud-mcp', sub: CHAIN } } };
+    await rejected(verifyInbound(await sign(unfreeze('account-unfreeze')), CALLER_ARN, otherCaller), 403);
   });
 });
 

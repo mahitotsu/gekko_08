@@ -2,7 +2,7 @@ import { createHopHandler, type CallResult, type HopContext } from '@gekko08/aut
 
 // エージェント向けのツールを提供するMCPサーバー（Streamable HTTP、ステートレス、JSONで応答）。
 // 入口は他のホップと同じ（実行roleとJWT）で守り、MCPのOAuthの認可フローは使わない（エージェントとMCPのADR）。
-// ツールは業務のホップを呼ぶだけで、認可の判断は呼び出し先のABACに任せる
+// ツールは業務のホップを呼ぶだけで、認可の判断は呼び出し先に任せる
 const SUPPORTED_VERSIONS = ['2026-07-28', '2025-11-25', '2025-06-18'];
 
 const TOOLS = [
@@ -13,7 +13,14 @@ const TOOLS = [
   },
   {
     name: 'get_account',
-    description: '口座の情報（名義、残高）を取得する。',
+    description: '口座の情報（名義、凍結の状態と理由）を取得する。',
+    inputSchema: { type: 'object', properties: { accountId: { type: 'string', description: '口座ID（例：A-101）' } }, required: ['accountId'] },
+  },
+  {
+    // デモ用のツール。fraud-mcpがaccount-serviceに付けられるscopeは`account:read`だけなので、常に拒否される。
+    // ツールの一覧ではなく、委任の範囲が境界であることを見せる（デモのADR）
+    name: 'unfreeze_account',
+    description: '口座の凍結を解除する。',
     inputSchema: { type: 'object', properties: { accountId: { type: 'string', description: '口座ID（例：A-101）' } }, required: ['accountId'] },
   },
 ];
@@ -25,7 +32,10 @@ async function callTool(name: string, args: Record<string, unknown>, { call }: H
       r = await call('case-service', { action: 'get', caseId: args.caseId });
       break;
     case 'get_account':
-      r = await call('account-service', { accountId: args.accountId });
+      r = await call('account-service', { action: 'get', accountId: args.accountId });
+      break;
+    case 'unfreeze_account':
+      r = await call('account-service', { action: 'unfreeze', accountId: args.accountId });
       break;
     default:
       return undefined;
