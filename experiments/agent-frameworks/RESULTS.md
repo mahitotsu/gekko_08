@@ -10,6 +10,9 @@ Claude Agent SDKは、中継の通り道を変えて2つの構成で確かめた
 
 生データ：`out-results.json`、`out-otel.json`（git管理外）。
 
+再現：この検証のあと、本体のfraud-agentをClaude Agent SDKで置き換え、bffのエージェントの実装を選ぶ機能を外した。
+この実験を動かすには、コミット`64c1cee`の時点の本体を使う。
+
 ## 構成
 
 | | Strands Agents 1.19.0（TypeScript） | Claude Agent SDK 0.3.286（TypeScript） |

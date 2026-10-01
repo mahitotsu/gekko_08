@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (2026-09-30)
+Accepted (2026-09-30)。決定1（Converse APIのループ）は、[Claude Agent SDKのADR](20261001040729-fraud-agent-on-claude-agent-sdk.md)で置き換えた。
 
 ## Context
 

@@ -18,7 +18,7 @@ AWS上のマイクロサービスで、Authorization Context（誰の権限で�
 
 ```
 ブラウザ ─> CloudFront ─> bff ─┬─> case-service ─> account-service        マイクロサービスの経路
-                               ├─> fraud-agent ─> fraud-mcp ─┬─> case-service      エージェントの経路
+                               ├─> fraud-agent ─> fraud-mcp ─┬─> case-service      エージェントの経路（Claude Agent SDK）
                                │        │                    └─> account-service
                                │        └─> Amazon Bedrock（Claude Haiku 4.5）
                                └─> entitlement-service（属性サービス。case-service・account-serviceからも呼ばれる）
@@ -27,7 +27,7 @@ AWS上のマイクロサービスで、Authorization Context（誰の権限で�
 | ディレクトリ | 内容 |
 |---|---|
 | [infra/](infra/) | CDKアプリ（単一のスタック`Gekko08App`） |
-| [packages/authz-context/](packages/authz-context/) | 各ホップが使う共通部品。JWTの検証、chain、JWTの発行、署名付きの呼び出し |
+| [packages/authz-context/](packages/authz-context/) | 各ホップが使う共通部品。JWTの検証、chain、JWTの発行、署名付きの呼び出し、エージェントからMCPサーバーを呼ぶ部品 |
 | [services/](services/) | 各Lambdaのハンドラー |
 | [web/](web/) | デモの画面 |
 | [tests/](tests/) | 要件のIDにひも付けたシナリオテスト |
@@ -46,6 +46,9 @@ AWS上のマイクロサービスで、Authorization Context（誰の権限で�
 - Amazon BedrockでClaude Haiku 4.5を使えること。アカウントによっては、Anthropicのモデルを初めて使う前に利用目的の申請が必要になる
   （Bedrockのコンソールのモデルカタログから行う）。参照実装は日本国内の推論プロファイル（東京・大阪）で呼ぶので、
   ap-northeast-1にデプロイする。
+- デプロイのときにnpmのレジストリにつながること。エージェント（fraud-agent）は[Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk/overview)で動き、
+  Lambda用のClaude Code（linux-arm64の実行ファイル、約241MB）を合成のときにレジストリから取得して関数に同梱する。
+  Claude Agent SDKとClaude Codeは、Anthropicの利用条件に従う。
 
 ## 始め方
 

@@ -1,3 +1,6 @@
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import * as cdk from 'aws-cdk-lib';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import { Construct } from 'constructs';
@@ -5,6 +8,7 @@ import { AuthFoundation } from './constructs/auth-foundation';
 import { Bff } from './constructs/bff';
 import { DemoData } from './constructs/demo-data';
 import { Hop } from './constructs/hop';
+import { REPO_ROOT, type NodeFunctionProps } from './constructs/node-function';
 import { OutboundFederationCheck } from './constructs/outbound-federation-check';
 import { WebFrontend } from './constructs/web-frontend';
 
@@ -13,6 +17,32 @@ const BEDROCK_MODEL = 'anthropic.claude-haiku-4-5-20251001-v1:0';
 /** 取引の目的。bffが経路ごとに決めて刻む（設計書§3） */
 export const PURPOSE = { profile: 'profile', caseSummary: 'case-summary', agentAnalysis: 'agent-analysis' } as const;
 export const BEDROCK_PROFILE = `jp.${BEDROCK_MODEL}`;
+
+// Lambdaの関数とレイヤーを合わせた展開後の上限は250MiB（262,144,000バイト）。上限に近づいたら合成を失敗させる
+const MAX_BUNDLE_BYTES = 255_000_000;
+
+/**
+ * fraud-agentに、Claude Code（linux-arm64の実行ファイル）を同梱する。SDKと同じ版を、npmのレジストリから取得する。
+ * 開発機の`node_modules`には開発機のプラットフォーム向けしか入らないため。SDKの版はfraud-agentの`package.json`で固定する
+ */
+function claudeCodeBundling(): NodeFunctionProps['bundling'] {
+  const manifest = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'services/fraud-agent/package.json'), 'utf8')) as { dependencies: Record<string, string> };
+  const version = manifest.dependencies['@anthropic-ai/claude-agent-sdk'];
+  if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error(`pin @anthropic-ai/claude-agent-sdk to an exact version (got ${version})`);
+  const pkg = '@anthropic-ai/claude-agent-sdk-linux-arm64';
+  const cache = path.join(os.tmpdir(), `gekko08-claude-code-${version}`);
+  return {
+    commandHooks: {
+      beforeBundling: () => [],
+      beforeInstall: () => [],
+      afterBundling: (_inputDir: string, outputDir: string) => [
+        `test -f ${cache}/package/claude || (mkdir -p ${cache} && cd ${cache} && npm pack ${pkg}@${version} --silent && tar -xzf *.tgz)`,
+        `cp ${cache}/package/claude ${outputDir}/claude`,
+        `size=$(du -sb ${outputDir} | cut -f1); if [ "$size" -gt ${MAX_BUNDLE_BYTES} ]; then echo "fraud-agent bundle is $size bytes (limit ${MAX_BUNDLE_BYTES})" >&2; exit 1; fi`,
+      ],
+    },
+  };
+}
 
 /** 参照実装の単一のスタック（設計書§9） */
 export class Gekko08AppStack extends cdk.Stack {
@@ -50,16 +80,27 @@ export class Gekko08AppStack extends cdk.Stack {
       hopName: 'fraud-mcp', entry: 'services/fraud-mcp/src/index.ts', issuer, callsOthers: true,
     });
     this.fraudMcp = fraudMcp;
+    // エージェントはClaude Agent SDKで、Claude Code（linux-arm64の実行ファイル）を子プロセスとして動かす（Claude Agent SDKのADR）
     const fraudAgent = new Hop(this, 'FraudAgent', {
       hopName: 'fraud-agent', entry: 'services/fraud-agent/src/index.ts', issuer, callsOthers: true,
-      environment: { BEDROCK_MODEL_ID: BEDROCK_PROFILE }, timeout: cdk.Duration.seconds(55),
+      environment: { BEDROCK_MODEL_ID: BEDROCK_PROFILE }, timeout: cdk.Duration.seconds(55), memorySize: 1024,
+      bundling: claudeCodeBundling(),
     });
     // Claude Haiku 4.5を、日本国内の推論プロファイル（東京・大阪）で呼ぶ
     this.bedrockResources = [
       this.formatArn({ service: 'bedrock', resource: 'inference-profile', resourceName: BEDROCK_PROFILE }),
       ...['ap-northeast-1', 'ap-northeast-3'].map((region) => `arn:aws:bedrock:${region}::foundation-model/${BEDROCK_MODEL}`),
     ];
-    fraudAgent.fn.addToRolePolicy(new iam.PolicyStatement({ actions: ['bedrock:InvokeModel'], resources: this.bedrockResources }));
+    // モデルを呼ぶのはClaude Codeの子プロセスで、渡すのはこのroleの認証情報だけ。ホップの実行roleの認証情報は渡さない
+    const modelRole = new iam.Role(this, 'FraudAgentModelRole', {
+      assumedBy: new iam.ArnPrincipal(fraudAgent.execRole.roleArn),
+      description: 'fraud-agent: invokes the Bedrock model only (credentials for the Claude Code child process)',
+    });
+    modelRole.addToPolicy(new iam.PolicyStatement({
+      actions: ['bedrock:InvokeModel', 'bedrock:InvokeModelWithResponseStream'], resources: this.bedrockResources,
+    }));
+    modelRole.grantAssumeRole(fraudAgent.execRole);
+    fraudAgent.fn.addEnvironment('MODEL_ROLE_ARN', modelRole.roleArn);
 
     // 入口
     const bff = new Bff(this, 'Bff');

@@ -85,6 +85,7 @@ AWSが保証した値ではないので、受信側の判定は変わらない�
 | 入口はBFFにし、ブラウザには認証情報を持たせない | ブラウザは秘密を保持できない。ブラウザには実行roleがなく、actorを確かめられない。取引の目的を決める場所としても、サーバー側の入口が要る | [入口のADR](adr/20260930083437-entry-via-bff.md) |
 | IdPはCognito User PoolとPre Token Generation V2 | 1回の`AssumeRoleWithWebIdentity`でSourceIdentityを設定できる | [IdPのADR](adr/20260930091026-idp-cognito-user-pool.md) |
 | ホップ間はFunction URLの`AWS_IAM`認証で、mTLSは使わない | 参加資格をネットワークではなくIAMで守れる。SPIREのような常駐コンポーネントが要らない | [コンピュートと通信のADR](adr/20260930091257-lambda-function-url-without-mtls.md) |
+| エージェントはClaude Agent SDKで作り、MCPは関数の中の中継から共通部品で呼ぶ | 広く使われているフレームワークでも同じ境界を保てることを示す。SDKのMCPには固定のヘッダーしか付けられないので、認証情報を持つ親のプロセスが中継する。中継をHTTPにすると、トレースの親子関係も一続きになった | [Claude Agent SDKのADR](adr/20261001040729-fraud-agent-on-claude-agent-sdk.md)、[検証](../experiments/agent-frameworks/RESULTS.md) |
 | MCPサーバーもOAuthではなく他のホップと同じ入口で守る | ホップの仕組みを1種類にできる。MCPの仕様で認可は任意（OAuthは推奨） | [エージェントとMCPのADR](adr/20260930093746-agent-and-mcp-on-lambda.md) |
 
 ### 委任の範囲の決め方
@@ -140,8 +141,26 @@ Token Exchangeでは、認可サーバーがトークンを交換するたびに
    });
    ```
 
-6. **データは各ホップの実行roleで読む。** ユーザーの権限でAWSリソースに直接アクセスすることは扱わない（要件定義のスコープ外）。
-7. **シナリオテストを要件にひも付ける。** [tests/scenario](../tests/scenario/)を参考に、正しいユーザーが通ること、アクセス権のないユーザー、
+6. **エージェントは、MCPの呼び出しを共通部品に通す。** フレームワークのMCPクライアントが、他のホップと同じ入口を通るようにする。
+   JWTはリクエストごと、宛先ごとに作るので、固定のヘッダーでは渡せない。フレームワークに応じて2つの形がある
+   （[検証](../experiments/agent-frameworks/RESULTS.md)）。
+
+   | 形 | 当てはまるフレームワーク | 使う部品 |
+   |---|---|---|
+   | 直接型 | MCPクライアントに通信路を渡せるもの（MCPのSDKの`Client`、Strands Agentsなど） | `HopMcpTransport`を渡す |
+   | 中継型 | 固定のヘッダーしか付けられないもの（Claude Agent SDKなど） | `startMcpRelay`で`127.0.0.1`に中継を立て、そのURLをHTTPのMCPサーバーとして渡す |
+
+   ```ts
+   import { startMcpRelay } from '@gekko08/authz-context/mcp';
+   const relay = await startMcpRelay(call, 'orders-mcp');
+   // query({ prompt, options: { mcpServers: { orders: { type: 'http', url: relay.url } }, ... } })
+   await relay.close();
+   ```
+
+   エージェントが子プロセスで動く場合（Claude Agent SDK）は、子プロセスに認証情報を渡さない。モデルを呼ぶのに要る認証情報は、
+   モデルの呼び出しだけを許すroleのものにし、組み込みのツール（シェルやファイルの読み書き）を無効にする（[fraud-agent](../services/fraud-agent/src/index.ts)）。
+7. **データは各ホップの実行roleで読む。** ユーザーの権限でAWSリソースに直接アクセスすることは扱わない（要件定義のスコープ外）。
+8. **シナリオテストを要件にひも付ける。** [tests/scenario](../tests/scenario/)を参考に、正しいユーザーが通ること、アクセス権のないユーザー、
    目的やscopeに合わない呼び出し、飛ばした呼び出し、許可していない主体が拒否されることを確かめる。
 
 ### 守るべき規律
@@ -167,6 +186,7 @@ Token Exchangeでは、認可サーバーがトークンを交換するたびに
 | アカウントの管理者 | IAMの権限を持つ主体は、resource policyや信頼ポリシーを書き換えられる。管理者に対する境界は、アカウントの分離やSCPで作る必要がある |
 | 途中での取り消し | 発行済みのJWT（有効期間5分）とchainのセッション（15分）は、途中で取り消さない。ログアウトはBFFのセッションを消し、リフレッシュトークンを取り消すまで。業務的なアクセス権の変更は、次のリクエストから効く |
 | エージェントの判断 | プロンプトインジェクションでエージェントが誤った要求をすることは防がない。防ぐのは、その要求が委任の範囲とユーザーの権限を超えること |
+| エージェントの子プロセスからの隔離 | fraud-agentのClaude Codeは、親のプロセスと同じ実行環境、同じOSのユーザーで動く。子プロセスに認証情報を渡さないのは環境変数の範囲で、OSの境界ではない。子プロセスに任意のコードを実行させない境界は、組み込みのツールを無効にする設定である。中継は、子プロセスから呼び出し先（fraud-mcp）をユーザーの代理で呼べる、その実行環境の中の入口になる |
 | アプリからの認証情報の隔離 | 共通部品はアプリと同じプロセスで動くライブラリで、アプリが乗っ取られると、受け渡されたセッションも実行roleの認証情報も読める。k8sでEnvoyなどのサイドカーに任せる構成と違い、Lambdaでは関数とExtensionが同じ実行環境で動くので、Extensionに分けても、乗っ取られたアプリに対する境界にはならない見込み（未検証） |
 
 補足：
@@ -203,6 +223,8 @@ case-serviceとaccount-serviceはそれぞれ属性サービスも呼ぶ）を10
   約250ms増えた。
 - コールドスタート直後は、JWTの検証に発行者のJWKSの取得が加わり、約340msかかった。
 - エージェントの経路では、モデルの呼び出し（Claude Haiku 4.5）が1回あたり約1〜5秒かかり、認可の処理の追加は相対的に小さい。
+  fraud-agentはClaude Codeを子プロセスとして起動するので、1回の分析（ツールの呼び出し3回）は全体で約10〜12秒、最大メモリは約500MBだった
+  （[検証](../experiments/agent-frameworks/RESULTS.md)。コールドスタートの初期化は約0.6〜0.7秒）。
 - 自分の環境では、`npm run test:scenario`の結果（`tests/out-latency.json`）で確かめる。
 
 ## 7. 規模の上限

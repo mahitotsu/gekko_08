@@ -233,17 +233,13 @@ function hopRoute(event: LambdaFunctionURLEvent): HopRoute | undefined {
   if (m) return { name: 'case-summary', purpose: 'case-summary', target: 'case-service', body: { action: 'summary', caseId: m[1] } };
   if (method === 'POST' && event.rawPath === '/api/agent') {
     let caseId: unknown;
-    let agent: unknown;
     try {
       const raw = event.isBase64Encoded ? Buffer.from(event.body ?? '', 'base64').toString() : event.body;
-      ({ caseId, agent } = JSON.parse(raw || '{}'));
+      caseId = JSON.parse(raw || '{}').caseId;
     } catch {
       return undefined;
     }
-    // エージェントの実装を選べる（`fraud-agent-<名前>`が呼び出し先の設定にあるときだけ）。どれを選んでも取引の目的は同じで、
-    // 呼べるかは入口のIAMが決める
-    const target = agent === undefined ? 'fraud-agent' : typeof agent === 'string' && /^[a-z0-9]{1,32}$/.test(agent) ? `fraud-agent-${agent}` : undefined;
-    if (target && typeof caseId === 'string' && /^[\w-]{1,64}$/.test(caseId)) return { name: 'agent', purpose: 'agent-analysis', target, body: { caseId } };
+    if (typeof caseId === 'string' && /^[\w-]{1,64}$/.test(caseId)) return { name: 'agent', purpose: 'agent-analysis', target: 'fraud-agent', body: { caseId } };
   }
   return undefined;
 }
@@ -259,7 +255,7 @@ export const handler = async (event: LambdaFunctionURLEvent): Promise<LambdaFunc
     const s = await loadSession(event);
     if (!s) return json(401, { error: 'not logged in' });
     const route = hopRoute(event);
-    if (!route || !(await settings()).config.targets[route.target]) return json(404, { error: 'not found' });
+    if (!route) return json(404, { error: 'not found' });
 
     const requestId = randomUUID();
     const t0 = performance.now();

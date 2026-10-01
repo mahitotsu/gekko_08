@@ -42,7 +42,7 @@
                                                   │          ↑               ↑
                                                   ├──> fraud-agent ──> fraud-mcp
                                                   │          │
-                                                  │          └──> Amazon Bedrock（Claude Haiku 4.5）
+                                                  │          └──> Amazon Bedrock（Claude Haiku 4.5。Claude Codeの子プロセスが呼ぶ）
                                                   │
                                                   └──> entitlement-service  <── case-service、account-service
 ```
@@ -52,7 +52,7 @@
 | bff | ログイン、セッション、取引の目的の決定、最初のホップ | ブラウザ（CloudFront経由） | case-service、fraud-agent、entitlement-service |
 | case-service | 不正検知の案件と取引の参照 | bff、fraud-mcp | account-service、entitlement-service |
 | account-service | 口座の参照 | case-service、fraud-mcp | entitlement-service |
-| fraud-agent | 案件の分析を行うAIエージェント（MCPクライアント） | bff | fraud-mcp、Bedrock |
+| fraud-agent | 案件の分析を行うAIエージェント。Claude Agent SDKがClaude Codeを子プロセスとして動かし、MCPは関数の中の中継から呼ぶ（§8） | bff | fraud-mcp、Bedrock |
 | fraud-mcp | エージェント向けのツールを提供するMCPサーバー | fraud-agent | case-service、account-service |
 | entitlement-service | 属性サービス。ユーザー本人の業務的なアクセス権を返す（終端） | bff、case-service、account-service | なし |
 
@@ -165,7 +165,8 @@ entitlement-serviceは呼び出し先を持たないので、chain用roleを持�
 
 | 種類 | 個数 | 権限 |
 |---|---|---|
-| 実行role | Lambda関数ごとに1つ | 自分のデータ（DynamoDB）へのアクセス、ログ出力。fraud-agentはBedrockの呼び出し、bffはセッションのテーブルとSSMのパラメータ。ホップの呼び出しには権限を付けない（呼び出し先のresource policyで許可する） |
+| 実行role | Lambda関数ごとに1つ | 自分のデータ（DynamoDB）へのアクセス、ログ出力。fraud-agentはモデル用のroleの引き受け、bffはセッションのテーブルとSSMのパラメータ。ホップの呼び出しには権限を付けない（呼び出し先のresource policyで許可する） |
+| モデル用のrole | 1つ（fraud-agent） | Bedrockのモデルの呼び出し（`bedrock:InvokeModel`・`bedrock:InvokeModelWithResponseStream`）だけ。fraud-agentの実行roleが引き受け、その認証情報だけをClaude Codeの子プロセスに渡す |
 | federated role | 1つ | 目的用のroleへの`sts:AssumeRole`・`sts:TagSession`・`sts:SetSourceIdentity`だけ |
 | 目的用のrole | 1つ | bffの呼び出し先のchain用roleへのchainと、JWTの発行（§4の表のとおり） |
 | chain用role | §4の表のとおり | 次のchain用roleへの`sts:AssumeRole`・`sts:TagSession`・`sts:SetSourceIdentity`と、JWTの発行（§4の表のとおり） |
@@ -268,6 +269,14 @@ bffのFunction URLを直接呼べうるが、セッションcookieがなけれ�
 
 **送信時**：§4の手順を行う。呼び出し先ごとのscopeは設定から付け、業務のコードは選ばない。STSクライアントとJWKSはLambdaの実行環境ごとに使い回す。
 
+**MCP**（`@gekko08/authz-context/mcp`）：MCPサーバーのホップを、エージェントのフレームワークから送信時の手順で呼ぶための部品。
+
+- `HopMcpTransport`（直接型）：MCPの`Transport`。MCPクライアントを差し替えられるフレームワークに渡す。1つのメッセージを1回の送信で送る。
+- `startMcpRelay`（中継型）：`127.0.0.1`で受けたMCPのメッセージを、送信時の手順でそのまま呼び出し先へ転送する。MCPクライアントを差し替えられず、
+  固定のヘッダーしか付けられないフレームワーク（Claude Agent SDK）に使う。認可の判断はせず、MCPのプロトコルも解釈しない
+  （`initialize`などにも呼び出し先が応える）。受け取った`traceparent`を転送するときのコンテキストにし、自分のスパンは作らない。
+- どちらも、メッセージとその応答を業務のコードに知らせる（fraud-agentはツールの呼び出しの記録に使う）。
+
 **ログ**：リクエストID、ホップ名、呼び出し元のホップ名（actor）と実行role名、subject、目的、scope、JWTの`sub`、判定結果、処理時間を構造化ログに出す。
 認証情報、JWT、cookieはログに出さない。
 
@@ -312,13 +321,26 @@ bffのFunction URLを直接呼べうるが、セッションcookieがなけれ�
   - 案件の取引メモには、本部監査部を名乗って他の支店の口座（A-999）の参照を促す文言を混ぜておく。エージェントがそれに誘導されて口座A-999を要求しても、
     account-serviceが業務的なアクセス権で拒否する。
 - **異動**：人事データでyamadaの所属をosakaに変えると、次のリクエストから、tokyoの案件は拒否され、osakaの案件を開ける（FR-8）。
-- **エージェントとLLM**：fraud-agentはBedrockのConverse APIでClaude Haiku 4.5を呼び、ツールはfraud-mcpから取得する（MCPのtools/list・tools/call）。
-  モデルに渡すのは業務データとツールの結果だけで、ヘッダーや認証情報は渡さない。
-  モデルは日本国内の推論プロファイル（`jp.anthropic.claude-haiku-4-5-20251001-v1:0`、東京・大阪）で呼ぶ。1回の分析でモデルを呼ぶのは最大8回。
+- **エージェント**：fraud-agentは、Claude Agent SDK（版を固定する）でClaude Code（linux-arm64の実行ファイル、関数に同梱）を子プロセスとして動かす
+  （[Claude Agent SDKのADR](../adr/20261001040729-fraud-agent-on-claude-agent-sdk.md)）。
+  - **プロセスの分担**：親（Node.jsのハンドラー）は、受信の検証、中継、子プロセスの起動を行い、認証情報を持つ。子（Claude Code）は、
+    エージェントのループを回し、Bedrockを呼び、中継をMCPサーバーとして呼ぶ。
+  - **中継**：分析のたびに、親が`startMcpRelay`（§6）で`127.0.0.1`の中継を立て、Claude Codeには`fraud`という名前のHTTPのMCPサーバーとして渡す。
+    中継は、受けたメッセージを送信時の手順（§4）でfraud-mcpへ転送する。分析が終わったら閉じる。
+  - **子プロセスに渡すもの**：環境変数は引き継がず、モデル用のroleの認証情報（§5）、リージョン、書き込める場所（`/tmp`）、Bedrockを使う設定だけを渡す。
+    受け取ったJWT、受け渡されたセッション、chainのセッション、実行roleの認証情報は渡さない。モデル用のroleの認証情報は実行環境ごとに使い回し、
+    期限の10分前に引き受け直す。
+  - **子プロセスの制限**：組み込みのツール（Bash、Readなど）は無効にし、中継のツール（`mcp__fraud__*`）だけを許可なしで使わせる（それ以外は拒否）。
+    設定ファイルを読まず、セッションを保存しない。Anthropicへの必須でない通信と自動更新を止める。
+  - **モデル**：Claude Haiku 4.5を、日本国内の推論プロファイル（`jp.anthropic.claude-haiku-4-5-20251001-v1:0`、東京・大阪）で呼ぶ。
+    補助的な処理に使う小さいモデルも同じにする。1回の分析のターンは最大8回。
+  - **応答**：分析の結果と、ツールの呼び出しの記録（ツール名、引数、呼び出し先のHTTPステータス）を返す。記録は中継が知らせるメッセージから取る。
+    エージェントが最後まで終わらなかったら502を返す。
+  - **関数**：メモリは1024MB。成果物（展開後）は約246MBで、そのうち実行ファイルが約241MB。合成のときに大きさを確かめ、255,000,000バイトを
+    超えたら失敗させる（zipの上限は250MiB）。超えたら、コンテナイメージに切り替える。
 - **MCPの実装**：fraud-mcpはStreamable HTTPのステートレスなサーバーで、SSEを使わずJSONで応答する。ツールは`get_case`（case-service）と
   `get_account`（account-service）の2つで、呼び出し先のホップの結果（HTTPステータスを含む）をそのまま返す。認可の判断はしない。
-  fraud-agentは分析のたびに`initialize`から始め、MCPの各メッセージを共通部品の送信（§4）で送る。MCPが求める`Accept`と
-  `MCP-Protocol-Version`のヘッダーは、共通部品に追加のヘッダーとして渡す。
+  プロトコルの版は`2026-07-28`・`2025-11-25`・`2025-06-18`に応じる。
 - **タイムアウト**：CloudFrontのオリジンの応答待ちは既定の上限の60秒で、bffのLambdaも60秒、fraud-agentは55秒とする。
   他のホップは30秒。
 - **MCPの認可についての注記**：MCPの仕様では認可は任意で、HTTPではOAuthに従うことが推奨される。この参照実装のfraud-mcpはOAuthではなく、
@@ -341,7 +363,7 @@ npmのワークスペースで次のように分ける。
 | Construct | 作るもの |
 |---|---|
 | `AuthFoundation` | Cognito User Pool（Essentials、マネージドログイン）、アプリクライアント、Pre Token Generation V2のLambda、OIDC provider、federated role。アプリクライアントには属性の書き込みを許さない |
-| `Hop` | `NodejsFunction`（関数ごとの実行role）、Function URL（`AWS_IAM`）、入口のresource policy、必要ならchain用role |
+| `Hop` | `NodejsFunction`（関数ごとの実行role）、Function URL（`AWS_IAM`）、入口のresource policy、必要ならchain用role。メモリ量とバンドルの設定を変えられる（fraud-agentは実行ファイルを同梱する） |
 | `Hop#allowCaller(caller, { scope, purposes })` | 呼び出し元と呼び出し先をつなぐ。入口のresource policyへの追加、chain用roleの信頼とchain権限、JWTの発行の権限（宛先、scope、目的）、`sub`の対応表、呼び出し元の設定（URL、aud、scope） |
 | `Bff` | bffの`NodejsFunction`とFunction URL、目的用のrole、セッションのテーブル、SSMのパラメータ（設定とシークレット）。`Bff#asCaller`で目的用のroleをchain用roleとして渡す |
 | `WebFrontend` | CloudFront、S3（静的なフロントエンド）、bffのFunction URLへのOAC |
@@ -388,6 +410,8 @@ NFR-3のテストは、集計結果を`tests/out-latency.json`（git管理外）
   `GetOutboundWebIdentityFederationInfo`を呼び、無効ならデプロイを失敗させて有効化の手順（`EnableOutboundWebIdentityFederation`）を示す。
   有効なら、アカウント固有の発行者URL（`IssuerIdentifier`）を取得して、各ホップにJWTの`iss`として渡す。
 - **Amazon Bedrockのモデル**：アカウントによっては、Claudeのモデルを使う前に利用の申請が必要になる。手順はREADMEに書く。
+- **npmのレジストリ**：合成のときに、Claude Code（linux-arm64の実行ファイル）をnpmのレジストリから取得する。開発機の`node_modules`には、
+  開発機のプラットフォーム向けしか入らないため。取得したものは一時ディレクトリに版ごとに置き、次からは使い回す。
 
 ### 呼び出し関係の制約
 
