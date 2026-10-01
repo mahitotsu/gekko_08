@@ -1,7 +1,8 @@
 # 検証結果：エージェントのフレームワークへの当てはめ
 
 実施：2026-10-01（UTC）、ap-northeast-1。本体のスタック`Gekko08App`に、フレームワークで作ったfraud-agentを
-2つ加えて（[bin/app.ts](bin/app.ts)）、シナリオテスト（[test/agent-frameworks.test.ts](test/agent-frameworks.test.ts)）を2回実行した。
+2つ加えて（[bin/app.ts](bin/app.ts)）、シナリオテスト（[test/agent-frameworks.test.ts](test/agent-frameworks.test.ts)）を実行した。
+Claude Agent SDKは、中継の通り道を変えて2つの構成で確かめた（プロセス内の`sdk`型を2回、`127.0.0.1`のHTTPを1回）。
 モデルは本体と同じClaude Haiku 4.5（Bedrock、日本国内の推論プロファイル）。
 
 目的：本体のfraud-agentは、BedrockのConverse APIで書いた最小限のツール呼び出しのループである。実際のエージェントのフレームワークで
@@ -14,8 +15,8 @@
 | | Strands Agents 1.19.0（TypeScript） | Claude Agent SDK 0.3.286（TypeScript） |
 |---|---|---|
 | 動き方 | 同じプロセスのライブラリ | Claude Code（linux-arm64の実行ファイル）を子プロセスとして起動する |
-| MCPを共通部品に通す方法 | **直接型**：`McpClient`に、共通部品の`call`で送る通信路（[hop-transport.ts](src/hop-transport.ts)）を渡す | **中継型**：SDKのHTTPのMCPには固定のヘッダーしか付けられない。プロセス内のMCPサーバーを置き、MCPクライアント（同じ通信路）でfraud-mcpへ中継する（[claude-agent.ts](src/claude-agent.ts)） |
-| 関数の設定 | 512MB、esbuildで1ファイルにまとめる | 2048MB、esbuildでまとめ、実行ファイルを同梱する |
+| MCPを共通部品に通す方法 | **直接型**：`McpClient`に、共通部品の`call`で送る通信路（[hop-transport.ts](src/hop-transport.ts)）を渡す | **中継型**：SDKのHTTPのMCPには固定のヘッダーしか付けられない。親のプロセスに中継のMCPサーバーを置き、MCPクライアント（同じ通信路）でfraud-mcpへ中継する（[claude-agent.ts](src/claude-agent.ts)）。中継の通り道は、最初はSDKの`sdk`型（子プロセスとの標準入出力）、次に`127.0.0.1`で受けるHTTPにした |
+| 関数の設定 | 512MB、esbuildで1ファイルにまとめる | 2048MB（HTTPの構成では1024MB）、esbuildでまとめ、実行ファイルを同梱する |
 | 組み込みに書いたコード | 約25行（エージェントの定義） | 約60行（中継のサーバー、子プロセスの環境変数、組み込みのツールの無効化） |
 
 通信路は約70行で、両方で共有した。ツール呼び出しの記録（ツール名、引数、呼び出し先のHTTPステータス）も、フレームワークに依らず通信路で取った。
@@ -33,7 +34,8 @@ OTelの出力は、フレームワークで形式も中身も大きく違った�
 
 - Strandsは、OTelの生成AI向けの標準（`gen_ai.*`）でスパンを出し、**メッセージの本文（システムプロンプト、業務データ、ツールの結果）を既定で記録する**。止める設定はない。
 - Claude Agent SDKは独自の形式（`claude_code.*`）で、トレース・メトリクス・ログを出し、**本文は既定で記録しない**。
-- どちらも、ホップのスパン（今回は仮のルートのスパン）と同じトレースにつながった。
+- どちらも、ホップのスパン（今回は仮のルートのスパン）と同じトレースにつながった。Claude Agent SDKでは、中継をHTTPにすると、
+  中継への`tools/call`がClaude Codeのツールのスパンの子になり、ルートからfraud-mcpへの呼び出しまで親子関係が一続きになった。
 
 ## 観測した事実
 
@@ -59,6 +61,8 @@ OTelの出力は、フレームワークで形式も中身も大きく違った�
 
 - 処理時間の大半はモデルの呼び出しである。Claude Agent SDKは、子プロセスの起動と、中継の往復の分だけ長い。
 - Claude Agent SDKの1回目の処理時間には、子プロセスの初回の起動が含まれる。
+- HTTPの中継で、メモリの割り当てを1024MBにした回：初期化559ms、処理時間（yamadaの2・3回目）9.9〜10.2秒（関数全体で12.2〜12.4秒）、
+  最大メモリ489〜504MB。2048MBの回との差は、モデルの応答時間のぶれと区別できない。
 
 ### OTelの出力
 
@@ -70,7 +74,7 @@ Claude Codeの出力は、関数の中に立てたOTLP/HTTP（JSON）の受け�
 | 出すもの | トレースだけ（メトリクスは`setupMeter`を呼んだときだけ） | トレース、メトリクス、ログ（イベント） |
 | 形式 | OTelの生成AI向けの標準。`invoke_agent`→`execute_agent_loop_cycle`→`chat`／`execute_tool`。属性は`gen_ai.request.model`、`gen_ai.usage.*`、`gen_ai.tool.name`、`gen_ai.tool.status`など | 独自。スパンは`claude_code.interaction`→`claude_code.llm_request`／`claude_code.tool`→`claude_code.tool.execution`。一部に`gen_ai.request.model`などの標準の属性も付く。メトリクスは`claude_code.token.usage`、`claude_code.cost.usage`など。ログは`user_prompt`、`api_request`、`tool_result`、`assistant_response`など |
 | ルートのスパンとのつながり | 同じトレースに入り、`invoke_agent`がルートの子になった | 同じトレースに入り、`claude_code.interaction`がルートの子になった。SDKが、親で有効なコンテキストを子プロセスの`TRACEPARENT`に入れる |
-| MCPへの引き継ぎ | `tools/call`の引数の`_meta`に`traceparent`を入れる（`initialize`と`tools/list`には入れない） | 中継のMCPサーバーへの呼び出しには入らない。親のプロセスでは、送るときにルートのトレースが有効だった |
+| MCPへの引き継ぎ | `tools/call`の引数の`_meta`に`traceparent`を入れる（`initialize`と`tools/list`には入れない） | `sdk`型の中継には入らない（親のプロセスでは、送るときにルートのトレースが有効だった）。HTTPの中継では、`tools/call`に`traceparent`ヘッダーが付き（3回中3回）、その親は`claude_code.tool.execution`のスパンだった。中継で作ったスパンも同じトレースのその下に入った。`initialize`・`tools/list`などの接続処理には付かない |
 | 本文 | **既定で記録する**。スパンのイベント（`gen_ai.system.message`、`gen_ai.user.message`、`gen_ai.tool.message`、`gen_ai.choice`）と`system_prompt`属性に、システムプロンプト、案件と口座のデータ、注入された文言がそのまま入った。止める設定はなく、型定義のコメントは「エクスポーターかプロセッサーで抑える」としている | **既定で記録しない**。`user_prompt`・`prompt`・`response`の属性はあるが、業務データは現れなかった。文書によると、`OTEL_LOG_USER_PROMPTS`などで明示的に有効にしたときだけ記録する |
 | 認証情報 | 現れなかった | 現れなかった |
 | リソースの属性 | （グローバルのTracerProviderの設定に従う） | `service.name`、`service.version`、`host.arch`、`os.type`、`os.version` |
@@ -90,8 +94,8 @@ Claude Codeの出力は、関数の中に立てたOTLP/HTTP（JSON）の受け�
      署名はできない。関数の中の受け口（ADOTのレイヤーのコレクター、または親のプロセスでの中継）を経由させる必要がある。ステップ0の送り方の比較に含める。
    - **フレームワークの形式は統一できない。** Strandsは標準、Claude Agent SDKは独自の形式なので、収集先で見るときの名前は異なる。
      ホップのスパン（共通部品が出す）を共通の軸にする。
-4. **中継型では、ホップの送信のスパンがフレームワークのツールのスパンの子にならない。** 子プロセスから中継への呼び出しに
-   トレースのコンテキストが付かないためで、同じトレースには入るが、ルートの直下に並ぶ。
+4. **中継型では、中継をHTTPにする。** `sdk`型（標準入出力）の中継には子プロセスからトレースのコンテキストが届かず、ホップの送信のスパンが
+   ルートの直下に並ぶ。`127.0.0.1`のHTTPにすれば、Claude Codeが`traceparent`を付けるので、ツールのスパンの子にできる。
 
 ## 確かめていないこと
 

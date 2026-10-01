@@ -1,24 +1,70 @@
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { createHopHandler, log, type Call } from '@gekko08/authz-context';
-import { trace } from '@opentelemetry/api';
+import { context, propagation, SpanKind, trace } from '@opentelemetry/api';
 import { HopTransport, type ToolCallRecord } from './hop-transport';
 import { dedupe, otlpReceiver, withRootSpan } from './otel-probe';
 import { CASE_ID, SYSTEM_PROMPT, userPrompt } from './prompt';
 
 // Claude Agent SDKで作ったfraud-agent。SDKのHTTPのMCPにはリクエストごとの署名とJWTを付けられないので、
-// プロセス内のMCPサーバーを置き、それがfraud-mcpへ中継する（中継型）。中継のMCPクライアントは、共通部品の`call`で送る通信路を使う。
-// 認証情報（受け渡されたセッション、JWT）はこのプロセスにとどまり、Claude Codeの子プロセスには渡らない
+// 127.0.0.1で受けるMCPサーバー（HTTP、ステートレス、JSONで応答）を置き、それがfraud-mcpへ中継する（中継型）。
+// 中継のMCPクライアントは、共通部品の`call`で送る通信路を使う。認証情報（受け渡されたセッション、JWT）はこのプロセスにとどまり、
+// Claude Codeの子プロセスには渡らない。Claude CodeはHTTPのMCPへのリクエストに`traceparent`を付けるので、中継はそれを引き継ぐ
 async function relayServer(call: Call, toolCalls: ToolCallRecord[]) {
   const upstream = new Client({ name: 'fraud-agent-claude', version: '0.1.0' });
   const transport = new HopTransport(call, 'fraud-mcp', toolCalls);
   await upstream.connect(transport);
-  const relay = new McpServer({ name: 'fraud', version: '0.1.0' }, { capabilities: { tools: {} } });
-  relay.server.setRequestHandler(ListToolsRequestSchema, () => upstream.listTools());
-  relay.server.setRequestHandler(CallToolRequestSchema, (req) => upstream.callTool(req.params));
-  return { relay, upstream, transport };
+  /** 中継が受け取った`traceparent`（実験の観測用） */
+  const received: { method?: string; traceparent?: string }[] = [];
+
+  const handle = async (msg: { id?: unknown; method?: string; params?: any }) => {
+    switch (msg.method) {
+      case 'initialize':
+        return { protocolVersion: msg.params?.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: 'fraud', version: '0.1.0' } };
+      case 'ping':
+        return {};
+      case 'tools/list':
+        return upstream.listTools();
+      case 'tools/call':
+        // ホップの送信のスパンの代わり。Claude Codeのツールのスパンの子になるかを見る
+        return trace.getTracer('gekko08-probe').startActiveSpan('relay tools/call', { kind: SpanKind.CLIENT }, async (span) => {
+          try {
+            return await upstream.callTool(msg.params);
+          } finally {
+            span.end();
+          }
+        });
+      default:
+        throw Object.assign(new Error(`Method not found: ${msg.method}`), { code: -32601 });
+    }
+  };
+  const server = createServer((req, res) => {
+    let raw = '';
+    req.on('data', (c) => { raw += c; });
+    req.on('end', async () => {
+      if (req.method !== 'POST') return res.writeHead(405).end();
+      const msg = JSON.parse(raw || '{}');
+      received.push({ method: msg.method, traceparent: req.headers.traceparent as string | undefined });
+      if (msg.id === undefined) return res.writeHead(202).end();
+      const ctx = propagation.extract(context.active(), req.headers);
+      try {
+        const result = await context.with(ctx, () => handle(msg));
+        res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result }));
+      } catch (e) {
+        const err = e as Error & { code?: number };
+        res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ jsonrpc: '2.0', id: msg.id, error: { code: err.code ?? -32603, message: err.message } }));
+      }
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/mcp`;
+  const close = async () => {
+    await upstream.close();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  };
+  return { url, close, transport, received };
 }
 
 // Claude Codeの子プロセスに渡す環境変数。Bedrockを呼ぶための実行roleの認証情報と、書き込める場所だけを渡す
@@ -53,7 +99,7 @@ export const handler = createHopHandler(async (body, { call, requestId }) => {
   if (!caseId) return { status: 400, body: { error: 'caseId is required' } };
 
   const toolCalls: ToolCallRecord[] = [];
-  const { relay, upstream, transport } = await relayServer(call, toolCalls);
+  const relay = await relayServer(call, toolCalls);
   const otlp = await otlpReceiver();
   const t0 = performance.now();
   const stderr: string[] = [];
@@ -71,7 +117,7 @@ export const handler = createHopHandler(async (body, { call, requestId }) => {
         systemPrompt: SYSTEM_PROMPT,
         // 組み込みのツール（Bash、Readなど）は使わせず、中継のMCPサーバーのツールだけを許す
         tools: [],
-        mcpServers: { fraud: { type: 'sdk', name: 'fraud', instance: relay } },
+        mcpServers: { fraud: { type: 'http', url: relay.url } },
         allowedTools: ['mcp__fraud__*'],
         permissionMode: 'dontAsk',
         settingSources: [],
@@ -101,7 +147,7 @@ export const handler = createHopHandler(async (body, { call, requestId }) => {
     log('error', 'agent failed', { hop: 'fraud-agent-claude', requestId, error: (e as Error).message, stderr: stderr.join('').slice(-2000) });
     throw e;
   } finally {
-    await upstream.close();
+    await relay.close();
     await otlp.close();
   }
   log('info', 'agent finished', { hop: 'fraud-agent-claude', requestId, caseId, toolCalls, subtype, turns, agentMs });
@@ -109,7 +155,13 @@ export const handler = createHopHandler(async (body, { call, requestId }) => {
   log('info', 'otel probe', {
     hop: 'fraud-agent-claude', requestId, traceId: probe?.traceId, inProcessSpans: dedupe(probe?.spans ?? []),
     child: { resource: got.resource, traces: dedupe(got.traces), metrics: dedupe(got.metrics), logs: dedupe(got.logs) },
-    mcpSent: transport.sent,
+    mcpSent: relay.transport.sent,
+    // 中継が受け取った`traceparent`の親が、Claude Codeのどのスパンか
+    relayReceived: relay.received.map((r) => {
+      const parent = r.traceparent?.split('-')[2];
+      const parentName = parent ? Object.entries(got.spanIds).find(([, ids]) => ids.includes(parent))?.[0] : undefined;
+      return { method: r.method, traceparent: !!r.traceparent, sameTrace: r.traceparent?.split('-')[1] === probe?.traceId, parentName };
+    }),
   });
   return { status: 200, body: { caseId, analysis, toolCalls } };
 });

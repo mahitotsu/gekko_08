@@ -18,7 +18,7 @@ const common = {
 const agents = [
   new Hop(stack, 'FraudAgentStrands', { ...common, hopName: 'fraud-agent-strands', entry: 'experiments/agent-frameworks/src/strands-agent.ts' }),
   new Hop(stack, 'FraudAgentClaude', {
-    ...common, hopName: 'fraud-agent-claude', entry: 'experiments/agent-frameworks/src/claude-agent.ts', memorySize: 2048,
+    ...common, hopName: 'fraud-agent-claude', entry: 'experiments/agent-frameworks/src/claude-agent.ts', memorySize: 1024,
     bundling: {
       // Claude Codeの実行ファイル（linux-arm64、約241MB）を関数に同梱する
       commandHooks: {

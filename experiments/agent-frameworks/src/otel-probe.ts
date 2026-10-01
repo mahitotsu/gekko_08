@@ -97,11 +97,18 @@ export async function withRootSpan<T>(name: string, f: () => Promise<T>): Promis
 interface OtlpKV { key: string; value: Record<string, unknown> }
 const kv = (list: OtlpKV[] = []) => Object.fromEntries(list.map((a) => [a.key, Object.values(a.value)[0]]));
 
-export interface Received { traces: Item[]; metrics: Item[]; logs: Item[]; resource: string[] }
+export interface Received {
+  traces: Item[];
+  metrics: Item[];
+  logs: Item[];
+  resource: string[];
+  /** スパン名ごとのスパンID。中継が受け取った`traceparent`の親を判定するのに使う */
+  spanIds: Record<string, string[]>;
+}
 
 /** 127.0.0.1でOTLP/HTTP（JSON）を受け取る。rootTraceIdとrootSpanIdは、つながりを判定するために使う */
 export async function otlpReceiver() {
-  const got: Received = { traces: [], metrics: [], logs: [], resource: [] };
+  const got: Received = { traces: [], metrics: [], logs: [], resource: [], spanIds: {} };
   let root: { traceId: string; spanId: string } | undefined;
   const server = createServer((req, res) => {
     let body = '';
@@ -114,6 +121,7 @@ export async function otlpReceiver() {
         }
         for (const rs of msg.resourceSpans ?? []) for (const ss of rs.scopeSpans ?? []) for (const s of ss.spans ?? []) {
           const attrs = kv(s.attributes);
+          (got.spanIds[s.name] ??= []).push(s.spanId);
           got.traces.push({
             name: s.name, scope: ss.scope?.name, kind: String(s.kind),
             sameTrace: root ? s.traceId === root.traceId : undefined,
