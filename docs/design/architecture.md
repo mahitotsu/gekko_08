@@ -424,6 +424,9 @@ Cognito User Poolのカスタム属性`custom:branch`は使わない。User Pool
 
 振る舞いを確かめるシナリオテストは、デプロイしたスタックに対して実行し、要件のIDにひも付ける。
 
+テストは、デモのユーザーとは別の専用のユーザー（`test-tokyo-manager`はtokyo・支店長、`test-osaka-officer`はosaka・担当者）を使い、Cognitoのユーザーと人事データの行を
+テストの実行ごとに用意する。パスワードは実行のたびにランダムな値にし、異動のテストもこの人事データだけを書き換える。
+
 マネージドログインはブラウザを必要とするので、テストでは`ADMIN_USER_PASSWORD_AUTH`でIDトークンを得て、bffの`/api/callback`と同じ形の
 セッションをテーブルに書き、そのcookieでCloudFrontからbffを呼ぶ。`ADMIN_USER_PASSWORD_AUTH`はIAMの権限
 （`cognito-idp:AdminInitiateAuth`）がなければ呼べず、ブラウザからは使えない。

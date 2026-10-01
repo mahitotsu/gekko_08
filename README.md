@@ -86,7 +86,7 @@ aws cognito-idp admin-set-user-password --user-pool-id "$POOL" --username yamada
 aws cognito-idp admin-set-user-password --user-pool-id "$POOL" --username tanaka --password '<パスワード>' --permanent
 ```
 
-シナリオテストも同じユーザーを使い、実行のたびにパスワードをランダムな値に置き換える。テストを流したあとは、パスワードを設定し直す。
+シナリオテストは、専用のユーザー（`test-tokyo-manager`、`test-osaka-officer`）と、その人事データを自分で用意して使う。デモのユーザーのパスワードと所属には触れない。
 
 ### 試す
 

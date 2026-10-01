@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it } from 'vitest';
-import { browserGet, browserPost, handledLogs, loginSession, traceSpans, type SpanRecord } from './helpers';
+import { browserGet, browserPost, handledLogs, loginSession, type SpanRecord, traceSpans, USERS } from './helpers';
 
 // トレース（FR-6）。各ホップの受信と送信のスパンが、traceparentの引き継ぎで1つのトレースにつながり、
 // 検証の結果（呼び出し元、目的、scope、ユーザー）が属性に入ることを、CloudWatch Transaction Search（aws/spans）で確かめる。
@@ -35,10 +35,10 @@ const byId = (spans: SpanRecord[], id?: string) => spans.find((s) => s.spanId ==
 
 beforeAll(async () => {
   startTime = Date.now() - 5000;
-  const yamada = await loginSession('yamada');
+  const manager = await loginSession('tokyoManager');
   // ブラウザが送ったtraceparentは、bffが引き継がない
-  const s = await browserGet('/api/cases/C-1001/summary', yamada, { traceparent: `00-${BROWSER_TRACE_ID}-00f067aa0ba902b7-01` });
-  const a = await browserPost('/api/agent', JSON.stringify({ caseId: 'C-1001' }), yamada);
+  const s = await browserGet('/api/cases/C-1001/summary', manager, { traceparent: `00-${BROWSER_TRACE_ID}-00f067aa0ba902b7-01` });
+  const a = await browserPost('/api/agent', JSON.stringify({ caseId: 'C-1001' }), manager);
   const logs = await handledLogs([s.body.requestId, a.body.requestId], ['bff'], startTime);
   const summaryTrace = logs[s.body.requestId].bff!.traceId!;
   const agentTrace = logs[a.body.requestId].bff!.traceId!;
@@ -69,12 +69,12 @@ describe('FR-6: マイクロサービスの経路が1つのトレースにつな
   });
 
   it('受信のスパンに、検証した呼び出し元・目的・scope・ユーザーが入る', () => {
-    expect(one(summary, 'bff').attributes).toMatchObject({ 'authz.purpose': 'case-summary', 'enduser.id': 'yamada', 'http.response.status_code': 200 });
+    expect(one(summary, 'bff').attributes).toMatchObject({ 'authz.purpose': 'case-summary', 'enduser.id': USERS.tokyoManager, 'http.response.status_code': 200 });
     expect(one(summary, 'case-service').attributes).toMatchObject({
-      'authz.inbound': 'accepted', 'authz.actor': 'bff', 'authz.purpose': 'case-summary', 'authz.scope': 'case:summary', 'enduser.id': 'yamada',
+      'authz.inbound': 'accepted', 'authz.actor': 'bff', 'authz.purpose': 'case-summary', 'authz.scope': 'case:summary', 'enduser.id': USERS.tokyoManager,
     });
     expect(one(summary, 'account-service').attributes).toMatchObject({
-      'authz.inbound': 'accepted', 'authz.actor': 'case-service', 'authz.scope': 'account:read', 'enduser.id': 'yamada',
+      'authz.inbound': 'accepted', 'authz.actor': 'case-service', 'authz.scope': 'account:read', 'enduser.id': USERS.tokyoManager,
     });
   });
 
@@ -107,7 +107,7 @@ describe('FR-6: エージェントの経路も1つのトレースにつながる
     expect(mcp.length).toBeGreaterThanOrEqual(3);
     for (const m of mcp) {
       expect(byId(agent, m.parentSpanId)?.name).toBe('call fraud-mcp');
-      expect(m.attributes).toMatchObject({ 'authz.actor': 'fraud-agent', 'authz.purpose': 'agent-analysis', 'authz.scope': 'mcp:tools', 'enduser.id': 'yamada' });
+      expect(m.attributes).toMatchObject({ 'authz.actor': 'fraud-agent', 'authz.purpose': 'agent-analysis', 'authz.scope': 'mcp:tools', 'enduser.id': USERS.tokyoManager });
     }
     expect(named(agent, 'case-service')[0].attributes).toMatchObject({ 'authz.actor': 'fraud-mcp', 'authz.scope': 'case:read' });
   });

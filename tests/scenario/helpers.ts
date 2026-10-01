@@ -29,9 +29,23 @@ export function stackOutputs(): Promise<Outputs> {
   return outputs;
 }
 
-/** デモユーザーの人事データ（DemoDataの初期値） */
-export const DEMO_USERS = { yamada: { branch: 'tokyo', title: '支店長' }, tanaka: { branch: 'osaka', title: '担当者' } } as const;
+/** テストで使う2人の役割と、その人事データ。デモのユーザー（yamada、tanaka）と同じ所属と役職にする */
+export const DEMO_USERS = { tokyoManager: { branch: 'tokyo', title: '支店長' }, osakaOfficer: { branch: 'osaka', title: '担当者' } } as const;
 export type DemoUser = keyof typeof DEMO_USERS;
+
+/**
+ * テスト専用のユーザー名。デモのユーザーには触れない（テストはパスワードを毎回置き換え、異動のテストは所属を書き換えるため）
+ */
+export const USERS: Record<DemoUser, string> = { tokyoManager: 'test-tokyo-manager', osakaOfficer: 'test-osaka-officer' };
+
+const provisioned = new Set<DemoUser>();
+/** テスト用のユーザーの人事データを、テストの実行ごとに1回、初期値で用意する */
+async function provisionStaff(user: DemoUser): Promise<void> {
+  if (provisioned.has(user)) return;
+  const o = await stackOutputs();
+  await db.send(new PutCommand({ TableName: o.StaffTable, Item: { userId: USERS[user], ...DEMO_USERS[user] } }));
+  provisioned.add(user);
+}
 
 /**
  * デモユーザーでログインし、IDトークンとリフレッシュトークンを得る。
@@ -41,20 +55,22 @@ export async function loginTokens(user: DemoUser): Promise<{ idToken: string; re
   const o = await stackOutputs();
   const UserPoolId = o.UserPoolId;
   const ClientId = o.UserPoolClientId;
+  await provisionStaff(user);
+  const name = USERS[user];
   // Cognitoはユーザーの識別だけを持つ。所属と役職は人事データ（属性サービス）にある
   try {
-    await cognito.send(new AdminCreateUserCommand({ UserPoolId, Username: user, MessageAction: 'SUPPRESS' }));
+    await cognito.send(new AdminCreateUserCommand({ UserPoolId, Username: name, MessageAction: 'SUPPRESS' }));
   } catch (e) {
     if (!(e instanceof UsernameExistsException)) throw e;
   }
   // 毎回ランダムなパスワードに置き換える。テストの外にパスワードを残さない
   const password = `${randomBytes(18).toString('base64url')}aA1!`;
-  await cognito.send(new AdminSetUserPasswordCommand({ UserPoolId, Username: user, Password: password, Permanent: true }));
+  await cognito.send(new AdminSetUserPasswordCommand({ UserPoolId, Username: name, Password: password, Permanent: true }));
   const { UserPoolClient } = await cognito.send(new DescribeUserPoolClientCommand({ UserPoolId, ClientId }));
-  const secretHash = createHmac('sha256', UserPoolClient!.ClientSecret!).update(user + ClientId).digest('base64');
+  const secretHash = createHmac('sha256', UserPoolClient!.ClientSecret!).update(name + ClientId).digest('base64');
   const r = await cognito.send(new AdminInitiateAuthCommand({
     UserPoolId, ClientId, AuthFlow: 'ADMIN_USER_PASSWORD_AUTH',
-    AuthParameters: { USERNAME: user, PASSWORD: password, SECRET_HASH: secretHash },
+    AuthParameters: { USERNAME: name, PASSWORD: password, SECRET_HASH: secretHash },
   }));
   return { idToken: r.AuthenticationResult!.IdToken!, refreshToken: r.AuthenticationResult!.RefreshToken! };
 }
@@ -69,7 +85,7 @@ export async function loginSession(user: DemoUser): Promise<string> {
     TableName: o.SessionsTable,
     Item: {
       pk: `sid#${createHash('sha256').update(sid).digest('base64url')}`,
-      username: user, idToken, idTokenExp: claims.exp, refreshToken,
+      username: USERS[user], idToken, idTokenExp: claims.exp, refreshToken,
       ttl: Math.floor(Date.now() / 1000) + 3600,
     },
   }));
@@ -141,7 +157,7 @@ export async function mintJwt(credentials: AwsCredentialIdentity, audience: stri
 export async function setStaffBranch(user: DemoUser, branch: string): Promise<void> {
   const o = await stackOutputs();
   await db.send(new UpdateCommand({
-    TableName: o.StaffTable, Key: { userId: user }, UpdateExpression: 'SET branch = :b', ExpressionAttributeValues: { ':b': branch },
+    TableName: o.StaffTable, Key: { userId: USERS[user] }, UpdateExpression: 'SET branch = :b', ExpressionAttributeValues: { ':b': branch },
   }));
 }
 

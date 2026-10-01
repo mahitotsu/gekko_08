@@ -1,7 +1,7 @@
 import { writeFileSync } from 'node:fs';
 import { CloudTrailClient, LookupEventsCommand } from '@aws-sdk/client-cloudtrail';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { browserGet, eventually, handledLogs, hopLogGroups, loginSession, readLogs, type HandledLog, type HopName } from './helpers';
+import { browserGet, eventually, type HandledLog, handledLogs, hopLogGroups, type HopName, loginSession, readLogs, USERS } from './helpers';
 
 // 追跡（FR-6）、ログに認証情報を入れない（SR-3）、処理時間の実測（NFR-3）。
 // ログはCloudWatch Logsから読む。到着に数秒〜数十秒かかる
@@ -16,9 +16,9 @@ let logsById: Awaited<ReturnType<typeof handledLogs>>;
 
 beforeAll(async () => {
   startTime = Date.now() - 5000;
-  const yamada = await loginSession('yamada');
+  const manager = await loginSession('tokyoManager');
   const summary = async (caseId: string) => {
-    const r = await browserGet(`/api/cases/${caseId}/summary`, yamada);
+    const r = await browserGet(`/api/cases/${caseId}/summary`, manager);
     expect(r.body.requestId).toBeTypeOf('string');
     return r.body.requestId as string;
   };
@@ -32,10 +32,10 @@ beforeAll(async () => {
 describe('FR-6: 1回のリクエストを、各ホップのログでリクエストIDとユーザーから追える', () => {
   it('bff・case-service・account-service・属性サービスのログが同じリクエストIDでつながり、ユーザー・目的・呼び出し元が記録される', () => {
     const l = logsById[allowedId];
-    expect(l.bff).toMatchObject({ user: 'yamada', purpose: 'case-summary', status: 200 });
-    expect(l['case-service']).toMatchObject({ subject: { id: 'yamada' }, purpose: 'case-summary', scope: 'case:summary', status: 200 });
-    expect(l['account-service']).toMatchObject({ subject: { id: 'yamada' }, purpose: 'case-summary', scope: 'account:read', status: 200 });
-    expect(l['entitlement-service']).toMatchObject({ subject: { id: 'yamada' }, scope: 'entitlements:read', status: 200 });
+    expect(l.bff).toMatchObject({ user: USERS.tokyoManager, purpose: 'case-summary', status: 200 });
+    expect(l['case-service']).toMatchObject({ subject: { id: USERS.tokyoManager }, purpose: 'case-summary', scope: 'case:summary', status: 200 });
+    expect(l['account-service']).toMatchObject({ subject: { id: USERS.tokyoManager }, purpose: 'case-summary', scope: 'account:read', status: 200 });
+    expect(l['entitlement-service']).toMatchObject({ subject: { id: USERS.tokyoManager }, scope: 'entitlements:read', status: 200 });
     // actorは直前のホップ（入口の実行role）、JWTの`sub`は直前のホップのchain用role（bffでは目的用のrole）
     expect(l['case-service']).toMatchObject({ actor: 'bff' });
     expect(l['case-service']!.actorRole).toMatch(/BffFunction/);
@@ -47,8 +47,8 @@ describe('FR-6: 1回のリクエストを、各ホップのログでリクエス
 
   it('拒否されたリクエストも、リクエストIDとユーザーで追える', async () => {
     const [l] = Object.values(await handledLogs([deniedId], ['bff', 'case-service'], startTime));
-    expect(l.bff).toMatchObject({ user: 'yamada', status: 403 });
-    expect(l['case-service']).toMatchObject({ subject: { id: 'yamada' }, status: 403 });
+    expect(l.bff).toMatchObject({ user: USERS.tokyoManager, status: 403 });
+    expect(l['case-service']).toMatchObject({ subject: { id: USERS.tokyoManager }, status: 403 });
   });
 
   // CloudTrailは届くまでに最大15分ほどかかるため、CHECK_CLOUDTRAIL=1のときだけ実行する
@@ -61,7 +61,7 @@ describe('FR-6: 1回のリクエストを、各ホップのログでリクエス
     }, 20 * 60_000, 30_000);
     for (const e of events.filter((x) => ['AssumeRole', 'GetWebIdentityToken'].includes(x.EventName!))) {
       const detail = JSON.parse(e.CloudTrailEvent!);
-      expect(detail.userIdentity.sessionContext.sourceIdentity).toBe('yamada');
+      expect(detail.userIdentity.sessionContext.sourceIdentity).toBe(USERS.tokyoManager);
       expect(detail.userIdentity.arn).toContain(`/${allowedId}`);
     }
   }, 21 * 60_000);

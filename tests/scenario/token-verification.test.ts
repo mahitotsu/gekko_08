@@ -1,7 +1,7 @@
 import { AuthzError, verifyInbound, type VerifyOptions } from '@gekko08/authz-context';
 import type { AwsCredentialIdentity } from '@smithy/types';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { chainTo, mintJwt, purposeSession, stackOutputs, type Outputs } from './helpers';
+import { chainTo, mintJwt, type Outputs, purposeSession, stackOutputs, USERS } from './helpers';
 
 // FR-1：各ホップの受信側の検証を、STSが実際に発行したJWTと発行者の実際のJWKSで確かめる。
 // デプロイしたホップの入口は直前のホップしか通れないため、不正なJWTはホップと同じ共通部品（verifyInbound）に直接渡す
@@ -28,7 +28,7 @@ const payloadOf = (token: string) => JSON.parse(Buffer.from(parts(token)[1], 'ba
 
 beforeAll(async () => {
   o = await stackOutputs();
-  purpose = await purposeSession('yamada', 'case-summary');
+  purpose = await purposeSession('tokyoManager', 'case-summary');
   chained = await chainTo(purpose, o.CaseServiceChainRoleArn);
 });
 
@@ -39,14 +39,14 @@ describe('FR-1: 各ホップは、STSが署名したJWTでsubject・宛先・委
   it('bffが目的を刻んだセッションで作ったcase-service宛てのJWTから、subject・目的・scopeを取り出せる', async () => {
     const v = await verifyInbound(await toCase(), callerArn('bff-exec'), caseOpts());
     expect(v).toEqual({
-      subject: { id: 'yamada' }, purpose: 'case-summary', scope: 'case:summary', actor: 'bff-exec', actorRole: 'bff-exec', tokenSub: o.PurposeRoleArn,
+      subject: { id: USERS.tokyoManager }, purpose: 'case-summary', scope: 'case:summary', actor: 'bff-exec', actorRole: 'bff-exec', tokenSub: o.PurposeRoleArn,
     });
   });
 
   it('chainしたセッションが作ったJWTにも、同じsubjectと目的が引き継がれる', async () => {
     const v = await verifyInbound(await mintJwt(chained, o.AccountServiceAudience, 'account:read'), callerArn('case-exec'),
       optsFor(o.AccountServiceAudience, { 'case-exec': o.CaseServiceChainRoleArn }));
-    expect(v).toMatchObject({ subject: { id: 'yamada' }, purpose: 'case-summary', scope: 'account:read', tokenSub: o.CaseServiceChainRoleArn });
+    expect(v).toMatchObject({ subject: { id: USERS.tokyoManager }, purpose: 'case-summary', scope: 'account:read', tokenSub: o.CaseServiceChainRoleArn });
   });
 
   it('scopeのないJWTは401（何も許さない）', async () => {
@@ -68,7 +68,7 @@ describe('FR-1: 各ホップは、STSが署名したJWTでsubject・宛先・委
     const token = await toCase();
     const p = payloadOf(token);
     const ns = p['https://sts.amazonaws.com/'];
-    ns.source_identity = 'tanaka';
+    ns.source_identity = USERS.osakaOfficer;
     ns.principal_tags.purpose = 'agent-analysis';
     ns.request_tags.scope = 'case:read';
     const [h, , s] = parts(token);
