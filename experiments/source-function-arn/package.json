@@ -1,0 +1,14 @@
+{
+  "name": "gekko08-exp-source-function-arn",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "deploy": "../../node_modules/.bin/cdk deploy",
+    "destroy": "../../node_modules/.bin/cdk destroy",
+    "run": "../../node_modules/.bin/tsx scripts/run.ts"
+  },
+  "devDependencies": {
+    "@aws-sdk/client-lambda": "^3.1144.0"
+  }
+}

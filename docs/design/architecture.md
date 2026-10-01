@@ -168,7 +168,7 @@ entitlement-serviceは呼び出し先を持たないので、chain用roleを持�
 
 | 種類 | 個数 | 権限 |
 |---|---|---|
-| 実行role | Lambda関数ごとに1つ | 自分のデータ（DynamoDB）へのアクセス、ログ出力、トレースの送信（`xray:PutTraceSegments`。§7）。fraud-agentはモデル用のroleの引き受け、bffはセッションのテーブルとSSMのパラメータ。ホップの呼び出しには権限を付けない（呼び出し先のresource policyで許可する） |
+| 実行role | Lambda関数ごとに1つ | 自分のデータ（DynamoDB）へのアクセス、ログ出力、トレースの送信（`xray:PutTraceSegments`。§7）。fraud-agentはモデル用のroleの引き受け、bffはセッションのテーブルとSSMのパラメータ。ホップの呼び出しの許可は付けない（呼び出し先のresource policyで許可する）。呼び出し先ごとに、自分の関数以外からの呼び出しをDenyする文を持つ（§5の入口のresource policyのひな形の後ろ） |
 | モデル用のrole | 1つ（fraud-agent） | Bedrockのモデルの呼び出し（`bedrock:InvokeModel`・`bedrock:InvokeModelWithResponseStream`）だけ。fraud-agentの実行roleが引き受け、その認証情報だけをClaude Codeの子プロセスに渡す |
 | federated role | 1つ | 目的用のroleへの`sts:AssumeRole`・`sts:TagSession`・`sts:SetSourceIdentity`だけ |
 | 目的用のrole | 1つ | bffの呼び出し先のchain用roleへのchainと、JWTの発行（§4の表のとおり） |
@@ -231,11 +231,6 @@ federated roleは、Cognitoを指すOIDC providerをPrincipalとし、`aud`＝�
       "Condition": { "ArnNotEquals": { "aws:PrincipalArn": ["<呼び出し元の実行role>"] } }
     },
     {
-      "Sid": "DenyOtherFunctions", "Effect": "Deny", "Principal": "*",
-      "Action": ["lambda:InvokeFunctionUrl", "lambda:InvokeFunction"], "Resource": "<この関数>",
-      "Condition": { "ArnNotEquals": { "lambda:SourceFunctionArn": ["<呼び出し元の関数>"] } }
-    },
-    {
       "Sid": "AllowUrl", "Effect": "Allow", "Principal": { "AWS": ["<呼び出し元の実行role>"] },
       "Action": "lambda:InvokeFunctionUrl", "Resource": "<この関数>",
       "Condition": { "StringEquals": { "lambda:FunctionUrlAuthType": "AWS_IAM" } }
@@ -250,6 +245,18 @@ federated roleは、Cognitoを指すOIDC providerをPrincipalとし、`aud`＝�
 ```
 
 実行roleは関数ごとに分けるので、「実行role」と「関数」は1対1に対応する。
+
+同じ実行roleを持つ別の関数からの呼び出しは、呼び出し元の実行roleに付けるDenyで塞ぐ（[置き場所のADR](../adr/20261001094443-source-function-arn-in-caller-identity-policy.md)）。
+`lambda:SourceFunctionArn`は、resource-based policyでは使えないため。`Hop#allowCaller`が、呼び出し先ごとに次の文を、呼び出し元の実行roleに
+別のポリシーとして付ける。
+
+```json
+{
+  "Effect": "Deny",
+  "Action": ["lambda:InvokeFunctionUrl", "lambda:InvokeFunction"], "Resource": "<呼び出し先の関数>",
+  "Condition": { "ArnNotEquals": { "lambda:SourceFunctionArn": ["<呼び出し元の関数>"] } }
+}
+```
 
 bffの入口は、CloudFrontのサービスプリンシパルを`AWS:SourceArn`＝ディストリビューションで許可する。同じアカウント内の広い権限を持つ主体は
 bffのFunction URLを直接呼べうるが、セッションcookieがなければbffが拒否する。

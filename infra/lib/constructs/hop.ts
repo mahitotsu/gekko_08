@@ -66,7 +66,8 @@ export class Hop extends Construct {
   readonly chainRole?: iam.Role;
 
   private readonly callerRoles: iam.IRole[] = [];
-  private readonly callerFunctions: lambda.IFunction[] = [];
+  /** 呼び出し元の実行roleごとの、許可する呼び出し元の関数 */
+  private readonly callerFunctions = new Map<iam.IRole, lambda.IFunction[]>();
   private readonly callers: Record<string, { hop: string; sub: string }> = {};
   private readonly targets: Record<string, HopTarget> = {};
 
@@ -107,7 +108,6 @@ export class Hop extends Construct {
 
     const actions = ['lambda:InvokeFunctionUrl', 'lambda:InvokeFunction'];
     const roleArns = cdk.Lazy.list({ produce: () => this.callerRoles.map((r) => r.roleArn) });
-    const fnArns = cdk.Lazy.list({ produce: () => this.callerFunctions.map((f) => f.functionArn) });
     new lambda.CfnResourcePolicy(this, 'EntryPolicy', {
       resourceArn: this.fn.functionArn,
       policyDocument: {
@@ -118,11 +118,8 @@ export class Hop extends Construct {
             Sid: 'DenyOtherPrincipals', Effect: 'Deny', Principal: '*', Action: actions, Resource: this.fn.functionArn,
             Condition: { ArnNotEquals: { 'aws:PrincipalArn': roleArns } },
           },
-          // 同じ実行roleを持つ別の関数からの呼び出しを塞ぐ
-          {
-            Sid: 'DenyOtherFunctions', Effect: 'Deny', Principal: '*', Action: actions, Resource: this.fn.functionArn,
-            Condition: { ArnNotEquals: { 'lambda:SourceFunctionArn': fnArns } },
-          },
+          // 同じ実行roleを持つ別の関数からの呼び出しは、呼び出し元の実行roleのDenyで塞ぐ（allowCaller）。
+          // lambda:SourceFunctionArnはresource-based policyでは使えない（source-function-arnのADR）
           {
             Sid: 'AllowUrl', Effect: 'Allow', Principal: { AWS: roleArns }, Action: 'lambda:InvokeFunctionUrl', Resource: this.fn.functionArn,
             Condition: { StringEquals: { 'lambda:FunctionUrlAuthType': 'AWS_IAM' } },
@@ -158,7 +155,7 @@ export class Hop extends Construct {
    */
   allowCaller(caller: HopCaller, delegation: Delegation): void {
     this.callerRoles.push(caller.execRole);
-    this.callerFunctions.push(caller.fn);
+    this.guardCallerFunction(caller);
     this.callers[caller.execRole.roleName] = { hop: caller.hopName, sub: caller.chainRole.roleArn };
 
     // ForAnyValueでは、許した宛先に外部の宛先を混ぜたJWTを発行できる（experiments/scope-tagsのE1-7）
@@ -205,4 +202,29 @@ export class Hop extends Construct {
 
     caller.addTarget(this.hopName, { url: this.url.url, audience: this.audience, scope: delegation.scope, forwardSession: !!this.chainRole });
   }
+
+  /**
+   * 呼び出し元の実行roleに、「このホップを、許可した呼び出し元の関数以外から呼ぶ」ことをDenyする文を持たせる（SR-2）。
+   * 同じアカウントでは入口のresource policyの許可だけで呼べるので、許可の条件ではなくDenyにする。実行roleを共有する関数は、まとめて条件に並べる。
+   * roleの既定のポリシーとは別のポリシーにして、関数がこのポリシーに依存しないようにする（循環参照を避ける）
+   */
+  private guardCallerFunction(caller: HopCaller): void {
+    const fns = this.callerFunctions.get(caller.execRole);
+    if (fns) {
+      fns.push(caller.fn);
+      return;
+    }
+    const allowed = [caller.fn];
+    this.callerFunctions.set(caller.execRole, allowed);
+    new iam.Policy(this, `CallerFunctionGuard${this.callerFunctions.size}`, {
+      roles: [caller.execRole],
+      statements: [new iam.PolicyStatement({
+        effect: iam.Effect.DENY,
+        actions: ['lambda:InvokeFunctionUrl', 'lambda:InvokeFunction'],
+        resources: [this.fn.functionArn],
+        conditions: { ArnNotEquals: { 'lambda:SourceFunctionArn': cdk.Lazy.list({ produce: () => allowed.map((f) => f.functionArn) }) } },
+      })],
+    });
+  }
+
 }

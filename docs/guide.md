@@ -95,7 +95,7 @@ AWSが保証した値ではないので、受信側の判定は変わらない�
 | 属性サービスは本人のアクセス権だけを返す | 照会する相手を引数に取らないので、誘導されたエージェントや侵害されたホップが他人の権限を問い合わせられない | 同上のADR |
 | 受け渡すセッションでホップを呼ばない | セッション自体に呼び出し権限があると、漏れたときに外から使え、侵害されたホップが次のホップを飛ばせる | [Token Exchange相当の構成](../experiments/actor-subject-jwt/RESULTS.md) |
 | 入口で「許可したrole以外」を明示的にDenyする | 同じアカウントでは、resource policyが許可していなくても、呼び出し元のidentity policyの広い許可で呼べた | 同上 |
-| 入口で`lambda:SourceFunctionArn`も確かめる | 同じ実行roleを共有する別の関数からの呼び出しを区別できた | 同上 |
+| 呼び出し元の関数も限る（呼び出し元の実行roleのDenyで、`lambda:SourceFunctionArn`を使う） | 同じ実行roleを共有する別の関数からの呼び出しを区別できた。このキーはresource-based policyでは使えないので、呼び出し元の側に置く | [置き場所のADR](adr/20261001094443-source-function-arn-in-caller-identity-policy.md)、[検証](../experiments/source-function-arn/RESULTS.md) |
 | JWTの`sub`を呼び出し元と照合する | 入口を通った呼び出し元と、JWTを作ったchain用roleが対応していることを確かめ、別経路で作られたJWTの持ち込みを防ぐ | [設計書§6](design/architecture.md#6-受信側の共通部品と判定) |
 | 入口はBFFにし、ブラウザには認証情報を持たせない | ブラウザは秘密を保持できない。ブラウザには実行roleがなく、actorを確かめられない。取引の目的を決める場所としても、サーバー側の入口が要る | [入口のADR](adr/20260930083437-entry-via-bff.md) |
 | IdPはCognito User PoolとPre Token Generation V2 | 1回の`AssumeRoleWithWebIdentity`でSourceIdentityを設定できる | [IdPのADR](adr/20260930091026-idp-cognito-user-pool.md) |
@@ -200,7 +200,7 @@ Token Exchangeでは、認可サーバーがトークンを交換するたびに
 | 守らないもの | 内容 |
 |---|---|
 | 侵害されたホップの振る舞い | 侵害されたホップは、処理中のリクエストについて、自分に許された呼び出し先・目的・scopeの範囲でユーザーとして振る舞える。Token Exchangeでも同じ |
-| 実行環境から持ち出された認証情報 | 実行roleの認証情報と受け渡されたセッションを持ち出されると、有効期限内は、そのホップとして次のホップを呼べうる。`lambda:SourceFunctionArn`が実行環境の外での利用でも付くかは確かめていない。IPv6の送信元アドレスで使用場所を縛れることは確かめたが、ホップのLambdaをVPCにつなぐ必要がある（[IPv6送信元による縛り](../experiments/network-binding/RESULTS.md)） |
+| 実行環境から持ち出された認証情報 | 実行roleの認証情報と受け渡されたセッションを持ち出されると、有効期限内は、そのホップとして次のホップを呼べうる。呼び出し元の関数の限定（`lambda:SourceFunctionArn`）では防げない。関数のARNは認証情報そのものに刻まれており、持ち出した認証情報で呼んでも、その関数からの呼び出しとして扱われた（[検証](../experiments/source-function-arn/RESULTS.md)）。IPv6の送信元アドレスで使用場所を縛れることは確かめたが、ホップのLambdaをVPCにつなぐ必要がある（[IPv6送信元による縛り](../experiments/network-binding/RESULTS.md)） |
 | 侵害されたBFF | BFFは、ログイン中のユーザーのIDトークンとリフレッシュトークンを持ち、取引の目的を決める。BFFが侵害されると、そのユーザーとして、定めた目的のどれででも最初のホップを呼べる。BFFは最も価値の高い構成要素になる |
 | 侵害された属性サービスやそのデータ | 業務的なアクセス権は属性サービスのデータがすべてを決める。書き換えられると、そのとおりに判定される |
 | アカウントの管理者 | IAMの権限を持つ主体は、resource policyや信頼ポリシーを書き換えられる。管理者に対する境界は、アカウントの分離やSCPで作る必要がある |
@@ -307,7 +307,6 @@ case-serviceとaccount-serviceはそれぞれ属性サービスも呼ぶ）を10
 |---|---|
 | 名前のパターンで一致させる（`ArnLike`） | そのパターンに合う名前のroleを作れる人は誰でも一致する。roleの作成をSCPやPermissions Boundaryで縛る必要がある。ARNを`Principal`に直接書く場合と違い、同じ名前での作り直しによるなりすましも防げない |
 | roleのタグで一致させる（`aws:PrincipalTag`） | セッションタグが同じキーのroleのタグを上書きするため、`sts:TagSession`のキーの制限を誤ると呼び出し元が身元を偽れる。`iam:TagRole`の統制も必要 |
-| 入口を関数のARNだけで一致させる（Principalを`*`とし、`lambda:SourceFunctionArn`とアカウントで絞る） | resource policyが公開と判定されうる。Lambdaの公開を制限する設定との関係は未確認 |
 
 ## 7. 将来の拡張の方向
 
