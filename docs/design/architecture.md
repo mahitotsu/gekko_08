@@ -279,7 +279,7 @@ bffのFunction URLを直接呼べうるが、セッションcookieがなけれ�
 
 **トレース**：受信と送信のスパンを作り、`traceparent`を引き継ぐ。応答を返す前に送り切る（§7）。
 
-**ログ**：リクエストID、トレースID、ホップ名、呼び出し元のホップ名（actor）と実行role名、subject、目的、scope、JWTの`sub`、判定結果、処理時間を構造化ログに出す。
+**ログ**：1件を1行のJSONで標準出力に書く（Lambdaのログの形式はJSON。`timestamp`と`level`を持つので、レベルで絞り込める）。リクエストID、トレースID、ホップ名、呼び出し元のホップ名（actor）と実行role名、subject、目的、scope、JWTの`sub`、判定結果、処理時間を構造化ログに出す。
 認証情報、JWT、cookieはログに出さない。
 
 ### 属性サービス（entitlement-service）
@@ -337,6 +337,7 @@ OpenTelemetryで出し、CloudWatchのTransaction Searchに集める（[収集�
   Claude Codeは`tools/call`に`traceparent`を付けるので、fraud-mcpへの送信のスパンは`claude_code.tool.execution`の子になる。
   接続の処理（`initialize`、`tools/list`）はClaude Codeのスパンの外で行われるので、fraud-agentの受信のスパンの子になる。
 - **ログ**：構造化ログに、その時点のスパンのトレースID（`traceId`）を入れる。
+- **メトリクスは出さない**：認可の判定の件数や処理時間は、構造化ログ（`handled`と`rejected`）からLogs Insightsで集計する（[収集先のADR](../adr/20261001020115-telemetry-destination-cloudwatch.md)）。
 - **入れないもの**：認証情報（JWT、受け渡すセッション）、リクエストとレスポンスの本文、プロンプト、ツールの入出力。業務のコードは属性を加えない。
 - **有効化**：CDKが、bffと各ホップに環境変数`AUTHZ_TELEMETRY=cloudwatch`と、`xray:PutTraceSegments`の権限を付ける。環境変数がなければ、
   OTelのAPIは何もしない（単体テストなど）。

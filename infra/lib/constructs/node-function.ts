@@ -26,6 +26,10 @@ export class NodeFunction extends nodejs.NodejsFunction {
       memorySize: 512,
       timeout: cdk.Duration.seconds(30),
       logGroup,
+      // 1件を1行のJSONにし、Logs Insightsでフィールドを直接扱えるようにする。共通部品のログはJSONのまま書く
+      loggingFormat: lambda.LoggingFormat.JSON,
+      applicationLogLevelV2: lambda.ApplicationLogLevel.INFO,
+      systemLogLevelV2: lambda.SystemLogLevel.INFO,
       projectRoot: REPO_ROOT,
       depsLockFilePath: path.join(REPO_ROOT, 'package-lock.json'),
       ...props,

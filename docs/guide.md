@@ -234,6 +234,31 @@ case-serviceとaccount-serviceはそれぞれ属性サービスも呼ぶ）を10
   （[検証](../experiments/agent-frameworks/RESULTS.md)。コールドスタートの初期化は約0.6〜0.7秒）。
 - 自分の環境では、`npm run test:scenario`の結果（`tests/out-latency.json`）で確かめる。
 
+### ログで集計する
+
+メトリクスは出さず、認可の判定の件数や処理時間は、各ホップの構造化ログからCloudWatch Logs Insightsで集計する。ログは1件1行のJSONなので、
+フィールドをそのまま使える。対象のロググループには、bffと各ホップの関数のロググループ（`Gekko08App-*FunctionLogs*`）を選ぶ。
+
+```
+# 共通部品が受信の検証で拒否した件数（ホップと理由ごと）
+filter message = "rejected"
+| stats count(*) as rejected by hop, reason
+| sort rejected desc
+
+# ホップごとの結果（業務のコードによる403を含む）
+filter message = "handled"
+| stats count(*) as requests by hop, actor, purpose, status
+
+# 処理時間の内訳（NFR-3）
+filter message = "handled" and hop = "case-service"
+| stats pct(timings.chainMs, 50) as chain, pct(timings.mintMs, 50) as mint, pct(timings.totalMs, 50) as total, pct(timings.totalMs, 90) as total_p90
+```
+
+- 入口のIAMが拒否した呼び出し（許可していない呼び出し元、署名のない呼び出し、ホップの飛ばし）は、関数に届かないので、関数のログにもトレースにも出ない。
+  `rejected`に出るのは、入口のIAMを通ったあとに共通部品が拒否したもの（JWTがない、宛先や`sub`が合わない、目的やscopeがないなど）である。
+- ログの`traceId`で、Transaction Searchのトレースを開ける。
+- 常に見張る（アラームを出す）には、ロググループのメトリクスフィルターを加える。
+
 ## 7. 規模の上限
 
 ホップが増えたときに先に上限になるのは、STSのリクエスト数（アカウント・リージョンごとに毎秒600件）と、1スタックのリソース数である。

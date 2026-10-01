@@ -2,11 +2,12 @@
 
 ## Status
 
-Accepted (2026-10-01)
+Accepted (2026-10-01)。同日に改訂：メトリクスは出さないことにした（[収集先のADR](20261001020115-telemetry-destination-cloudwatch.md)）。
+メトリクスについての検証の結果は、記録として残す。
 
 ## Context
 
-トレースとメトリクスはOTLPで出し、CloudWatchに集める（[収集先のADR](20261001020115-telemetry-destination-cloudwatch.md)）。
+トレースはOTLPで出し、CloudWatchに集める（[収集先のADR](20261001020115-telemetry-destination-cloudwatch.md)）。
 Lambdaからの送り方を決める必要がある。Lambdaは応答を返すと実行環境が止まるので、止まる前に送り切るか、拡張機能（Extension）に任せる必要がある。
 fraud-agentのClaude Code（子プロセス）もOTLPで送るが、SigV4の署名はできない
 （[フレームワークへの当てはめの検証](../../experiments/agent-frameworks/RESULTS.md)）。
@@ -27,11 +28,11 @@ fraud-agentのClaude Code（子プロセス）もOTLPで送るが、SigV4の署�
 
 **関数の中のOTel SDKが、SigV4で署名して、CloudWatchのOTLPの受け口に直接送る。ホップの呼び出しの終わりに送り切る。**
 
-1. 共通部品が、トレースとメトリクスのエクスポーター（OTLP/HTTPのprotobufを、実行roleの認証情報で署名して送る）を提供する。
-   受け口は`https://xray.<region>.amazonaws.com/v1/traces`と`https://monitoring.<region>.amazonaws.com/v1/metrics`。
+1. 共通部品が、トレースのエクスポーター（OTLP/HTTPのprotobufを、実行roleの認証情報で署名して送る）を提供する。
+   受け口は`https://xray.<region>.amazonaws.com/v1/traces`。
 2. 共通部品が、ホップの呼び出しの終わりに、応答を返す前に送り切る（`forceFlush`）。
 3. 子プロセス（Claude Code）のOTLPは、親のプロセスが`127.0.0.1`で受け、署名して転送する。子プロセスに認証情報は渡さない。
-4. 各ホップの実行roleに、`xray:PutTraceSegments`と`cloudwatch:PutMetricData`だけを許す。
+4. 各ホップの実行roleに、`xray:PutTraceSegments`だけを許す。
 5. Lambdaのレイヤーと拡張機能は使わない。
 
 ## 採用しなかった選択肢
@@ -42,15 +43,13 @@ fraud-agentのClaude Code（子プロセス）もOTLPで送るが、SigV4の署�
 - **コレクターのレイヤー（opentelemetry-lambda）**：関数と子プロセスが同じ経路（`localhost:4318`）で送れ、decoupleで応答を待たせない。
   ただし、計測では直接送信より遅く（コールドでコレクターの起動を待つ。ウォームでも関数からコレクターへの送信が残る）、メモリも多く、
   応答のあとの拡張機能の時間も課金された。AWSが出しているコレクターのレイヤーは「非推奨」の扱いで、上流のものを使うことになる。
-- **メトリクスだけEmbedded Metric Format（ログ）で出す**：送信の時間はかからないが、CloudWatchがOTLPのメトリクスを直接受け付け、
-  直接送信の増分も小さい（並行して約17ms）ので、形式を2つに分けない。
 
 ## Consequences
 
 ### よくなること
 
 - レイヤーも拡張機能も要らず、関数の作りが他のホップと同じで済む。依存はOTelのSDKと、すでに使っている署名の部品だけ。
-- トレース、メトリクス、子プロセスのテレメトリを、1つの仕組みで送れる。
+- このプロセスのトレースと、子プロセスのトレースを、1つの仕組みで送れる。
 - IAMの権限を、確かめた最小のアクションに絞れる。
 
 ### 引き受けること

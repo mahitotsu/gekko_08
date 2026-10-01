@@ -11,9 +11,3 @@
   - 緊急または重要で、丁寧に議論したうえで積んでおくべきと判断したとき
 
 ## 作業の予定
-
-- OpenTelemetryでメトリクスを出す（NFR-3、FR-6の強化）。トレースは出力済み。収集先と送り方はトレースと同じ
-  （[収集先のADR](docs/adr/20261001020115-telemetry-destination-cloudwatch.md)、[送り方のADR](docs/adr/20261001053646-telemetry-direct-export.md)。
-  メトリクスの受け口は`https://monitoring.<region>.amazonaws.com/v1/metrics`、権限は`cloudwatch:PutMetricData`）。
-  認可の判定の件数（ホップ、許可・拒否、拒否の理由ごと）と、各処理の時間を中心にする。毎回送るか間隔をあけるか（実行環境が止まる前に送り切る必要がある）、
-  メトリクスの属性にsubjectを入れないこと（系列の数が増える）を決める。要件のIDにひも付けたシナリオテストで確かめる
