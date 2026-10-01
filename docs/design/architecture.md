@@ -322,13 +322,22 @@ OpenTelemetryで出し、CloudWatchのTransaction Searchに集める（[収集�
 | `<ホップ名>` | 共通部品の受信 | SERVER | `authz.inbound`（`accepted`／`rejected`）、`authz.reject_reason`、`authz.actor`、`authz.purpose`、`authz.scope`、`enduser.id`、`authz.request_id`、`http.response.status_code` |
 | `call <呼び出し先>` | 共通部品の送信 | CLIENT | `authz.target`、`authz.request_id`、`http.response.status_code` |
 | `chain (sts:AssumeRole)`、`mint JWT (sts:GetWebIdentityToken)` | 共通部品の送信 | INTERNAL | — |
+| `<サービス>.<操作>`（`DynamoDB.GetItem`、`STS.AssumeRole`など） | 共通部品の`traceAwsClient`を付けたAWS SDKのクライアント | CLIENT | `rpc.system`（`aws-api`）、`rpc.service`、`rpc.method`、`aws.dynamodb.table_names`、`aws.request_id`、`http.response.status_code` |
+| `claude_code.*`（`interaction`、`llm_request`、`tool`、`tool.execution`など） | fraud-agentのClaude Code（子プロセス） | — | Claude Codeが決める。プロンプトや応答の本文は記録させない |
 
 - **引き継ぎ**：送信のスパンの`traceparent`を、ホップへのリクエストのヘッダーに付ける。受信側はそれを親にする。`traceparent`を受け入れるのは、
   入口のIAMで呼び出し元を確かめたホップの間だけで、bffはブラウザから届いた`traceparent`を使わず、新しいトレースを始める。
-- **中継**：fraud-agentの中継（§6）は自分のスパンを作らず、受け取った`traceparent`を転送するときのコンテキストにする。Claude Codeのテレメトリを
-  送らない今は、fraud-mcpへの送信のスパンはfraud-agentの受信のスパンの子になる。
+- **AWS SDK**：esbuildで1ファイルにまとめた関数では、AWS SDKの自動計装が効かない。共通部品の`traceAwsClient`がクライアントにミドルウェアを
+  加え、呼び出しごとにスパンを作る。キーや本文は属性に入れない。
+- **Claude Code**：fraud-agentは、Claude Codeのトレースを有効にし（トレースだけ。メトリクスとログのイベントは出さない）、送り先を
+  共通部品の`startOtlpTraceRelay`が`127.0.0.1`に立てた受け口にする。受け口は、受けたOTLPを実行roleで署名してX-Rayに転送する。
+  Claude Codeは、SDKが入れる`TRACEPARENT`を親にするので、`claude_code.interaction`はfraud-agentの受信のスパンの子になる。
+  分析の終わりに、Claude Codeが残りを送り終えるのを待つ（最後の受信から300ms、最大2秒）。
+- **中継**：fraud-agentのMCPの中継（§6）は自分のスパンを作らず、受け取った`traceparent`を転送するときのコンテキストにする。
+  Claude Codeは`tools/call`に`traceparent`を付けるので、fraud-mcpへの送信のスパンは`claude_code.tool.execution`の子になる。
+  接続の処理（`initialize`、`tools/list`）はClaude Codeのスパンの外で行われるので、fraud-agentの受信のスパンの子になる。
 - **ログ**：構造化ログに、その時点のスパンのトレースID（`traceId`）を入れる。
-- **入れないもの**：認証情報（JWT、受け渡すセッション）、リクエストとレスポンスの本文。業務のコードは属性を加えない。
+- **入れないもの**：認証情報（JWT、受け渡すセッション）、リクエストとレスポンスの本文、プロンプト、ツールの入出力。業務のコードは属性を加えない。
 - **有効化**：CDKが、bffと各ホップに環境変数`AUTHZ_TELEMETRY=cloudwatch`と、`xray:PutTraceSegments`の権限を付ける。環境変数がなければ、
   OTelのAPIは何もしない（単体テストなど）。
 
@@ -412,13 +421,13 @@ Cognito User Poolのカスタム属性`custom:branch`は使わない。User Pool
 | FR-3 | chainの途中でSourceIdentityや目的を変えられない。定めていない目的を刻めない。新しいtagのキーを加えられない。目的に合わない下流のJWTや、宣言していないscopeを発行できない |
 | FR-4 | 途中のホップを飛ばした呼び出しが403 |
 | FR-5 | ブラウザに返す応答とcookieに、トークンも認証情報も含まれない |
-| FR-6 | 1回のリクエストを、各ホップのログとCloudTrailでリクエストIDとユーザーから追える。マイクロサービスとエージェントの経路が、それぞれ1つのトレースにつながり（各ホップの受信のスパンが直前のホップの送信のスパンの子になる）、受信のスパンに検証した呼び出し元・目的・scope・ユーザーが入る。ブラウザから届いた`traceparent`は引き継がない |
+| FR-6 | 1回のリクエストを、各ホップのログとCloudTrailでリクエストIDとユーザーから追える。マイクロサービスとエージェントの経路が、それぞれ1つのトレースにつながり（各ホップの受信のスパンが直前のホップの送信のスパンの子になる）、受信のスパンに検証した呼び出し元・目的・scope・ユーザーが入る。DynamoDBの呼び出しが各ホップの受信のスパンの子になる。Claude Codeのスパンがfraud-agentの受信の子になり、`tools/call`の送信が`claude_code.tool.execution`の子になる。ブラウザから届いた`traceparent`は引き継がない |
 | FR-7 | エージェントが誘導されて他の支店の口座を要求しても拒否される。エージェントの分析では、支店長にも残高が返らない。自分の支店の案件は分析できる。モデルの判断は毎回変わりうるので、誘導されたかどうかではなく、誘導されても他の支店のデータや残高が応答に現れないことを確かめる |
 | FR-8 | 人事データで所属を変えると、次のリクエストから結果が変わる |
 | NFR-3 | 各ホップの処理時間（chain、JWTの発行、検証）を集計して公開する |
 | SR-1 | 受け渡したchainのセッションで、どのホップも呼べない。内部のホップ以外を宛先に含むJWTを作れない |
 | SR-2 | 許可していない主体（広い権限を持つroleを含む）が各ホップを呼ぶと403 |
-| SR-3 | 各ホップのログとトレースのスパンに、認証情報・JWT・cookieが含まれない |
+| SR-3 | 各ホップのログとトレースのスパンに、認証情報・JWT・cookieが含まれない。スパン（Claude Codeのものを含む）に、プロンプト・業務データ・ツールの結果・注入された文言が含まれない |
 
 FR-6・SR-3・NFR-3のテストは、各ホップの構造化ログをCloudWatch Logsから読んで確かめる。トレースは、Transaction Searchのロググループ
 `aws/spans`をトレースID（bffのログにある）で引いて確かめる。スパンが届くまでに数十秒〜数分かかる。FR-6のうちCloudTrailの確認は、イベントが届くまでに

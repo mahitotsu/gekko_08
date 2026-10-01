@@ -3,14 +3,14 @@ import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DeleteCommand, DynamoDBDocumentClient, GetCommand, PutCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { GetParameterCommand, SSMClient } from '@aws-sdk/client-ssm';
 import { AssumeRoleCommand, AssumeRoleWithWebIdentityCommand, STSClient } from '@aws-sdk/client-sts';
-import { ATTR, createCaller, flushTelemetry, initTelemetry, log, tracer, type Call, type Target, type Timings } from '@gekko08/authz-context';
+import { ATTR, createCaller, flushTelemetry, initTelemetry, log, traceAwsClient, tracer, type Call, type Target, type Timings } from '@gekko08/authz-context';
 import { ROOT_CONTEXT, SpanKind, SpanStatusCode, type Span } from '@opentelemetry/api';
 import type { LambdaFunctionURLEvent, LambdaFunctionURLResult } from 'aws-lambda';
 
 initTelemetry('bff');
-const db = DynamoDBDocumentClient.from(new DynamoDBClient({}));
-const ssm = new SSMClient({});
-const sts = new STSClient({});
+const db = DynamoDBDocumentClient.from(traceAwsClient(new DynamoDBClient({})));
+const ssm = traceAwsClient(new SSMClient({}));
+const sts = traceAwsClient(new STSClient({}));
 const SESSIONS = process.env.SESSIONS_TABLE!;
 
 const SESSION_COOKIE = '__Host-sid';
@@ -216,9 +216,9 @@ async function withChain<T>(s: Session, requestId: string, purpose: string, timi
     WebIdentityToken: s.idToken,
     DurationSeconds: 900,
   })));
-  const { Credentials: c } = await step(timings, 'purposeMs', 'stamp purpose (sts:AssumeRole)', () => new STSClient({
+  const { Credentials: c } = await step(timings, 'purposeMs', 'stamp purpose (sts:AssumeRole)', () => traceAwsClient(new STSClient({
     credentials: { accessKeyId: fed!.AccessKeyId!, secretAccessKey: fed!.SecretAccessKey!, sessionToken: fed!.SessionToken! },
-  }).send(new AssumeRoleCommand({
+  })).send(new AssumeRoleCommand({
     RoleArn: config.purposeRoleArn,
     RoleSessionName: requestId,
     DurationSeconds: 900,

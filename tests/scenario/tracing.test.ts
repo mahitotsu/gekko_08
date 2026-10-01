@@ -11,6 +11,13 @@ const SECRETS: [string, RegExp][] = [
   ['セッショントークン', /IQoJb3JpZ2lu/],
   ['セッションcookie', /__Host-sid=/],
 ];
+// 本文（プロンプト、業務データ、ツールの結果、注入された文言）。スパンに記録しない
+const CONTENT: [string, RegExp][] = [
+  ['プロンプト', /分析してください|不正検知アナリスト/],
+  ['案件のデータ', /深夜帯の海外送金/],
+  ['口座のデータ', /東京 太郎/],
+  ['注入された文言', /本部監査部/],
+];
 const BROWSER_TRACE_ID = '4bf92f3577b34da6a3ce929d0e0e4736';
 
 let startTime: number;
@@ -39,7 +46,8 @@ beforeAll(async () => {
   [summary, agent] = await Promise.all([
     // bff、case-service、account-service、属性サービス（2回）の受信と、それぞれへの送信
     traceSpans(summaryTrace, startTime, (sp) => named(sp, 'entitlement-service').length >= 2 && named(sp, 'account-service').length >= 1 && named(sp, 'bff').length >= 1),
-    traceSpans(agentTrace, startTime, (sp) => named(sp, 'fraud-agent').length >= 1 && named(sp, 'fraud-mcp').length >= 3 && named(sp, 'case-service').length >= 1 && named(sp, 'bff').length >= 1),
+    traceSpans(agentTrace, startTime, (sp) => named(sp, 'fraud-agent').length >= 1 && named(sp, 'fraud-mcp').length >= 3 && named(sp, 'case-service').length >= 1
+      && named(sp, 'bff').length >= 1 && named(sp, 'claude_code.interaction').length >= 1 && named(sp, 'claude_code.tool.execution').length >= 1),
   ]);
 }, 420_000);
 
@@ -70,6 +78,15 @@ describe('FR-6: マイクロサービスの経路が1つのトレースにつな
     });
   });
 
+  it('AWS SDKの呼び出し（DynamoDB）は、呼び出したホップの受信のスパンの子になる', () => {
+    for (const hop of ['case-service', 'account-service', 'entitlement-service']) {
+      const servers = named(summary, hop).map((h) => h.spanId);
+      const db = summary.filter((sp) => sp.attributes['rpc.service'] === 'DynamoDB' && servers.includes(sp.parentSpanId ?? ''));
+      expect(db.length, hop).toBeGreaterThan(0);
+      for (const d of db) expect(d.attributes['aws.dynamodb.table_names']).toBeDefined();
+    }
+  });
+
   it('NFR-3: 送信の内訳（chain、JWTの発行）と、bffでの目的の刻印がスパンになる', () => {
     for (const name of ['assume (sts:AssumeRoleWithWebIdentity)', 'stamp purpose (sts:AssumeRole)', 'chain (sts:AssumeRole)', 'mint JWT (sts:GetWebIdentityToken)']) {
       expect(named(summary, name).length, name).toBeGreaterThan(0);
@@ -92,15 +109,36 @@ describe('FR-6: エージェントの経路も1つのトレースにつながる
       expect(byId(agent, m.parentSpanId)?.name).toBe('call fraud-mcp');
       expect(m.attributes).toMatchObject({ 'authz.actor': 'fraud-agent', 'authz.purpose': 'agent-analysis', 'authz.scope': 'mcp:tools', 'enduser.id': 'yamada' });
     }
-    expect(one(agent, 'case-service').attributes).toMatchObject({ 'authz.actor': 'fraud-mcp', 'authz.scope': 'case:read' });
+    expect(named(agent, 'case-service')[0].attributes).toMatchObject({ 'authz.actor': 'fraud-mcp', 'authz.scope': 'case:read' });
+  });
+
+  it('Claude Code（子プロセス）のスパンは、fraud-agentの受信のスパンの子になる', () => {
+    const fraudAgent = one(agent, 'fraud-agent');
+    expect(one(agent, 'claude_code.interaction').parentSpanId).toBe(fraudAgent.spanId);
+  });
+
+  it('ツールの呼び出し（tools/call）のfraud-mcpへの送信は、Claude Codeのツールの実行のスパンの子になる', () => {
+    const toMcp = named(agent, 'call fraud-mcp');
+    const underTool = toMcp.filter((c) => byId(agent, c.parentSpanId)?.name === 'claude_code.tool.execution');
+    // 接続の処理（initializeやtools/list）は、Claude Codeがスパンの外で行うので、fraud-agentの受信のスパンの子になる
+    const underAgent = toMcp.filter((c) => byId(agent, c.parentSpanId)?.name === 'fraud-agent');
+    expect(underTool.length).toBe(named(agent, 'claude_code.tool.execution').length);
+    expect(underTool.length + underAgent.length).toBe(toMcp.length);
   });
 });
 
-describe('SR-3: スパンに認証情報が入らない', () => {
+describe('SR-3: スパンに認証情報も本文も入らない', () => {
   it('2つのトレースのすべてのスパンに、認証情報のパターンが現れない', () => {
     for (const s of [...summary, ...agent]) {
       const text = JSON.stringify(s);
       for (const [name, re] of SECRETS) expect(re.test(text), `${s.name}に${name}`).toBe(false);
+    }
+  });
+
+  it('プロンプト、業務データ、ツールの結果は、どのスパンにも記録されない（Claude Codeのスパンを含む）', () => {
+    for (const s of [...summary, ...agent]) {
+      const text = JSON.stringify(s);
+      for (const [name, re] of CONTENT) expect(re.test(text), `${s.name}に${name}`).toBe(false);
     }
   });
 });

@@ -1,6 +1,6 @@
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { AssumeRoleCommand, STSClient } from '@aws-sdk/client-sts';
-import { createHopHandler, log, type SessionCredentials } from '@gekko08/authz-context';
+import { createHopHandler, log, startOtlpTraceRelay, traceAwsClient, type SessionCredentials } from '@gekko08/authz-context';
 import { startMcpRelay, type McpExchange } from '@gekko08/authz-context/mcp';
 
 // 案件の分析を行うAIエージェント。Claude Agent SDKが、Claude Code（同梱の実行ファイル）を子プロセスとして動かす。
@@ -29,7 +29,7 @@ let model: Promise<SessionCredentials & { expiration: number }> | undefined;
 function modelCredentials() {
   const fresh = (c: { expiration: number }) => c.expiration - Date.now() > 10 * 60_000;
   const assume = async () => {
-    const { Credentials: c } = await new STSClient({}).send(new AssumeRoleCommand({
+    const { Credentials: c } = await traceAwsClient(new STSClient({})).send(new AssumeRoleCommand({
       RoleArn: process.env.MODEL_ROLE_ARN, RoleSessionName: 'fraud-agent-model', DurationSeconds: 3600,
     }));
     return { accessKeyId: c!.AccessKeyId!, secretAccessKey: c!.SecretAccessKey!, sessionToken: c!.SessionToken!, expiration: c!.Expiration!.getTime() };
@@ -39,8 +39,28 @@ function modelCredentials() {
   return model;
 }
 
+/**
+ * Claude Codeのトレースの設定。送り先は、このプロセスの中継（127.0.0.1）で、中継が署名してCloudWatchに転送する。
+ * トレースだけを出し、メトリクスとログのイベントは出さない。プロンプトやツールの入出力の本文は、既定のまま記録させない（SR-3）
+ */
+function childTelemetry(endpoint?: string): Record<string, string> {
+  if (!endpoint) return {};
+  return {
+    CLAUDE_CODE_ENABLE_TELEMETRY: '1',
+    // トレースは、Claude Codeではベータの機能
+    CLAUDE_CODE_ENHANCED_TELEMETRY_BETA: '1',
+    OTEL_TRACES_EXPORTER: 'otlp',
+    OTEL_METRICS_EXPORTER: 'none',
+    OTEL_LOGS_EXPORTER: 'none',
+    OTEL_EXPORTER_OTLP_PROTOCOL: 'http/protobuf',
+    OTEL_EXPORTER_OTLP_ENDPOINT: endpoint,
+    // 分析の途中でも送り、終了の前に送り残しを少なくする
+    OTEL_BSP_SCHEDULE_DELAY: '200',
+  };
+}
+
 /** Claude Codeの子プロセスの環境変数。process.envは引き継がず、要るものだけを渡す */
-async function childEnv(): Promise<Record<string, string | undefined>> {
+async function childEnv(otlpEndpoint?: string): Promise<Record<string, string | undefined>> {
   const c = await modelCredentials();
   return {
     PATH: process.env.PATH,
@@ -58,6 +78,7 @@ async function childEnv(): Promise<Record<string, string | undefined>> {
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
     DISABLE_AUTOUPDATER: '1',
     CLAUDE_AGENT_SDK_CLIENT_APP: 'gekko08-fraud-agent/0.1.0',
+    ...childTelemetry(otlpEndpoint),
   };
 }
 
@@ -77,6 +98,8 @@ export const handler = createHopHandler(async (body, { call, requestId }) => {
 
   const toolCalls: ToolCallRecord[] = [];
   const relay = await startMcpRelay(call, 'fraud-mcp', recordToolCall(toolCalls));
+  // Claude Codeのトレースの受け口。SDKは、このときのスパン（fraud-agentの受信）を子プロセスのTRACEPARENTに入れる
+  const otlp = await startOtlpTraceRelay();
   const t0 = performance.now();
   const stderr: string[] = [];
   let analysis: string | undefined;
@@ -98,7 +121,7 @@ export const handler = createHopHandler(async (body, { call, requestId }) => {
         persistSession: false,
         maxTurns: MAX_TURNS,
         cwd: '/tmp',
-        env: await childEnv(),
+        env: await childEnv(otlp?.endpoint),
         stderr: (d) => { stderr.push(d); },
       },
     })) {
@@ -110,8 +133,11 @@ export const handler = createHopHandler(async (body, { call, requestId }) => {
   } catch (e) {
     log('error', 'agent failed', { hop: 'fraud-agent', requestId, error: (e as Error).message, stderr: stderr.join('').slice(-2000) });
     throw e;
+    // Claude Codeは終了するときに残りのスパンを送る。届くのを待つ（転送の完了は、応答の前に共通部品が待つ）
+    await otlp?.settle();
   } finally {
     await relay.close();
+    await otlp?.close();
   }
   const agentMs = Math.round(performance.now() - t0);
   log('info', 'agent finished', { hop: 'fraud-agent', requestId, caseId, toolCalls, ...outcome, agentMs });

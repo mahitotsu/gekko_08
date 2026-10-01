@@ -1,8 +1,8 @@
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, GetCommand } from '@aws-sdk/lib-dynamodb';
-import { createHopHandler } from '@gekko08/authz-context';
+import { createHopHandler, traceAwsClient } from '@gekko08/authz-context';
 
-const db = DynamoDBDocumentClient.from(new DynamoDBClient({}));
+const db = DynamoDBDocumentClient.from(traceAwsClient(new DynamoDBClient({})));
 const STAFF = process.env.STAFF_TABLE!;
 const TITLE_PERMISSIONS = process.env.TITLE_PERMISSIONS_TABLE!;
 

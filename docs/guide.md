@@ -129,6 +129,7 @@ Token Exchangeでは、認可サーバーがトークンを交換するたびに
 
 5. **業務のコードを書く。** `createHopHandler`に業務の関数を渡す。受け取るのは検証済みの`subject`・`actor`・`purpose`・`scope`と、
    次のホップを呼ぶ`call`だけで、JWTも認証情報も扱わない。scopeで操作を、属性サービスのアクセス権でデータを判定する。
+   AWS SDKのクライアントは`traceAwsClient`で包み、呼び出しをトレースに出す。
 
    ```ts
    export const handler = createHopHandler(async (body, { scope, purpose, call }) => {
@@ -157,6 +158,8 @@ Token Exchangeでは、認可サーバーがトークンを交換するたびに
    await relay.close();
    ```
 
+   エージェントのテレメトリは、ホップのトレースにつなぐ。子プロセスで動く場合は、`startOtlpTraceRelay`の受け口を送り先にし、
+   親のプロセスが署名して転送する。エージェントが本文（プロンプト、ツールの入出力）を記録しない設定になっているかを確かめる。
    エージェントが子プロセスで動く場合（Claude Agent SDK）は、子プロセスに認証情報を渡さない。モデルを呼ぶのに要る認証情報は、
    モデルの呼び出しだけを許すroleのものにし、組み込みのツール（シェルやファイルの読み書き）を無効にする（[fraud-agent](../services/fraud-agent/src/index.ts)）。
 7. **データは各ホップの実行roleで読む。** ユーザーの権限でAWSリソースに直接アクセスすることは扱わない（要件定義のスコープ外）。

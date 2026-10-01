@@ -3,7 +3,7 @@ import { AssumeRoleCommand, GetWebIdentityTokenCommand, STSClient } from '@aws-s
 import { defaultProvider } from '@aws-sdk/credential-provider-node';
 import { SpanKind, SpanStatusCode } from '@opentelemetry/api';
 import { SignatureV4 } from '@smithy/signature-v4';
-import { ATTR, injectTraceContext, tracer } from './telemetry';
+import { ATTR, injectTraceContext, traceAwsClient, tracer } from './telemetry';
 import { HEADER_CONTEXT, HEADER_REQUEST_ID, HEADER_SESSION, type CallResult, type SessionCredentials, type Target } from './types';
 
 const region = () => process.env.AWS_REGION!;
@@ -16,7 +16,7 @@ function execSigner(): SignatureV4 {
 }
 
 function stsWith(creds: SessionCredentials): STSClient {
-  return new STSClient({ region: region(), credentials: creds });
+  return traceAwsClient(new STSClient({ region: region(), credentials: creds }));
 }
 
 export function encodeSession(creds: SessionCredentials): string {

@@ -1,8 +1,8 @@
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, GetCommand } from '@aws-sdk/lib-dynamodb';
-import { createHopHandler, type Call } from '@gekko08/authz-context';
+import { createHopHandler, traceAwsClient, type Call } from '@gekko08/authz-context';
 
-const db = DynamoDBDocumentClient.from(new DynamoDBClient({}));
+const db = DynamoDBDocumentClient.from(traceAwsClient(new DynamoDBClient({})));
 const TABLE = process.env.ACCOUNTS_TABLE!;
 
 interface Entitlements { branch: string; title: string; permissions: string[] }

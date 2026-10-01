@@ -3,4 +3,4 @@ export { AuthzError, roleNameFromAssumedRoleArn, verifyInbound, type CallerEntry
 export { log } from './log';
 export { createCaller, decodeSession, encodeSession, type Call, type CallOptions, type Timings } from './outbound';
 export * from './types';
-export { ATTR, flushTelemetry, initTelemetry, tracer } from './telemetry';
+export { ATTR, flushTelemetry, initTelemetry, startOtlpTraceRelay, traceAwsClient, tracer, type OtlpTraceRelay } from './telemetry';

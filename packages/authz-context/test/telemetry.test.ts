@@ -5,7 +5,7 @@ import type { LambdaFunctionURLEvent } from 'aws-lambda';
 import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT } from 'jose';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createHopHandler, type HopConfig } from '../src/handler';
-import { ATTR, inboundContext, injectTraceContext } from '../src/telemetry';
+import { ATTR, inboundContext, injectTraceContext, startOtlpTraceRelay, traceAwsClient } from '../src/telemetry';
 
 const ISSUER = 'https://example.tokens.sts.global.api.aws';
 const CHAIN = 'arn:aws:iam::123456789012:role/bff-federated';
@@ -79,5 +79,31 @@ describe('traceparentの引き継ぎ', () => {
   it('大文字のヘッダー名でも、受信のtraceparentを読める', () => {
     const ctx = inboundContext({ Traceparent: `00-${TRACE_ID}-${PARENT}-01` });
     expect(trace.getSpanContext(ctx)?.traceId).toBe(TRACE_ID);
+  });
+});
+
+describe('AWS SDKの呼び出しのスパン', () => {
+  // AWS SDKのクライアントの代わり。登録されたミドルウェアで、1回の呼び出しを再現する
+  function fakeClient() {
+    let mw: any;
+    const client = { middlewareStack: { add: (m: any) => { mw = m; } } };
+    traceAwsClient(client);
+    return (input: unknown, output: unknown) => mw(async () => output, { clientName: 'DynamoDBClient', commandName: 'GetItemCommand' })({ input });
+  }
+
+  it('サービス名・操作名・テーブル名・リクエストIDを属性に入れ、キーは入れない', async () => {
+    await fakeClient()({ TableName: 'cases', Key: { caseId: 'C-1001' } }, { output: { $metadata: { requestId: 'r-1', httpStatusCode: 200 } } });
+    const [span] = memory.getFinishedSpans();
+    expect(span.name).toBe('DynamoDB.GetItem');
+    expect(span.attributes).toMatchObject({
+      'rpc.system': 'aws-api', 'rpc.service': 'DynamoDB', 'rpc.method': 'GetItem', 'aws.dynamodb.table_names': ['cases'], 'aws.request_id': 'r-1',
+    });
+    expect(JSON.stringify(span.attributes)).not.toContain('C-1001');
+  });
+});
+
+describe('子プロセスのトレースの中継', () => {
+  it('トレースが無効なら、中継を立てない', async () => {
+    expect(await startOtlpTraceRelay()).toBeUndefined();
   });
 });

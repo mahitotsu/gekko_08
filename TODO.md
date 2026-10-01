@@ -12,8 +12,8 @@
 
 ## 作業の予定
 
-- 標準形式（OpenTelemetry）でトレースとメトリクスを出力する（FR-6・NFR-3の強化）。収集先は[ADR](docs/adr/20261001020115-telemetry-destination-cloudwatch.md)、送り方は[ADR](docs/adr/20261001053646-telemetry-direct-export.md)（関数の中のSDKが署名して直接送る）。
-  次の順に進め、各ステップを要件のIDにひも付けたシナリオテストで確かめる。
-  2. AWS SDKの呼び出し（STS、DynamoDB）とエージェント。Claude Codeのテレメトリ（`claude_code.*`）をホップのスパンにつなぐ
-     （[検証](experiments/agent-frameworks/RESULTS.md)）。プロンプトや応答の本文は既定で記録しない（SR-3）
-  3. メトリクス：認可の判定の件数（ホップ、許可・拒否、拒否の理由ごと）と、各処理の時間
+- OpenTelemetryでメトリクスを出す（NFR-3、FR-6の強化）。トレースは出力済み。収集先と送り方はトレースと同じ
+  （[収集先のADR](docs/adr/20261001020115-telemetry-destination-cloudwatch.md)、[送り方のADR](docs/adr/20261001053646-telemetry-direct-export.md)。
+  メトリクスの受け口は`https://monitoring.<region>.amazonaws.com/v1/metrics`、権限は`cloudwatch:PutMetricData`）。
+  認可の判定の件数（ホップ、許可・拒否、拒否の理由ごと）と、各処理の時間を中心にする。毎回送るか間隔をあけるか（実行環境が止まる前に送り切る必要がある）、
+  メトリクスの属性にsubjectを入れないこと（系列の数が増える）を決める。要件のIDにひも付けたシナリオテストで確かめる
