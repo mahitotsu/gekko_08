@@ -51,6 +51,20 @@ AWSが保証した値ではないので、受信側の判定は変わらない�
                 x-authz-session: chainのセッション（受信側がさらに先を呼ぶ場合）   業務のコード：属性サービスからアクセス権を得て判定
 ```
 
+用語：
+
+| 用語 | 意味 |
+|---|---|
+| ホップ | 呼び出しの連鎖の1つ。Lambdaの関数と、`AWS_IAM`認証のFunction URL |
+| 実行role | 各ホップの関数のrole。ホップを呼ぶ（SigV4で署名する）のはこのroleで、入口のIAMはこれで呼び出し元（actor）を確かめる |
+| federated role | bffが、ユーザーのIDトークンで`AssumeRoleWithWebIdentity`するrole。SourceIdentityが刻まれる |
+| 目的用のrole | bffが、federated roleのセッションからchainし、取引の目的をtransitive session tagとして刻むrole |
+| chain用role | 呼び出し先を持つホップごとのrole。受け取ったセッションからchainし、次のホップ宛てのJWTを作ることだけができる |
+| 受け渡すセッション | 呼び出し元が`x-authz-session`で渡すchainのセッション。漏れても、どのホップも呼べない |
+| 取引の目的（purpose） | 入口が経路ごとに決める、何のための取引か。途中で変えられない |
+| scope | 呼び出し元と呼び出し先の組ごとに宣言する、呼び出し元に許す操作。JWTに付く |
+| 属性サービス | 本人の業務的なアクセス権（所属、役職ごとの権限）を返すホップ |
+
 認可の根拠は3つの層に分ける。
 
 | 層 | 問い | 担い手 |
@@ -64,7 +78,7 @@ AWSが保証した値ではないので、受信側の判定は変わらない�
 
 要点：
 
-- **ユーザーと取引の目的は入口で一度だけ刻む。** SourceIdentityとtransitive session tagは、role chainingで途中のホップが変えられない。
+- **ユーザーと取引の目的は、リクエストごとに入口で刻む。** SourceIdentityとtransitive session tagは、role chainingで途中のホップが変えられない。
 - **呼び出しの許可（actor）とユーザーの証明（subject）を分ける。** ホップを呼ぶ権限は各ホップの実行roleにだけあり、ユーザーの代理の
   セッションは、IAMが許した宛先・目的・scopeのJWTを作ることしかできない。
 - **委任の範囲はコードではなくIAMのポリシーが強制する。** 目的に合わない下流宛てのJWTや、宣言していないscopeは、STSが発行しない。
@@ -203,9 +217,49 @@ Token Exchangeでは、認可サーバーがトークンを交換するたびに
   本番で使うなら無効にしてよい。
 - 各ホップのログとトレースのスパン（`enduser.id`）には、ユーザーの識別子と取引の目的が出る。個人情報の扱いは、自分のシステムの方針に合わせる。
 - 業務的なアクセス権の判定を1か所に集めたい場合は、各ホップのコードの判定を、Amazon Verified Permissions（Cedar）のような判定サービスに
-  任せる選択肢がある（[§8](#8-将来の拡張の方向)）。委任の範囲をIAMに強制させる部分は変わらない。
+  任せる選択肢がある（[§7](#7-将来の拡張の方向)）。委任の範囲をIAMに強制させる部分は変わらない。
 
-## 6. レイテンシの実測
+## 6. 運用
+
+### トレースを見る
+
+トレースは、CloudWatchのTransaction Searchで見る（スパンはロググループ`aws/spans`に入る）。各ホップのログの`traceId`で、1回のリクエストの
+トレースを開ける。スパンの種類と属性は[設計書§7](design/architecture.md#7-追跡fr-6)にある。
+
+- 1つのトレースは、bffの受信のスパンから始まり、各ホップの受信（SERVER）と送信（`call <呼び出し先>`）、その内訳（chain、JWTの発行）、
+  AWS SDKの呼び出し（`DynamoDB.GetItem`など）が親子でつながる。エージェントの経路では、fraud-agentの受信の下にClaude Codeのスパン
+  （`claude_code.*`）が入り、`tools/call`ごとのfraud-mcpへの送信がその下につながる。
+- 受信のスパンの`authz.actor`・`authz.purpose`・`authz.scope`・`enduser.id`で、どの呼び出し元が、何の取引で、誰の代理で呼んだかがわかる。
+  共通部品が拒否したときは、`authz.inbound`が`rejected`になり、`authz.reject_reason`に理由が入る。
+- スパンの量（2026-10-01の実測）は、1リクエストあたり、案件の要約で32スパン・約27KB、エージェントの分析（ツールの呼び出し3回）で
+  56スパン・約47KBだった。スパンはCloudWatch Logsとして取り込まれ、費用は量に比例する。
+
+### ログで集計する
+
+メトリクスは出さず、認可の判定の件数や処理時間は、各ホップの構造化ログからCloudWatch Logs Insightsで集計する。ログは1件1行のJSONなので、
+フィールドをそのまま使える。対象のロググループには、bffと各ホップの関数のロググループ（`Gekko08App-*FunctionLogs*`）を選ぶ。
+
+```
+# 共通部品が受信の検証で拒否した件数（ホップと理由ごと）
+filter message = "rejected"
+| stats count(*) as rejected by hop, reason
+| sort rejected desc
+
+# ホップごとの結果（業務のコードによる403を含む）
+filter message = "handled"
+| stats count(*) as requests by hop, actor, purpose, status
+
+# 処理時間の内訳（NFR-3）
+filter message = "handled" and hop = "case-service"
+| stats pct(timings.chainMs, 50) as chain, pct(timings.mintMs, 50) as mint, pct(timings.totalMs, 50) as total, pct(timings.totalMs, 90) as total_p90
+```
+
+- 入口のIAMが拒否した呼び出し（許可していない呼び出し元、署名のない呼び出し、ホップの飛ばし）は、関数に届かないので、関数のログにもトレースにも出ない。
+  `rejected`に出るのは、入口のIAMを通ったあとに共通部品が拒否したもの（JWTがない、宛先や`sub`が合わない、目的やscopeがないなど）である。
+- ログの`traceId`で、Transaction Searchのトレースを開ける。
+- 常に見張る（アラームを出す）には、ロググループのメトリクスフィルターを加える。
+
+### レイテンシの実測
 
 2026-10-01、ap-northeast-1、Lambda（Node.js 24、arm64、512MB）で、マイクロサービスの経路（bff → case-service → account-service、
 case-serviceとaccount-serviceはそれぞれ属性サービスも呼ぶ）を10回呼んだときのウォームの値（ミリ秒）。トレースを有効にした状態で測った。
@@ -235,37 +289,27 @@ case-serviceとaccount-serviceはそれぞれ属性サービスも呼ぶ）を10
   （[検証](../experiments/agent-frameworks/RESULTS.md)。コールドスタートの初期化は約0.6〜0.7秒）。
 - 自分の環境では、`npm run test:scenario`の結果（`tests/out-latency.json`）で確かめる。
 
-### ログで集計する
-
-メトリクスは出さず、認可の判定の件数や処理時間は、各ホップの構造化ログからCloudWatch Logs Insightsで集計する。ログは1件1行のJSONなので、
-フィールドをそのまま使える。対象のロググループには、bffと各ホップの関数のロググループ（`Gekko08App-*FunctionLogs*`）を選ぶ。
-
-```
-# 共通部品が受信の検証で拒否した件数（ホップと理由ごと）
-filter message = "rejected"
-| stats count(*) as rejected by hop, reason
-| sort rejected desc
-
-# ホップごとの結果（業務のコードによる403を含む）
-filter message = "handled"
-| stats count(*) as requests by hop, actor, purpose, status
-
-# 処理時間の内訳（NFR-3）
-filter message = "handled" and hop = "case-service"
-| stats pct(timings.chainMs, 50) as chain, pct(timings.mintMs, 50) as mint, pct(timings.totalMs, 50) as total, pct(timings.totalMs, 90) as total_p90
-```
-
-- 入口のIAMが拒否した呼び出し（許可していない呼び出し元、署名のない呼び出し、ホップの飛ばし）は、関数に届かないので、関数のログにもトレースにも出ない。
-  `rejected`に出るのは、入口のIAMを通ったあとに共通部品が拒否したもの（JWTがない、宛先や`sub`が合わない、目的やscopeがないなど）である。
-- ログの`traceId`で、Transaction Searchのトレースを開ける。
-- 常に見張る（アラームを出す）には、ロググループのメトリクスフィルターを加える。
-
-## 7. 規模の上限
+### 規模の上限
 
 ホップが増えたときに先に上限になるのは、STSのリクエスト数（アカウント・リージョンごとに毎秒600件）と、1スタックのリソース数である。
-目安と対処の方向は[設計書§11](design/architecture.md#11-前提条件と制約)にある。
+上限の一覧と、経路ごとのSTSの呼び出し回数の目安は[設計書§11](design/architecture.md#11-前提条件と制約)にある。
 
-## 8. 将来の拡張の方向
+上限に近づいたときの対処の方向：
+
+- STSのリクエスト数のクォータの引き上げを依頼する。それでも足りない規模では、複数のアカウントに分ける（[要件定義](requirements.md#将来の拡張初版では扱わない)では将来の拡張）。
+- スタックを分ける。
+- 受信側の`sub`の対応表を、命名規則による導出や、起動時に読む設定（SSM Parameter Storeなど）に置き換える。
+- 信頼ポリシーで、呼び出し元の列挙を1つの文にまとめる。
+
+この設計はroleと関数をARNで厳格に一致させている。ポリシーの大きさを抑えるために、次の書き方に切り替える選択肢もあるが、いずれもなりすましを防ぐ別の統制が必要になる。
+
+| 書き方 | 代償 |
+|---|---|
+| 名前のパターンで一致させる（`ArnLike`） | そのパターンに合う名前のroleを作れる人は誰でも一致する。roleの作成をSCPやPermissions Boundaryで縛る必要がある。ARNを`Principal`に直接書く場合と違い、同じ名前での作り直しによるなりすましも防げない |
+| roleのタグで一致させる（`aws:PrincipalTag`） | セッションタグが同じキーのroleのタグを上書きするため、`sts:TagSession`のキーの制限を誤ると呼び出し元が身元を偽れる。`iam:TagRole`の統制も必要 |
+| 入口を関数のARNだけで一致させる（Principalを`*`とし、`lambda:SourceFunctionArn`とアカウントで絞る） | resource policyが公開と判定されうる。Lambdaの公開を制限する設定との関係は未確認 |
+
+## 7. 将来の拡張の方向
 
 初版では扱わないが、次の方向が考えられる。
 

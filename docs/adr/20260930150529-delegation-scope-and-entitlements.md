@@ -2,14 +2,15 @@
 
 ## Status
 
-Accepted (2026-10-01)。要件定義は下の「要件への影響」のとおりに修正した。
+Accepted (2026-10-01)。要件定義は下の「要件への影響」のとおりに修正した。[多段伝播のADR](20260930064314-multi-hop-authorization-context-propagation.md)と
+[IdPのADR](20260930091026-idp-cognito-user-pool.md)の、業務属性をトークンとsession tagsで運ぶ部分を置き換える。
 
 ## Context
 
 [多段伝播のADR](20260930064314-multi-hop-authorization-context-propagation.md)では、ユーザーの識別子と業務属性（`branch`）を
 SourceIdentityとtransitive session tagでログイン時に刻み、JWTで各ホップへ届けることにした。各ホップはJWTの`branch`とデータの`branch`を比べる。
 OAuthのscopeに相当するもの（ユーザーの代理として何を許すか）は明示的には持たず、入口のIAM（actor）と、受信側がactorごとに許す操作で代えている
-（当時の設計ガイド§3。今の設計ガイドでは[§3](../guide.md#3-各判断の根拠)）。
+（当時の設計ガイド§3）。
 
 この構成には2つの弱さがある。
 

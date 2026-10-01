@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (2026-10-01)
+Accepted (2026-10-01)。[エージェントとMCPのADR](20260930093746-agent-and-mcp-on-lambda.md)の決定1を置き換える。
 
 ## Context
 

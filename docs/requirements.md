@@ -2,9 +2,7 @@
 
 参照実装を設計する前提となる要件をまとめる。
 
-関連文書：[PRFAQ](prfaq/aws-authorization-context-propagation.md)、[多段伝播のADR](adr/20260930064314-multi-hop-authorization-context-propagation.md)、
-[入口のADR](adr/20260930083437-entry-via-bff.md)、
-[委任の範囲と業務的なアクセス権のADR](adr/20260930150529-delegation-scope-and-entitlements.md)
+元にした文書：[PRFAQ](prfaq/aws-authorization-context-propagation.md)
 
 ## 目的と対象
 
@@ -50,6 +48,9 @@
 | 処理時間 | 1回のリクエストの処理は、各ホップで15分以内に収まる。長い対話は複数のリクエストとして扱う |
 | アカウント | 単一のAWSアカウント |
 | 連携先 | AWS内部のホップ間だけ。AWSの外のサービスにユーザーの証明を渡すことは扱わない |
+| コンピュート | ホップはAWS Lambda（Function URL） |
+| IdP | Amazon Cognito User Pool（Pre Token Generation V2） |
+| リージョン | ap-northeast-1（デモのエージェントが、日本国内の推論プロファイルでモデルを呼ぶため） |
 
 ## 将来の拡張（初版では扱わない）
 
@@ -64,3 +65,6 @@
 
 - 業務RBACの持たせ方の一般論（参照実装では1つの例を示すにとどめる）
 - ユーザーの権限でAWSリソースに直接アクセスすること
+- Lambda以外のコンピュート（ECSなど）
+- Cognito以外のIdPでの検証
+- Pre Token Generation V1トリガー

@@ -345,7 +345,6 @@ OpenTelemetryで出し、CloudWatchのTransaction Searchに集める（[収集�
   接続の処理（`initialize`、`tools/list`）はClaude Codeのスパンの外で行われるので、fraud-agentの受信のスパンの子になる。
 - **ログ**：構造化ログに、その時点のスパンのトレースID（`traceId`）を入れる。
 - **メトリクスは出さない**：認可の判定の件数や処理時間は、構造化ログ（`handled`と`rejected`）からLogs Insightsで集計する（[収集先のADR](../adr/20261001020115-telemetry-destination-cloudwatch.md)）。
-- **量**：2026-10-01の実測では、1リクエストあたり、案件の要約で32スパン・約27KB、エージェントの分析（ツールの呼び出し3回）で56スパン・約47KB。
 - **入れないもの**：認証情報（JWT、受け渡すセッション）、リクエストとレスポンスの本文、プロンプト、ツールの入出力。業務のコードは属性を加えない。
 - **有効化**：CDKが、bffと各ホップに環境変数`AUTHZ_TELEMETRY=cloudwatch`と、`xray:PutTraceSegments`の権限を付ける。環境変数がなければ、
   OTelのAPIは何もしない（単体テストなど）。
@@ -459,9 +458,10 @@ NFR-3のテストは、集計結果を`tests/out-latency.json`（git管理外）
   アカウント全体の設定なので、参照実装は自動で有効にしない。カスタムリソース`OutboundFederationCheck`がデプロイ時に
   `GetOutboundWebIdentityFederationInfo`を呼び、無効ならデプロイを失敗させて有効化の手順（`EnableOutboundWebIdentityFederation`）を示す。
   有効なら、アカウント固有の発行者URL（`IssuerIdentifier`）を取得して、各ホップにJWTの`iss`として渡す。
-- **Amazon Bedrockのモデル**：アカウントによっては、Claudeのモデルを使う前に利用の申請が必要になる。手順はREADMEに書く。
+- **Amazon Bedrockのモデル**：アカウントによっては、Claudeのモデルを使う前に利用の申請が必要になる（Bedrockのコンソールのモデルカタログから行う）。
 - **CloudWatch Transaction Search**：トレースの受け口を使うには、アカウント単位で有効にしておく必要がある（スパンの送り先をCloudWatch Logsにし、
-  X-RayがロググループにPutLogEventsできるresource policyを置く）。アカウント全体の設定なので、参照実装は自動で有効にしない。手順はREADMEに書く。
+  X-RayがロググループにPutLogEventsできるresource policyを置く）。アカウント全体の設定なので、参照実装は自動で有効にしない
+  （[Enable Transaction Search](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/Enable-TransactionSearch.html)）。
 - **npmのレジストリ**：合成のときに、Claude Code（linux-arm64の実行ファイル）をnpmのレジストリから取得する。開発機の`node_modules`には、
   開発機のプラットフォーム向けしか入らないため。取得したものは一時ディレクトリに版ごとに置き、次からは使い回す。
 
@@ -485,18 +485,3 @@ NFR-3のテストは、集計結果を`tests/out-latency.json`（git管理外）
 | Lambdaのresource policy：20KB | 入口のresource policy | 呼び出し元50個前後 |
 
 `GetWebIdentityToken`のリクエスト数のクォータは文書に記載がない。
-
-上限に近づいたときの対処の方向：
-
-- STSのリクエスト数のクォータの引き上げを依頼する。それでも足りない規模では、複数のアカウントに分ける（要件定義では将来の拡張）。
-- スタックを分ける。
-- 受信側の`sub`の対応表を、命名規則による導出や、起動時に読む設定（SSM Parameter Storeなど）に置き換える。
-- 信頼ポリシーで、呼び出し元の列挙を1つの文にまとめる。
-
-この設計はroleと関数をARNで厳格に一致させている。ポリシーの大きさを抑えるために、次の書き方に切り替える選択肢もあるが、いずれもなりすましを防ぐ別の統制が必要になる。
-
-| 書き方 | 代償 |
-|---|---|
-| 名前のパターンで一致させる（`ArnLike`） | そのパターンに合う名前のroleを作れる人は誰でも一致する。roleの作成をSCPやPermissions Boundaryで縛る必要がある。ARNを`Principal`に直接書く場合と違い、同じ名前での作り直しによるなりすましも防げない |
-| roleのタグで一致させる（`aws:PrincipalTag`） | セッションタグが同じキーのroleのタグを上書きするため、`sts:TagSession`のキーの制限を誤ると呼び出し元が身元を偽れる。`iam:TagRole`の統制も必要 |
-| 入口を関数のARNだけで一致させる（Principalを`*`とし、`lambda:SourceFunctionArn`とアカウントで絞る） | resource policyが公開と判定されうる。Lambdaの公開を制限する設定との関係は未確認 |
