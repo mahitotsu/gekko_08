@@ -11,14 +11,22 @@ import { WebFrontend } from './constructs/web-frontend';
 const BEDROCK_MODEL = 'anthropic.claude-haiku-4-5-20251001-v1:0';
 
 /** 取引の目的。bffが経路ごとに決めて刻む（設計書§3） */
-const PURPOSE = { profile: 'profile', caseSummary: 'case-summary', agentAnalysis: 'agent-analysis' } as const;
-const BEDROCK_PROFILE = `jp.${BEDROCK_MODEL}`;
+export const PURPOSE = { profile: 'profile', caseSummary: 'case-summary', agentAnalysis: 'agent-analysis' } as const;
+export const BEDROCK_PROFILE = `jp.${BEDROCK_MODEL}`;
 
 /** 参照実装の単一のスタック（設計書§9） */
 export class Gekko08AppStack extends cdk.Stack {
+  // 構成を外から拡張するための参照（呼び出し関係とbffの設定は合成時に決まるので、作成後に加えたホップも反映される）
+  readonly issuer: string;
+  readonly bff: Bff;
+  readonly fraudMcp: Hop;
+  /** エージェントが呼ぶモデル（推論プロファイルと、その先の基盤モデル） */
+  readonly bedrockResources: string[];
+
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
     const { issuer } = new OutboundFederationCheck(this, 'OutboundFederationCheck');
+    this.issuer = issuer;
     const data = new DemoData(this, 'DemoData');
 
     // ホップ
@@ -41,21 +49,21 @@ export class Gekko08AppStack extends cdk.Stack {
     const fraudMcp = new Hop(this, 'FraudMcp', {
       hopName: 'fraud-mcp', entry: 'services/fraud-mcp/src/index.ts', issuer, callsOthers: true,
     });
+    this.fraudMcp = fraudMcp;
     const fraudAgent = new Hop(this, 'FraudAgent', {
       hopName: 'fraud-agent', entry: 'services/fraud-agent/src/index.ts', issuer, callsOthers: true,
       environment: { BEDROCK_MODEL_ID: BEDROCK_PROFILE }, timeout: cdk.Duration.seconds(55),
     });
     // Claude Haiku 4.5を、日本国内の推論プロファイル（東京・大阪）で呼ぶ
-    fraudAgent.fn.addToRolePolicy(new iam.PolicyStatement({
-      actions: ['bedrock:InvokeModel'],
-      resources: [
-        this.formatArn({ service: 'bedrock', resource: 'inference-profile', resourceName: BEDROCK_PROFILE }),
-        ...['ap-northeast-1', 'ap-northeast-3'].map((region) => `arn:aws:bedrock:${region}::foundation-model/${BEDROCK_MODEL}`),
-      ],
-    }));
+    this.bedrockResources = [
+      this.formatArn({ service: 'bedrock', resource: 'inference-profile', resourceName: BEDROCK_PROFILE }),
+      ...['ap-northeast-1', 'ap-northeast-3'].map((region) => `arn:aws:bedrock:${region}::foundation-model/${BEDROCK_MODEL}`),
+    ];
+    fraudAgent.fn.addToRolePolicy(new iam.PolicyStatement({ actions: ['bedrock:InvokeModel'], resources: this.bedrockResources }));
 
     // 入口
     const bff = new Bff(this, 'Bff');
+    this.bff = bff;
     const web = new WebFrontend(this, 'Web', { bff });
     const callbackUrl = `${web.origin}/api/callback`;
     const auth = new AuthFoundation(this, 'Auth', { callbackUrl, logoutUrl: `${web.origin}/` });

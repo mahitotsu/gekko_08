@@ -12,6 +12,13 @@
 
 ## 作業の予定
 
-- 標準形式（OpenTelemetry）でトレースとメトリクスを出力する（FR-6・NFR-3の強化）。共通部品の送信で`traceparent`を付けて引き継ぐ。
-  メトリクスは認可の判定の件数（ホップ、許可・拒否、拒否の理由ごと）を中心にする。自動計装がヘッダーやSDKの引数（JWT、受け渡すセッション）を
-  属性に入れないこと（SR-3）、subjectを属性に入れるかどうか、ADOTのレイヤーとSDKからの直接送信のどちらにするか（コールドスタートの増分）を確かめて決める
+- **エージェントのフレームワークへの当てはめを確かめる（最優先）**。Strands Agents（TypeScript）とClaude Agent SDKでfraud-agentを作り、
+  共通部品を通してMCPサーバーを呼べるか、Lambdaで動くか、FR-1〜4・FR-7・SR-3が保たれるか、OTelで何がどの形式で出るかを確かめる
+  （`experiments/agent-frameworks/`）。結果をもとに、今の最小限のループを置き換えるかをADRで決める。OTelの計装の作り方はこの結果に依る
+- 標準形式（OpenTelemetry）でトレースとメトリクスを出力する（FR-6・NFR-3の強化）。収集先は[ADR](docs/adr/20261001020115-telemetry-destination-cloudwatch.md)。
+  次の順に進め、各ステップを要件のIDにひも付けたシナリオテストで確かめる。
+  0. Lambdaからの送り方（ADOTのレイヤーか直接送信か）を、コールドスタートと送り切る時間の実測で決める。ESMでまとめた関数で効く自動計装と、
+     メトリクスの送り方（OTLPかEmbedded Metric Format）も確かめる
+  1. Lambdaの実行とHTTP通信：受信と送信のスパン、`traceparent`の引き継ぎ、検証の結果（actor、目的、scope、拒否の理由）の属性。subjectを属性に入れるかを決める
+  2. AWS SDKの呼び出し（STS、DynamoDB、Bedrock）とMCP。エージェントのフレームワークのスパンとつなぐ。メッセージの本文は既定で記録しない（SR-3）
+  3. メトリクス：認可の判定の件数（ホップ、許可・拒否、拒否の理由ごと）と、各処理の時間

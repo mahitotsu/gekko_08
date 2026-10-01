@@ -3,7 +3,7 @@ import { createHopHandler, type CallResult, type HopContext } from '@gekko08/aut
 // エージェント向けのツールを提供するMCPサーバー（Streamable HTTP、ステートレス、JSONで応答）。
 // 入口は他のホップと同じ（実行roleとJWT）で守り、MCPのOAuthの認可フローは使わない（エージェントとMCPのADR）。
 // ツールは業務のホップを呼ぶだけで、認可の判断は呼び出し先のABACに任せる
-const SUPPORTED_VERSIONS = ['2026-07-28', '2025-06-18'];
+const SUPPORTED_VERSIONS = ['2026-07-28', '2025-11-25', '2025-06-18'];
 
 const TOOLS = [
   {

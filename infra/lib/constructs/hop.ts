@@ -2,7 +2,7 @@ import * as cdk from 'aws-cdk-lib';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import { Construct } from 'constructs';
-import { NodeFunction } from './node-function';
+import { NodeFunction, type NodeFunctionProps } from './node-function';
 
 /** 取引の目的を運ぶtransitive session tagのキー。chainで引き継ぎ、途中で変えられない */
 export const PURPOSE_TAG = 'purpose';
@@ -49,6 +49,8 @@ export interface HopProps {
   callsOthers: boolean;
   environment?: Record<string, string>;
   timeout?: cdk.Duration;
+  memorySize?: number;
+  bundling?: NodeFunctionProps['bundling'];
 }
 
 /**
@@ -87,6 +89,8 @@ export class Hop extends Construct {
       entry: props.entry,
       description: `${props.hopName} hop`,
       ...(props.timeout ? { timeout: props.timeout } : {}),
+      ...(props.memorySize ? { memorySize: props.memorySize } : {}),
+      ...(props.bundling ? { bundling: props.bundling } : {}),
       environment: {
         HOP_NAME: props.hopName,
         HOP_AUDIENCE: this.audience,
