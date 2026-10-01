@@ -65,32 +65,40 @@ export AWS_REGION=ap-northeast-1
 npm install
 npm test                          # 共通部品の単体テスト
 npm run deploy                    # スタック Gekko08App をデプロイする（5分ほど）
-npm run test:scenario             # デプロイしたスタックに対するシナリオテスト（2〜3分）
+npm run test:scenario             # デプロイしたスタックに対するシナリオテスト（4〜5分。トレースの到着を待つ）
 npm run test:scenario:cloudtrail  # CloudTrailでの追跡も確かめる（最大15分ほどかかる）
 ```
 
+デモの画面を使うときは、デプロイのあとに1回だけ、[デモのセットアップ](#セットアップデプロイのあとに1回だけ)でユーザーとパスワードを用意する。
+
 ## デモ
 
-### ユーザーを用意する
+### セットアップ（デプロイのあとに1回だけ）
 
 デモのユーザーは、yamada（tokyo・支店長）とtanaka（osaka・担当者）の2人。所属と役職は人事データ（DynamoDBのテーブル、出力`StaffTable`）に
-デプロイ時に入る。Cognitoにはユーザー名とパスワードだけを置く。次のコマンドでユーザーを作り、パスワードを設定する。
-パスワードは12文字以上で、大文字・小文字・数字・記号を含める。
+デプロイ時に入る。Cognitoにはユーザー名とパスワードだけを置くので、ユーザーを作ってパスワードを設定する。
+パスワードは12文字以上で、大文字・小文字・数字・記号を含める。すでにユーザーがあれば作成は飛ばし、パスワードだけを設定し直す。
 
 ```sh
+export AWS_REGION=ap-northeast-1
 POOL=$(aws cloudformation describe-stacks --stack-name Gekko08App --query "Stacks[0].Outputs[?OutputKey=='UserPoolId'].OutputValue" --output text)
 for u in yamada tanaka; do
-  aws cognito-idp admin-create-user --user-pool-id "$POOL" --username "$u" --message-action SUPPRESS
+  aws cognito-idp admin-get-user --user-pool-id "$POOL" --username "$u" >/dev/null 2>&1 ||
+    aws cognito-idp admin-create-user --user-pool-id "$POOL" --username "$u" --message-action SUPPRESS >/dev/null
 done
 aws cognito-idp admin-set-user-password --user-pool-id "$POOL" --username yamada --password '<パスワード>' --permanent
 aws cognito-idp admin-set-user-password --user-pool-id "$POOL" --username tanaka --password '<パスワード>' --permanent
+
+# 画面のURL
+aws cloudformation describe-stacks --stack-name Gekko08App --query "Stacks[0].Outputs[?OutputKey=='WebUrl'].OutputValue" --output text
 ```
 
-シナリオテストは、専用のユーザー（`test-tokyo-manager`、`test-osaka-officer`）と、その人事データを自分で用意して使う。デモのユーザーのパスワードと所属には触れない。
+シナリオテストは、専用のユーザー（`test-tokyo-manager`、`test-osaka-officer`）と、その人事データを自分で用意して使う。
+デモのユーザーのパスワードと所属には触れないので、テストを流したあとも、設定したパスワードでログインできる。
 
 ### 試す
 
-スタックの出力`WebUrl`をブラウザで開き、ログインする。
+画面のURL（スタックの出力`WebUrl`）をブラウザで開き、yamadaかtanakaでログインする。
 
 | 操作 | yamada（tokyo・支店長）の結果 | tanaka（osaka・担当者）の結果 |
 |---|---|---|
