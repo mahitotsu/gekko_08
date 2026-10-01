@@ -4,13 +4,14 @@ import { Construct } from 'constructs';
 
 export const AUD_A = 'gekko08-exp:case-service';
 export const AUD_B = 'gekko08-exp:account-service';
-export const PURPOSES = ['case-summary', 'agent-analysis'];
+export const PURPOSES = ['case-summary', 'agent-analysis', 'account-unfreeze'];
 
 // scope相当の値をAWSに強制させる2つの形を検証する。
 // E0: JWTの発行条件（sts:SigningAlgorithm、sts:DurationSeconds、宛先のForAllValues）
 // E1（形A）: GetWebIdentityTokenのrequest_tagsを、宛先ごとにIAMで絞れるか
 // E2（形B）: 取引の目的をtransitive session tagとして刻み、下流で変えられないか。目的でIAMの判定を変えられるか
 // E3: 形Aと形Bの組み合わせ
+// E4: 同じ宛先で、取引の目的ごとに付けられるscopeを変える（tagの許可に目的の条件を加える）
 export class ScopeTagsStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: cdk.StackProps) {
     super(scope, id, props);
@@ -81,7 +82,30 @@ export class ScopeTagsStack extends cdk.Stack {
     // E3: 下流でも、宛先ごとのscopeを付けられる
     c.addToPolicy(tagFor(AUD_A, 'case:read'));
 
-    for (const [key, role] of Object.entries({ E0: r0, E1: ra, User: u, Purpose: p, Chain: c })) {
+    // E4: account-service宛ては、case-summaryならaccount:readだけ、account-unfreezeならaccount:unfreezeだけ
+    const c4 = new iam.Role(this, 'Chain4', { assumedBy: new iam.ArnPrincipal(p.roleArn) });
+    trustFrom(c4, p, { 'ForAllValues:StringEquals': { 'aws:TagKeys': ['branch', 'purpose'] } });
+    c4.addToPolicy(new iam.PolicyStatement({
+      actions: ['sts:GetWebIdentityToken'],
+      resources: ['*'],
+      conditions: {
+        'ForAllValues:StringEquals': { 'sts:IdentityTokenAudience': [AUD_B] },
+        Null: { 'sts:IdentityTokenAudience': 'false' },
+        StringEquals: { 'sts:SigningAlgorithm': 'ES384', 'aws:PrincipalTag/purpose': ['case-summary', 'account-unfreeze'] },
+      },
+    }));
+    const tagForPurpose = (audience: string, purpose: string, scopeValue: string) => {
+      const st = tagFor(audience, scopeValue);
+      st.addCondition('StringEquals', { 'aws:RequestTag/scope': scopeValue, 'aws:PrincipalTag/purpose': purpose });
+      return st;
+    };
+    c4.addToPolicy(tagForPurpose(AUD_B, 'case-summary', 'account:read'));
+    c4.addToPolicy(tagForPurpose(AUD_B, 'account-unfreeze', 'account:unfreeze'));
+    // tagの値に空白を使えるか（scopeを空白区切りの一覧にする場合）
+    c4.addToPolicy(mint([AUD_A]));
+    c4.addToPolicy(tagFor(AUD_A, 'case:read case:propose'));
+
+    for (const [key, role] of Object.entries({ E0: r0, E1: ra, User: u, Purpose: p, Chain: c, Chain4: c4 })) {
       new cdk.CfnOutput(this, `${key}RoleArn`, { value: role.roleArn });
     }
   }

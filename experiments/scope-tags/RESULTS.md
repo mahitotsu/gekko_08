@@ -1,6 +1,6 @@
 # 検証結果：scope相当の値をSTSとIAMに強制させる
 
-実施：2026-09-30（UTC）、ap-northeast-1。テスト用スクリプト（TypeScript、AWS SDK for JavaScript v3）から、
+実施：2026-09-30（UTC）、E4は2026-10-01に追加、ap-northeast-1。テスト用スクリプト（TypeScript、AWS SDK for JavaScript v3）から、
 IAM roleだけのスタックに対して実行した。
 
 目的：認可サーバーを置かずに、OAuthのscope相当の値（委任の範囲）をSTSとIAMに強制させられるかを確かめる。あわせて、
@@ -79,6 +79,27 @@ IAM roleだけのスタックに対して実行した。
 | E3-1：`purpose=agent-analysis`のChainで、case-service宛てに`scope=case:read` | 発行できた。`principal_tags`の`purpose`と`request_tags`の`scope`が両方入る |
 | E3-2：同じChainで、case-service宛てに`scope=case:summary` | 拒否 |
 
+### E4：同じ宛先で、取引の目的ごとにscopeを変える（2026-10-01に追加）
+
+構成：Chain4（Purposeを信頼）に、account-service宛ての`GetWebIdentityToken`を目的`case-summary`・`account-unfreeze`で許す。
+`sts:TagGetWebIdentityToken`は目的ごとに文を分け、各文に`aws:PrincipalTag/purpose`の条件を加える（`case-summary`なら`scope=account:read`だけ、
+`account-unfreeze`なら`scope=account:unfreeze`だけ）。あわせて、case-service宛てに`scope=case:read case:propose`（空白を含む値）を許す。
+
+| 試験 | 結果 |
+|---|---|
+| E4-1：`purpose=case-summary`で、account-service宛てに`scope=account:read` | 発行できた |
+| E4-2：`purpose=case-summary`で、account-service宛てに`scope=account:unfreeze` | 拒否（`sts:TagGetWebIdentityToken`） |
+| E4-3：`purpose=account-unfreeze`で、account-service宛てに`scope=account:unfreeze` | 発行できた |
+| E4-4：`purpose=account-unfreeze`で、account-service宛てに`scope=account:read` | 拒否（`sts:TagGetWebIdentityToken`） |
+| E4-5・E4-6：`purpose=agent-analysis`で、account-service宛てに`scope=account:read`／`account:unfreeze` | 拒否（`sts:GetWebIdentityToken`） |
+| E4-7：`purpose=case-summary`で、`scope=account:read account:unfreeze` | 拒否 |
+| E4-8：`scope=case:read case:propose`（空白を含む値） | 発行できた。`request_tags`に値がそのまま入る |
+
+- `sts:TagGetWebIdentityToken`の判定でも、`aws:PrincipalTag/purpose`（transitive tagで引き継いだ目的）の条件が効いた。同じ呼び出し元と宛先の組で、
+  付けられるscopeを取引の目的ごとに変えられる。
+- JWTのtagの値に空白を使える。scopeを空白区切りの一覧にできる。
+- 同じ実行で、E0〜E3は前回と同じ結果だった（E1-7は今回も発行できた）。目的を刻むchainは、ウォーム10回で中央値123ms、最大178ms。
+
 ## 設計への示唆
 
 - 取引の目的（Transaction Tokensの`purp`に相当）は形Bで、ホップごとの委任の範囲（Token Exchangeのdownscopingに相当）は形Aで、
@@ -86,3 +107,5 @@ IAM roleだけのスタックに対して実行した。
 - 形Bは、目的に応じてIAM自体の判定（どの宛先のJWTを作れるか）を変えられる。目的に合わない下流への呼び出しを、アプリの判定より前に止められる。
 - 受信側は、`scope`がないJWTを「何も許さない」と扱う必要がある（E1-6）。
 - 参照実装の本体は、`GetWebIdentityToken`の宛先の条件を`ForAllValues`＋`Null`に直す必要がある（E1-7）。
+- 同じ呼び出し元と宛先の組で、取引の目的ごとにscopeを変えるには、`sts:TagGetWebIdentityToken`の文を目的ごとに分け、`aws:PrincipalTag/purpose`の条件を加える（E4）。
+  目的の条件がないと、組に許したscopeのどれでも、許した目的のどの取引でも付けられる。

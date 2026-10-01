@@ -77,6 +77,20 @@ await check('E2-7 目的=case-summaryならaccount宛てのJWTを発行できる
 await check('E3-1 下流でcase宛てにscope=case:read', 'ok', () => mint(cAgent, [AUD_A], { tags: scope('case:read') }));
 await check('E3-2 下流でcase宛てにscope=case:summary', 'denied', () => mint(cAgent, [AUD_A], { tags: scope('case:summary') }));
 
+// E4: 目的ごとのscope
+const c4 = async (value: string) => assume(await purpose(value), out.Chain4RoleArn);
+const c4Summary = await c4('case-summary');
+const c4Unfreeze = await c4('account-unfreeze');
+const c4Agent = await c4('agent-analysis');
+await check('E4-1 目的=case-summaryでaccount宛てにscope=account:read', 'ok', () => mint(c4Summary, [AUD_B], { tags: scope('account:read') }));
+await check('E4-2 目的=case-summaryでaccount宛てにscope=account:unfreeze', 'denied', () => mint(c4Summary, [AUD_B], { tags: scope('account:unfreeze') }));
+await check('E4-3 目的=account-unfreezeでaccount宛てにscope=account:unfreeze', 'ok', () => mint(c4Unfreeze, [AUD_B], { tags: scope('account:unfreeze') }));
+await check('E4-4 目的=account-unfreezeでaccount宛てにscope=account:read', 'denied', () => mint(c4Unfreeze, [AUD_B], { tags: scope('account:read') }));
+await check('E4-5 目的=agent-analysisでaccount宛てにscope=account:read', 'denied', () => mint(c4Agent, [AUD_B], { tags: scope('account:read') }));
+await check('E4-6 目的=agent-analysisでaccount宛てにscope=account:unfreeze', 'denied', () => mint(c4Agent, [AUD_B], { tags: scope('account:unfreeze') }));
+await check('E4-7 目的=case-summaryでaccount宛てにscopeを2つ（一覧）', 'denied', () => mint(c4Summary, [AUD_B], { tags: scope('account:read account:unfreeze') }));
+await check('E4-8 tagの値に空白（scope=case:read case:propose）', 'ok', () => mint(c4Agent, [AUD_A], { tags: scope('case:read case:propose') }));
+
 for (const r of results) console.log(`${r.pass ? 'PASS' : 'FAIL'}  ${r.id}  expect=${r.expect}  ${r.outcome}${r.detail && typeof r.detail === 'object' ? `  ${JSON.stringify(r.detail)}` : ''}`);
 const sorted = [...timings].sort((a, b) => a - b);
 console.log(`目的を刻むchain（ウォーム10回）: median ${sorted[5]}ms, max ${sorted[9]}ms, all ${JSON.stringify(timings)}`);

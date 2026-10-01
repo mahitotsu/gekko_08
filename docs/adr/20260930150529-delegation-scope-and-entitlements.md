@@ -4,6 +4,7 @@
 
 Accepted (2026-10-01)。要件定義は下の「要件への影響」のとおりに修正した。[多段伝播のADR](20260930064314-multi-hop-authorization-context-propagation.md)と
 [IdPのADR](20260930091026-idp-cognito-user-pool.md)の、業務属性をトークンとsession tagsで運ぶ部分を置き換える。
+決定1のうちすべての組を目的で限る部分、決定2、決定5のうち業務のコードに目的を渡す部分は、[委任の範囲の定義のADR](20261001130745-delegation-definitions.md)で置き換えた。
 
 ## Context
 
