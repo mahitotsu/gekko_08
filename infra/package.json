@@ -4,7 +4,8 @@
   "license": "Apache-2.0",
   "type": "module",
   "scripts": {
-    "cdk": "cdk"
+    "cdk": "cdk",
+    "test": "vitest run"
   },
   "dependencies": {
     "@aws-sdk/client-cognito-identity-provider": "^3.1143.0",

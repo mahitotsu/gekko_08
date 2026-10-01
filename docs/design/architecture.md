@@ -402,7 +402,7 @@ npmのワークスペース（`infra`、`packages/*`、`services/*`、`tests`）
 
 | ディレクトリ | 内容 |
 |---|---|
-| `infra/` | CDKアプリ（単一のスタック`Gekko08App`） |
+| `infra/` | CDKアプリ（単一のスタック`Gekko08App`）と、`Hop`のテンプレートの単体テスト（`infra/test/`。§10） |
 | `packages/authz-context/` | 受信側・送信側の共通部品、MCPの部品、トレース（§6、§7） |
 | `services/<名前>/` | 各Lambdaのハンドラー（bff、case-service、account-service、entitlement-service、fraud-agent、fraud-mcp、pretoken） |
 | `web/` | 静的なフロントエンド（ワークスペースではない） |
@@ -458,7 +458,14 @@ FR-6・SR-3・NFR-3のテストは、各ホップの構造化ログをCloudWatch
 最大15分ほどかかるため、`npm run test:scenario:cloudtrail`のときだけ実行する。CloudTrailのイベントは、`Username`（＝`RoleSessionName`＝リクエストID）で引ける。
 NFR-3のテストは、集計結果を`tests/out-latency.json`（git管理外）に書く。
 
-共通部品の単体テストは、要件のIDにはひも付けない。
+共通部品の単体テストと、`Hop`のテンプレートの単体テスト（`infra/test/`、`npm test`）は、要件のIDにはひも付けない。
+
+`Hop`のテンプレートの単体テストは、デモの配線に依存しない試験用の小さなスタックを合成し、§5のIAMの条件を確かめる。確かめるのは、
+入口のresource policy（Function URLが`AWS_IAM`であること、許可した呼び出し元の実行role以外へのDeny、許可の相手）、呼び出し元の実行roleのDeny
+（`lambda:SourceFunctionArn`）、JWTの発行の条件（宛先の`ForAllValues`＋`Null`、`ES384`、300秒以下、目的、scopeのキーと値）、chain用roleが
+chainとJWTの発行のほかに権限を持たないこと、chain用roleの信頼（相手とtagのキー）、`sub`の対応表である。文は（Effect, Principal, Action,
+Resource, Condition）の組に分けて比べるので、文のまとめ方が変わっても結果は変わらない。あわせて、条件をわざと壊したテンプレート
+（`ForAnyValue`にする、Denyを消す、`aws:TagKeys`の制限を外す、`sub`を別のroleにするなど）を、それぞれのチェックが見逃さないことを確かめる。
 
 ## 11. 前提条件と制約
 
