@@ -1,0 +1,11 @@
+gekko08
+Copyright 2026 akring
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This repository does not include third-party software. Dependencies are installed
+from the npm registry by the user and are governed by their own licenses. In
+particular, the Claude Agent SDK (@anthropic-ai/claude-agent-sdk) and the Claude
+Code executable that it runs are proprietary software of Anthropic PBC ("All rights
+reserved"), and their use is subject to Anthropic's terms:
+https://code.claude.com/docs/en/legal-and-compliance

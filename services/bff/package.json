@@ -1,6 +1,7 @@
 {
   "name": "@gekko08/bff",
   "private": true,
+  "license": "Apache-2.0",
   "type": "module",
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.1143.0",

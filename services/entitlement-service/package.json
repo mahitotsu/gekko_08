@@ -1,6 +1,7 @@
 {
   "name": "@gekko08/entitlement-service",
   "private": true,
+  "license": "Apache-2.0",
   "type": "module",
   "dependencies": {
     "@gekko08/authz-context": "*",

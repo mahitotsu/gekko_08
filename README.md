@@ -140,3 +140,18 @@ npm run destroy
 
 IAMのアウトバウンドIDフェデレーションはアカウント全体の設定なので、スタックを消しても無効にならない。不要なら
 `aws iam disable-outbound-web-identity-federation`で無効にする。
+
+## ライセンス
+
+このリポジトリは[Apache License 2.0](LICENSE)で公開する（[NOTICE](NOTICE)）。
+
+依存するソフトウェアは、リポジトリに含めず、利用者がnpmのレジストリから入れる。それぞれのライセンスに従う。
+
+- **Claude Agent SDKとClaude Code**：Anthropic PBCのプロプライエタリなソフトウェアで、利用は[Anthropicの条件](https://code.claude.com/docs/en/legal-and-compliance)に従う
+  （Bedrock経由で使う場合は、利用者の既存の商用契約が適用される）。参照実装はClaude Codeの実行ファイルを同梱せず、合成のときに
+  レジストリから取得して、改変せずに関数に入れる。
+  - 自分の組織の利用者のために、自分のBedrockの認証情報で動かすことは、条件の範囲内である。
+  - デモのエージェントの形を、**社外の利用者向けのサービスに転用する場合**は注意が要る。Anthropicとの個別の合意がない限り、
+    利用者の代わりにClaudeの利用料を払う・転売する・仲介することは認められていない。
+  - 製品名や機能名に「Claude Code」や「Anthropic」を使ってはならない。
+- **その他の依存**：MIT、Apache-2.0、ISC、BSDなどの寛容なライセンス。

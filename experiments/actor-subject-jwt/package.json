@@ -1,7 +1,10 @@
 {
   "name": "gekko08-exp-actor-subject",
   "private": true,
-  "scripts": { "cdk": "cdk" },
+  "license": "Apache-2.0",
+  "scripts": {
+    "cdk": "cdk"
+  },
   "devDependencies": {
     "@types/node": "^22.0.0",
     "aws-cdk": "^2",

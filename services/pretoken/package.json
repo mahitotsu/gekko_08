@@ -1,5 +1,6 @@
 {
   "name": "@gekko08/pretoken",
   "private": true,
+  "license": "Apache-2.0",
   "type": "module"
 }
