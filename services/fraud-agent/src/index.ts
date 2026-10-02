@@ -141,7 +141,8 @@ export const handler = createHopHandler(async (body, { call, requestId }) => {
     await otlp?.close();
   }
   const agentMs = Math.round(performance.now() - t0);
-  log('info', 'agent finished', { hop: 'fraud-agent', requestId, caseId, toolCalls, ...outcome, agentMs });
+  // ログにはツール名とHTTPステータスだけを出す。引数はモデルが作る値で、注入された文言が入りうるので、応答にだけ返す
+  log('info', 'agent finished', { hop: 'fraud-agent', requestId, caseId, toolCalls: toolCalls.map(({ name, status }) => ({ name, status })), ...outcome, agentMs });
   if (analysis === undefined) return { status: 502, body: { error: 'agent did not finish', toolCalls } };
   return { status: 200, body: { caseId, analysis, toolCalls } };
 });
