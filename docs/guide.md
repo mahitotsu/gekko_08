@@ -9,7 +9,7 @@
 すり替わったりしやすい。ユーザーIDをヘッダーで渡せば途中のホップが書き換えられ、アクセストークンを丸ごと転送すれば宛先（`aud`）を
 確かめられず、委任の範囲（scope）も絞れない。OAuth Token Exchangeは正攻法だが、認可サーバーを運用する必要がある。
 
-この参照実装は、Token Exchangeと同じことを、認可サーバーもサイドカーも置かずに、Cognito・STS・IAM・Lambdaだけで実現する。
+この参照実装は、Token Exchangeと同等の検証を、認可サーバーもサイドカーも置かずに、Cognito・STS・IAM・Lambdaだけで行う（違いは[PRFAQ Q1](prfaq/aws-authorization-context-propagation.md#q1-oauth-token-exchangeと何が違うのか)）。
 各ホップは、受け取ったリクエストについて次の4つを確かめられる。
 
 | 確かめること | Token Exchangeでの担い手 | この参照実装での担い手 |
@@ -44,7 +44,7 @@ AWSが保証した値ではないので、受信側の判定は変わらない�
 
 ```
 ログイン     Cognito ─(IDトークン: source_identity)─> bff ─AssumeRoleWithWebIdentity─> federated roleのセッション（SourceIdentity＝yamada）
-取引の開始   bff ─AssumeRole（purpose＝agent-analysisをtransitive tagで刻む）─> 目的用のroleのセッション
+取引の開始   bff ─AssumeRole（purpose＝agent-analysisとrequestIdをtransitive tagで刻む）─> 目的用のroleのセッション
 ホップ間     呼び出し元                                                           受信側
              ① 受け取ったセッションで自分のchain用roleにchain（目的は引き継がれ、変えられない）
              ② GetWebIdentityToken（aud＝受信側、Tags＝scope）。IAMが宛先とscopeを限り、影響の大きいscopeは目的でも限る
@@ -86,15 +86,15 @@ AWSが保証した値ではないので、受信側の判定は変わらない�
 | 2. 委任の範囲 | この取引で、この呼び出し元に何を許すか | 取引の目的とホップごとのscope。IAMが強制する |
 | 3. 業務的なアクセス権 | このユーザーは、このデータを扱ってよいか | 属性サービス（人事データと権限マスタ） |
 
-判定は、**委任の範囲が操作を許し、かつ業務的なアクセス権がデータを許す**ときだけ許す。Microsoft Entra IDの委任された権限で
-「実効権限はアプリに許した範囲とユーザー自身の権限の積集合」とするのと同じ考え方である。
+判定は、**委任の範囲が操作を許し、かつ業務的なアクセス権がデータを許す**ときだけ許す。Microsoft Entra IDの委任されたアクセスで、
+クライアントアプリに許したscopeとユーザー自身の権限の両方を求めるのと同じ考え方である（[Microsoftの文書](https://learn.microsoft.com/en-us/entra/identity-platform/delegated-access-primer)）。
 
 要点：
 
 - **ユーザーと取引の目的は、リクエストごとに入口で刻む。** SourceIdentityとtransitive session tagは、role chainingで途中のホップが変えられない。
 - **呼び出しの許可（actor）とユーザーの証明（subject）を分ける。** ホップを呼ぶ権限は各ホップの実行roleにだけあり、ユーザーの代理の
   セッションは、IAMが許した宛先・目的・scopeのJWTを作ることしかできない。
-- **委任の範囲はコードではなくIAMのポリシーが強制する。** 宣言していないscopeや、許していない目的の取引での影響の大きい操作のscopeは、STSが発行しない。
+- **委任の範囲はコードではなくIAMのポリシーが強制する。** 宣言していないscopeは、STSが発行しない。影響の大きい操作のscopeも、許していない目的の取引では発行しない。
   業務のコードはscopeだけを見て、目的は使わない。
 - **IAMが強制するのは、静的な組み合わせだけである。** 強制するのは（呼び出し元、呼び出し先、scope、取引の目的）の組み合わせで、デプロイ時に決まる。
   どの口座か、いくらまでかといったリソースや値の単位の判定は、IAMは強制せず、各ホップの業務のコードが属性サービスの値で行う。
@@ -252,8 +252,8 @@ Token Exchangeでは、認可サーバーがトークンを交換するたびに
 | 途中のホップ（業務のコードの乗っ取り） | 処理中のリクエストについて、そのユーザーとして、自分に許された呼び出し先を、自分に許されたscopeで呼べる。自分の実行roleで、自分のデータを読み書きできる | ユーザー（SourceIdentity）と取引の目的を変えること。下流に渡すリクエストIDを変えること（chainのセッション名はIAMが刻まれた値に限り、ヘッダーは受信側がJWTの値と照合する）。許されていない呼び出し先を呼ぶこと（ホップを飛ばすことを含む）。宣言していないscopeを付けること。**目的の制限があるscopeを、その取引の目的が許さないときに付けること**（例：案件を開く取引やエージェントの取引のcase-serviceは、凍結の解除のJWTを発行できない）。他人のアクセス権を属性サービスに問い合わせること |
 | 共通部品と同じプロセスのアプリ | 途中のホップの乗っ取りと同じ。共通部品はアプリと同じプロセスで動くライブラリなので、アプリが乗っ取られると、受け渡されたセッションも実行roleの認証情報も読める | 同上 |
 | エージェントの子プロセス（Claude Code） | 誘導された場合：中継を通して、fraud-mcpのツールを、ユーザーの代理として、エージェントの取引（`agent-analysis`）で呼べる。任意のコードを実行させられた場合：親と同じ実行環境、同じOSのユーザーで動くので、親の持つ認証情報を読みうる。そうなると、fraud-agentのホップの乗っ取りと同じになる。トレースの受け口を通して、アカウントのトレースに任意のスパンを書き込める | 誘導された場合：ツールの範囲を越えること。凍結の解除は、fraud-mcpが付けられるscopeにないので拒否される。他の支店のデータは、業務的なアクセス権で拒否される |
-| BFF | ログイン中のユーザーのIDトークンとリフレッシュトークンを持ち、取引の目的を決める。セッションのあるユーザーとして、定めた目的のどれででも（凍結の解除の取引を含む）最初のホップを呼べる。BFFは最も価値の高い構成要素である | ログインしていないユーザーになりすますこと（Cognitoが署名したIDトークンが要る）。定めていない目的を刻むこと。最初のホップ（case-service、fraud-agent、属性サービス）以外を直接呼ぶこと |
-| 監査サービス（audit-service） | アカウントのCloudTrailのイベント履歴と、各ホップのログを読める。すべてのユーザーの取引の記録が読まれる | 委任の範囲を広げること。ホップを呼ぶこと（呼び出し先は属性サービスだけ）。CloudTrailの記録を書き換えること |
+| BFF | ログイン中のユーザーのIDトークンとリフレッシュトークンを持ち、取引の目的を決める。セッションのあるユーザーとして、定めた目的のどれででも（凍結の解除の取引を含む）最初のホップを呼べる。BFFは最も価値の高い構成要素である | ログインしていないユーザーになりすますこと（Cognitoが署名したIDトークンが要る）。定めていない目的を刻むこと。最初のホップ（case-service、fraud-agent、属性サービス、audit-service）以外を直接呼ぶこと |
+| 監査サービス（audit-service） | アカウントのCloudTrailのイベント履歴と、各ホップのログを読める。すべてのユーザーの取引の記録が読まれる | 委任の範囲を広げること。属性サービス以外のホップを呼ぶこと。CloudTrailの記録を書き換えること |
 | 属性サービスとそのデータ | 業務的なアクセス権は、属性サービスのデータがすべてを決める。書き換えられると、そのとおりに判定される（例：担当者に解除の権限を与える） | 委任の範囲を広げること。目的とscopeはIAMが強制するので、データを書き換えても、エージェントの取引で凍結を解除させることはできない |
 | 実行環境の外に持ち出した認証情報 | 実行roleの認証情報と受け渡されたセッションの両方を持ち出すと、有効期限内は、そのホップとして次のホップを呼べる。呼び出し元の関数の限定（`lambda:SourceFunctionArn`）では防げない。関数のARNは認証情報そのものに刻まれており、持ち出した認証情報で呼んでも、その関数からの呼び出しとして扱われた（[検証](../experiments/source-function-arn/RESULTS.md)） | 受け渡されたセッションやJWTだけでは、どのホップも呼べない（SR-1）。呼び出しには、呼び出し元の実行roleの署名が要る |
 | Pre Token Generationトリガー、User Poolの設定 | SourceIdentityの値は、このLambdaが決める。AWSは値の正しさを検証しない。任意のユーザーとして振る舞える | — |
@@ -275,7 +275,7 @@ fraud-agentは、委任に使う認証情報を子プロセスに渡さない（
 | リソースや値の単位での判定 | IAMが強制するのは、呼び出し元・呼び出し先・scope・目的の組み合わせまでである。どの口座か、いくらまでかの判定は業務のコードが行い、その誤りはIAMでは止まらない |
 | エージェントの判断 | プロンプトインジェクションでエージェントが誤った要求をすることは防がない。防ぐのは、その要求が委任の範囲とユーザーの権限を超えること |
 | 人間が操作したことの証明 | 凍結の解除の取引で示せるのは、「エージェントの取引からは解除できない」ことである。取引の目的を決めるのはBFFなので、BFFが侵害されれば、どの目的でも刻める |
-| 途中での取り消し | 発行済みのJWT（有効期間5分）とchainのセッション（15分）は、途中で取り消さない。ログアウトはBFFのセッションを消し、リフレッシュトークンを取り消し、マネージドログインのログインの状態を消すまで。業務的なアクセス権の変更は、次のリクエストから効く |
+| 途中での取り消し | 発行済みのJWT（有効期間5分）とchainのセッション（15分）は、途中で取り消さない。ログアウトはBFFのセッションを消し、リフレッシュトークンを取り消し、マネージドログインのセッションを消すまで。業務的なアクセス権の変更は、次のリクエストから効く |
 | 権限の範囲内での大量アクセス | レート制限や異常検知は、別の仕組みで扱う |
 | アプリからの認証情報の隔離 | 共通部品をアプリから隔離しない。k8sでEnvoyなどのサイドカーに任せる構成と違い、Lambdaでは関数とExtensionが同じ実行環境で動くので、Extensionに分けても、乗っ取られたアプリに対する境界にはならない見込み（未検証） |
 | 持ち出した認証情報の使用場所 | 使用場所を縛る手段として、IPv6の送信元アドレスで縛れることは確かめたが、ホップのLambdaをVPCにつなぐ必要がある（[IPv6送信元による縛り](../experiments/network-binding/RESULTS.md)）。参照実装は縛らない |
@@ -285,7 +285,7 @@ fraud-agentは、委任に使う認証情報を子プロセスに渡さない（
 - 受け渡すセッションは、漏れてもどのホップも呼べないように作ってある（SR-1）。守るべきものが小さいので、アプリからの隔離の
   価値は、ワークロードの鍵そのものを守るk8sのサイドカーより小さい。
 - テストのために、アプリクライアントで`ADMIN_USER_PASSWORD_AUTH`を有効にしている。呼ぶにはIAMの権限が要り、ブラウザからは使えないが、
-  本番で使うなら無効にしてよい。
+  本番では無効にする。
 - 各ホップのログとトレースのスパン（`enduser.id`）には、ユーザーの識別子と取引の目的が出る。個人情報の扱いは、自分のシステムの方針に合わせる。
 - 業務的なアクセス権の判定を1か所に集めたい場合は、各ホップのコードの判定を、Amazon Verified Permissions（Cedar）のような判定サービスに
   任せる選択肢がある（[§7](#7-将来の拡張の方向)）。委任の範囲をIAMに強制させる部分は変わらない。
@@ -368,8 +368,8 @@ CloudTrailの`GetWebIdentityToken`のイベントの`responseElements.webIdentit
    bffの行に経路（`route`＝`case-unfreeze`）と取引の目的、各ホップの行に検証したユーザー（`subject.id`）・呼び出し元（`actor`）・目的・scopeが出る。
    ログはアプリが書くものなので、次のCloudTrailで、AWSの側の記録と照らし合わせる。
 
-3. **CloudTrailで、AWSが記録した事実と照らし合わせる。** chainとJWTの発行の`RoleSessionName`はリクエストIDなので、CloudTrailの`Username`で引ける
-   （届くまでに最大15分ほどかかる。`lookup-events`で引けるのは90日まで）。
+3. **CloudTrailで、AWSが記録した事実と照らし合わせる。** bffとchainが作るセッションの名前（`RoleSessionName`）はリクエストIDなので、それらのセッションによる
+   `AssumeRole`と`GetWebIdentityToken`を、CloudTrailの`Username`で引ける（届くまでに最大15分ほどかかる。`lookup-events`で引けるのは90日まで）。
 
    ```sh
    aws cloudtrail lookup-events --lookup-attributes AttributeKey=Username,AttributeValue=<リクエストID> \
@@ -377,10 +377,11 @@ CloudTrailの`GetWebIdentityToken`のイベントの`responseElements.webIdentit
    ```
 
    2026-10-01に解除の取引を引くと、次のイベントが出た（いずれも`userIdentity.sessionContext.sourceIdentity`はユーザー）。
+   最初の`AssumeRole`の`tags`には、リクエストIDのtag（`requestId`、transitive）も付く（導入後の2026-10-02（UTC）に確かめた）。
 
    | イベント | 呼んだ主体（`userIdentity.arn`のrole） | 主な`requestParameters` |
    |---|---|---|
-   | `AssumeRole` | federated role | `roleArn`＝目的用のrole、`tags`＝`purpose: account-unfreeze`（transitive） |
+   | `AssumeRole` | federated role | `roleArn`＝目的用のrole、`tags`＝`purpose: account-unfreeze`、`requestId: <リクエストID>`（どちらもtransitive） |
    | `GetWebIdentityToken` | 目的用のrole | `audience`＝case-service、`tags`＝`scope: case:unfreeze` |
    | `AssumeRole` | 目的用のrole | `roleArn`＝case-serviceのchain用role |
    | `GetWebIdentityToken` | case-serviceのchain用role | `audience`＝account-service、`tags`＝`scope: account:unfreeze` |
@@ -440,10 +441,11 @@ case-serviceとaccount-serviceはそれぞれ属性サービスも呼ぶ）を10
 
 ### 規模の上限
 
-ホップが増えたときに先に上限になるのは、STSのリクエスト数と、1スタックのリソース数である。上限の一覧と、経路ごとのSTSの呼び出し回数は
+ホップが増えたときに先に上限になるのは、構成の大きさではIAMのポリシーの大きさ（chain用roleの信頼ポリシーとインラインポリシー。呼び出し元・呼び出し先が
+十前後）、処理量ではSTSのリクエスト数である。上限の一覧と、経路ごとのSTSの呼び出し回数は
 [設計書§11](design/architecture.md#11-前提条件と制約)にある。
 
-- 文書にある上限は、`AssumeRole`などが共有する毎秒600件（アカウント・リージョンごと）である。参照実装では、chainのたびに`AssumeRole`を呼ぶ。
+- 文書にある上限は、`AssumeRole`などが共有する毎秒600件（アカウント・リージョンごと。[IAMとSTSのクォータ](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_iam-quotas.html#reference_iam-quotas-sts-requests)）である。参照実装では、chainのたびに`AssumeRole`を呼ぶ。
   案件を開く取引では1リクエストで3回なので、アカウント全体でおよそ毎秒200リクエストが目安になる。
 - JWTの発行（`GetWebIdentityToken`）は、ホップへの呼び出しのたびに行うので、`AssumeRole`より回数が多い。ところが、その上限は文書にも
   Service Quotasにも記載がない。ログインの`AssumeRoleWithWebIdentity`も同じである。この参照実装では、両者の上限を確認できなかった。

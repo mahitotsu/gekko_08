@@ -11,9 +11,11 @@
 - [デモは口座の凍結解除](../adr/20261001123029-demo-account-unfreeze.md)
 - [デモの画面はReactの静的なSPA](../adr/20261002065842-demo-ui-react-static.md)
 - [監査サービス](../adr/20261002074437-audit-service.md)：各ホップのログとCloudTrailを、JWTの`jti`で突き合わせる
+- [リクエストIDのtag](../adr/20261002154129-request-id-transitive-tag.md)：リクエストIDをtransitive session tagとして刻み、各chainのセッション名をその値に限る
 - [入口はBFF](../adr/20260930083437-entry-via-bff.md)
 - [IdPはCognito User Pool](../adr/20260930091026-idp-cognito-user-pool.md)
 - [ホップはLambdaとFunction URL、mTLSは使わない](../adr/20260930091257-lambda-function-url-without-mtls.md)
+- [`SourceFunctionArn`の置き場所](../adr/20261001094443-source-function-arn-in-caller-identity-policy.md)：呼び出し元の関数の限定は、呼び出し元の実行roleのidentity policyのDenyで行う
 - [BFFの公開とセッション](../adr/20260930093744-bff-hosting-and-session.md)
 - [実装言語はTypeScript](../adr/20260930093745-implementation-language-typescript.md)
 - [エージェントとMCPサーバーもLambdaのホップ](../adr/20260930093746-agent-and-mcp-on-lambda.md)

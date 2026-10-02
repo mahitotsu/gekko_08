@@ -3,7 +3,7 @@
 ## Status
 
 Accepted (2026-09-30)。業務属性をtransitive session tagで運ぶ部分は、[委任の範囲と業務的なアクセス権のADR](20260930150529-delegation-scope-and-entitlements.md)で
-取引の目的を運ぶことに置き換えた（業務的なアクセス権は属性サービスから得る）。actorとsubjectを分ける決定は変わらない
+取引の目的を運ぶことに置き換えた（業務的なアクセス権は属性サービスから得る）。actorとsubjectを分ける決定は変わらない。
 決定1のうち、`lambda:SourceFunctionArn`を受信側のresource policyで使う部分は、[置き場所のADR](20261001094443-source-function-arn-in-caller-identity-policy.md)で、
 呼び出し元の実行roleのidentity policyのDenyに置き換える。
 

@@ -2,14 +2,15 @@
 
 AWS上のマイクロサービスで、Authorization Context（誰の権限で処理するのか）とWorkload Identity（どのサービスが呼んでいるのか）を分け、
 多段呼び出しの奥まで届ける仕組みの参照実装。認可サーバーもサイドカーも置かず、Cognito・STS・IAM・Lambdaだけで、OAuth Token Exchangeと
-同じこと（各ホップが「誰の代理か」「どのサービスから来たか」「自分宛てか」「代理として何を許されているか」を確かめる）を実現する。
+同等の4つの検証（各ホップが「誰の代理か」「どのサービスから来たか」「自分宛てか」「代理として何を許されているか」を確かめる）を行う。
+委任の範囲は、実行時の交換ではなくデプロイ時の宣言で絞る（違いは[PRFAQ Q1](docs/prfaq/aws-authorization-context-propagation.md#q1-oauth-token-exchangeと何が違うのか)）。
 
 認可の根拠は3つの層に分ける。
 
 | 層 | 問い | 担い手 |
 |---|---|---|
 | 身元 | 誰の代理か、どのサービスから来たか | SourceIdentity、入口のIAM、STSが署名したJWT |
-| 委任の範囲（OAuthのscopeに相当） | この取引で、この呼び出し元に何を許すか | ホップごとのscope（JWTのtag）がその1ホップで渡す操作を、取引の目的（transitive session tag）が取引全体で得られる影響の大きい操作の上限を決める。値はIAMが強制する |
+| 委任の範囲（OAuthのscopeに相当） | この取引で、この呼び出し元に何を許すか | ホップごとのscope（JWTのtag）は、その1ホップで渡す操作を決める。取引の目的（transitive session tag）は、取引全体で得られる影響の大きい操作の上限を決める。どちらの値もIAMが強制する |
 | 業務的なアクセス権 | このユーザーは、このデータを扱ってよいか | 属性サービス（人事データと権限マスタ） |
 
 仕組みと当てはめ方は[設計ガイド](docs/guide.md)に、背景と設計の詳細は[docs/](docs/README.md)にある。
@@ -61,7 +62,7 @@ AWS上のマイクロサービスで、Authorization Context（誰の権限で�
 - Amazon BedrockでClaude Haiku 4.5を使えること。アカウントによっては、Anthropicのモデルを初めて使う前に利用目的の申請が必要になる
   （Bedrockのコンソールのモデルカタログから行う）。参照実装は日本国内の推論プロファイル（東京・大阪）で呼ぶので、
   スタックのリージョンはap-northeast-1に固定している（[infra/lib/app-stack.ts](infra/lib/app-stack.ts)の`REGION`）。
-  シナリオテストも同じリージョンを使う。このREADMEのAWS CLIのコマンドのために、`AWS_REGION`も設定しておく。
+  シナリオテストも同じリージョンを使う。README中のAWS CLIのコマンド用に、`AWS_REGION`も設定しておく。
 - CloudWatchのTransaction Searchが有効であること。トレースの受け口を使うのに要る、アカウント全体の設定で、参照実装は自動では有効にしない。
   手順は[Enable Transaction Search](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/Enable-TransactionSearch.html)にある。
   トレースの送信に失敗しても、各ホップの処理は失敗させない。
@@ -91,7 +92,7 @@ npm run test:scenario:cloudtrail  # CloudTrailでの追跡も確かめる（最�
 
 ### セットアップ（デプロイのあとに1回だけ）
 
-デモのユーザーは、yamada（tokyo・支店長）、tanaka（osaka・担当者）、suzuki（本部・監査担当）の3人。所属と役職は人事データ（DynamoDBのテーブル、出力`StaffTable`）に
+デモのユーザーは、yamada（tokyo・支店長）、tanaka（osaka・担当者）、suzuki（honbu・監査担当）の3人。所属と役職は人事データ（DynamoDBのテーブル、出力`StaffTable`）に
 デプロイ時に入る。Cognitoにはユーザー名とパスワードだけを置くので、ユーザーを作ってパスワードを設定する。
 パスワードは12文字以上で、大文字・小文字・数字・記号を含める。すでにユーザーがあれば作成は飛ばし、パスワードだけを設定し直す。
 
@@ -160,7 +161,7 @@ yamadaが案件`C-1001`の「凍結を解除」を押す。200で、口座A-101�
 
 **④ suzukiで監査し、ホップの記録とAWSの記録の一致を見る**（目的`audit`）
 
-ログアウトして、suzuki（本部・監査担当）でログインし、「監査」を開く。左の一覧に、yamadaのログインのセッションの操作（①〜③）が時刻の順に並ぶ。
+ログアウトして、suzuki（honbu・監査担当）でログインし、「監査」を開く。左の一覧に、yamadaのログインのセッションの操作（①〜③）が時刻の順に並ぶ。
 
 - ③（凍結を解除）を選ぶ：case-serviceが`account:unfreeze`のscopeでaccount-serviceを呼んだ記録と、STSがそのJWTを発行した記録
   （CloudTrailの`GetWebIdentityToken`）が、項目ごとに一致する。
@@ -172,7 +173,7 @@ CloudTrailのイベントは届くまでに数分〜15分ほどかかる。そ�
 
 **ほかのユーザーでの結果**
 
-| 操作 | 取引の目的 | yamada（tokyo・支店長） | tanaka（osaka・担当者） | suzuki（本部・監査担当） |
+| 操作 | 取引の目的 | yamada（tokyo・支店長） | tanaka（osaka・担当者） | suzuki（honbu・監査担当） |
 |---|---|---|---|---|
 | 案件`C-1001`（tokyo）を開く | `case-summary` | 200 | 403。case-serviceが業務的なアクセス権で拒否する | 403 |
 | 案件`C-1001`をエージェントに分析させる | `agent-analysis` | 200 | 200。ただし案件の取得（`get_case`）がcase-serviceに403で拒否され、案件の内容は分析に入らない | 200。tanakaと同じく、案件の取得が403（監査担当には案件の参照の権限がない） |
@@ -189,10 +190,10 @@ bffが侵害されれば、どの目的でも刻める（[設計ガイド](docs/
 
 ### 監査で確かめる
 
-結果のカードの「監査で確かめる」か、画面の「監査」から、1回の取引について、各ホップのログ（アプリが書いた記録）を、CloudTrail（STSが書いた記録）と
+結果のカードの「監査で確かめる」か、画面の「監査」から、1回の取引について、各ホップのログ（アプリが書いた記録）を、CloudTrailが記録したSTSの呼び出しと
 JWTの`jti`で突き合わせて見られる。使えるのは、監査担当のsuzukiだけである（[試す](#試す)の④）。
 
-| 操作 | yamada・tanaka | suzuki（本部・監査担当） |
+| 操作 | yamada・tanaka | suzuki（honbu・監査担当） |
 |---|---|---|
 | 「監査」を開く（目的`audit`） | 403（業務的なアクセス権）。監査の権限がない | 200。直近24時間の取引の一覧（監査の操作と、その対象の取引を含む）。ログインのセッションごとにまとめ、セッションの中は時刻の順 |
 | 取引を選ぶ | 403 | 一覧の右に、ホップの記録（呼び出しの順）ごとに、比べた項目（JWTを発行したrole・宛先・scope・ユーザー・目的）をアプリの記録とAWSの記録の2列で並べ、情報源（ロググループ、CloudTrailのイベントID）と、監査サービスが比べた結果 |
