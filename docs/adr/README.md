@@ -1,7 +1,7 @@
 # ADRの索引
 
 設計判断の記録。ファイル名は`YYYYMMDDHHMMSS-<slug>.md`（UTC）。置き換えや改訂の関係は、関係する両方のADRのStatusに書く。
-不要になったADRは削除する（[文書一覧](../README.md)）。
+置き換えたADRも削除せずに残す（[ADRの扱い](../../CLAUDE.md#adrの扱い)）。
 
 | ADR | 決めたこと | 状態 |
 |---|---|---|

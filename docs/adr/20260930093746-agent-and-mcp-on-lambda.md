@@ -2,6 +2,8 @@
 
 ## Status
 
+**今有効な決定**：エージェントとMCPサーバーもLambdaのホップにし、MCPはOAuthではなく他のホップと同じ入口で守る。エージェントの実装は[Claude Agent SDKのADR](20261001040729-fraud-agent-on-claude-agent-sdk.md)による。
+
 Accepted (2026-09-30)。決定1（Converse APIのループ）は、[Claude Agent SDKのADR](20261001040729-fraud-agent-on-claude-agent-sdk.md)で置き換えた。
 
 ## Context
