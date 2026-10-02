@@ -232,6 +232,7 @@ async function withChain<T>(s: Session, requestId: string, purpose: string, timi
 
 const CASE_SUMMARY = /^\/api\/cases\/([\w-]{1,64})\/summary$/;
 const CASE_UNFREEZE = /^\/api\/cases\/([\w-]{1,64})\/unfreeze$/;
+const AUDIT_REQUEST = /^\/api\/audit\/requests\/([0-9a-f-]{36})$/;
 
 interface HopRoute {
   name: string;
@@ -254,6 +255,12 @@ function hopRoute(event: LambdaFunctionURLEvent): HopRoute | undefined {
   // 凍結の解除は、この経路でだけ目的`account-unfreeze`を刻む。エージェントの取引からは解除のscopeを発行できない
   const u = method === 'POST' ? event.rawPath.match(CASE_UNFREEZE) : null;
   if (u) return { name: 'case-unfreeze', purpose: PURPOSES.accountUnfreeze, target: 'case-service', scope: 'case:unfreeze', body: { action: 'unfreeze', caseId: u[1] } };
+  // 監査。監査サービスが、監査の権限（属性サービス）を確かめる
+  if (method === 'GET' && event.rawPath === '/api/audit/requests') {
+    return { name: 'audit-list', purpose: PURPOSES.audit, target: 'audit-service', scope: 'audit:read', body: { action: 'list' } };
+  }
+  const a = method === 'GET' ? event.rawPath.match(AUDIT_REQUEST) : null;
+  if (a) return { name: 'audit-reconcile', purpose: PURPOSES.audit, target: 'audit-service', scope: 'audit:read', body: { action: 'reconcile', requestId: a[1] } };
   if (method === 'POST' && event.rawPath === '/api/agent') {
     let caseId: unknown;
     try {

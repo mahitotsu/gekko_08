@@ -1,0 +1,11 @@
+{
+  "name": "@gekko08/audit-service",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "dependencies": {
+    "@aws-sdk/client-cloudtrail": "^3.1145.0",
+    "@aws-sdk/client-cloudwatch-logs": "^3.1145.0",
+    "@gekko08/authz-context": "*"
+  }
+}

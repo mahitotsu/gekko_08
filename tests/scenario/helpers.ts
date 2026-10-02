@@ -29,14 +29,16 @@ export function stackOutputs(): Promise<Outputs> {
   return outputs;
 }
 
-/** テストで使う2人の役割と、その人事データ。デモのユーザー（yamada、tanaka）と同じ所属と役職にする */
-export const DEMO_USERS = { tokyoManager: { branch: 'tokyo', title: '支店長' }, osakaOfficer: { branch: 'osaka', title: '担当者' } } as const;
+/** テストで使う役割と、その人事データ。デモのユーザー（yamada、tanaka、suzuki）と同じ所属と役職にする */
+export const DEMO_USERS = {
+  tokyoManager: { branch: 'tokyo', title: '支店長' }, osakaOfficer: { branch: 'osaka', title: '担当者' }, auditor: { branch: 'honbu', title: '監査担当' },
+} as const;
 export type DemoUser = keyof typeof DEMO_USERS;
 
 /**
  * テスト専用のユーザー名。デモのユーザーには触れない（テストはパスワードを毎回置き換え、異動のテストは所属を書き換えるため）
  */
-export const USERS: Record<DemoUser, string> = { tokyoManager: 'test-tokyo-manager', osakaOfficer: 'test-osaka-officer' };
+export const USERS: Record<DemoUser, string> = { tokyoManager: 'test-tokyo-manager', osakaOfficer: 'test-osaka-officer', auditor: 'test-auditor' };
 
 const provisioned = new Set<DemoUser>();
 /** テスト用のユーザーの人事データを、テストの実行ごとに1回、初期値で用意する */
@@ -233,6 +235,7 @@ const HOP_LOG_GROUPS = {
   'fraud-agent': 'FraudAgentFunctionLogs',
   'fraud-mcp': 'FraudMcpFunctionLogs',
   'entitlement-service': 'EntitlementServiceFunctionLogs',
+  'audit-service': 'AuditServiceFunctionLogs',
 } as const;
 export type HopName = keyof typeof HOP_LOG_GROUPS;
 

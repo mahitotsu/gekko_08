@@ -132,6 +132,7 @@ function createHandle(business: HopHandler, config: HopConfig) {
       actor: verified.actor,
       actorRole: verified.actorRole,
       tokenSub: verified.tokenSub,
+      tokenId: verified.tokenId,
       subject: verified.subject,
       purpose: verified.purpose,
       scope: verified.scope,

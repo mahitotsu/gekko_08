@@ -2,6 +2,7 @@
 
 export const PURPOSE_LABELS: Record<string, string> = {
   profile: '本人の表示',
+  audit: '取引の監査',
   'case-summary': '案件を開く',
   'account-unfreeze': '凍結を解除する',
   'agent-analysis': 'エージェントによる分析',
@@ -35,7 +36,14 @@ export const REASONS: Record<string, { layer: Layer; text: string }> = {
   },
 };
 
-export const BRANCH_LABELS: Record<string, string> = { tokyo: '東京支店', osaka: '大阪支店' };
+export const BRANCH_LABELS: Record<string, string> = { tokyo: '東京支店', osaka: '大阪支店', honbu: '本部' };
+
+/** bffの経路の名前 */
+export const ROUTE_LABELS: Record<string, string> = {
+  'case-summary': '案件を開く',
+  'case-unfreeze': '凍結を解除',
+  agent: 'エージェントに分析させる',
+};
 
 export const TOOL_LABELS: Record<string, string> = {
   get_case: '案件を取得',

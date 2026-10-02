@@ -13,6 +13,8 @@ export const PURPOSES = {
   accountUnfreeze: 'account-unfreeze',
   /** エージェントによる分析 */
   agentAnalysis: 'agent-analysis',
+  /** 取引の監査 */
+  audit: 'audit',
 } as const;
 
 export const authz: DelegationDefinition = {
@@ -21,5 +23,6 @@ export const authz: DelegationDefinition = {
     'entitlement-service': ['entitlements:read'],
     'case-service': ['case:summary', 'case:unfreeze'],
     'fraud-agent': ['agent:analyze'],
+    'audit-service': ['audit:read'],
   },
 };

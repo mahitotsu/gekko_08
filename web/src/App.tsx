@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { get, post, type Account, type ApiResult, type Case, type HopBody, type Me, type ToolCall } from './api';
-import { BRANCH_LABELS, LAYER_LABELS, PURPOSE_LABELS, REASONS, TOOL_LABELS } from './labels';
+import { Audit } from './Audit';
+import { BRANCH_LABELS, TOOL_LABELS } from './labels';
+import { Denial, PurposeChip } from './parts';
 
 type ActionKey = 'summary' | 'unfreeze' | 'agent';
 
@@ -56,8 +58,12 @@ interface Entry {
 
 let nextId = 1;
 
+type View = 'ops' | 'audit';
+
 export function App() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
+  const [view, setView] = useState<View>('ops');
+  const [auditId, setAuditId] = useState<string>();
 
   const loadMe = useCallback(async () => {
     const r = await get<Me>('/api/me');
@@ -88,7 +94,17 @@ export function App() {
       <main className="content">
         {me === undefined && <p className="muted">読み込み中…</p>}
         {me === null && <SignedOut />}
-        {me && <Workspace />}
+        {me && (
+          <>
+            <nav className="tabs" aria-label="画面">
+              <button type="button" className={`tab ${view === 'ops' ? 'on' : ''}`} onClick={() => setView('ops')}>操作</button>
+              <button type="button" className={`tab ${view === 'audit' ? 'on' : ''}`} onClick={() => setView('audit')}>監査</button>
+            </nav>
+            {/* 操作の履歴を残すため、切り替えても消さない */}
+            <div hidden={view !== 'ops'} className="view"><Workspace onAudit={(id) => { setAuditId(id); setView('audit'); }} /></div>
+            {view === 'audit' && <div className="view"><Audit requestId={auditId} onSelect={setAuditId} /></div>}
+          </>
+        )}
       </main>
     </div>
   );
@@ -122,7 +138,7 @@ function SignedOut() {
   );
 }
 
-function Workspace() {
+function Workspace({ onAudit }: { onAudit: (requestId: string) => void }) {
   const [caseId, setCaseId] = useState('C-1001');
   const [entries, setEntries] = useState<Entry[]>([]);
   const valid = CASE_ID.test(caseId);
@@ -168,7 +184,7 @@ function Workspace() {
       </section>
       <section className="results">
         {entries.length === 0 && <p className="muted center">操作の結果がここに並ぶ。許可されたものも、拒否されたものも残る。</p>}
-        {entries.map((e) => <ResultCard key={e.id} entry={e} />)}
+        {entries.map((e) => <ResultCard key={e.id} entry={e} onAudit={onAudit} />)}
       </section>
     </>
   );
@@ -211,15 +227,6 @@ function ActionCard({ def, danger, disabled, onRun }: { def: ActionDef; danger: 
   );
 }
 
-function PurposeChip({ purpose }: { purpose: string }) {
-  return (
-    <span className="purpose" title="取引の目的。bffが入口で刻み、途中のホップは変えられない">
-      <span className="purpose-k">目的</span>
-      <span className="purpose-v">{PURPOSE_LABELS[purpose] ?? purpose}</span>
-      <code>{purpose}</code>
-    </span>
-  );
-}
 
 function HopPath({ hops }: { hops: string[] }) {
   return (
@@ -243,7 +250,7 @@ function denialReason(body: HopBody): string | undefined {
   return body.reason ?? body.account?.reason;
 }
 
-function ResultCard({ entry }: { entry: Entry }) {
+function ResultCard({ entry, onAudit }: { entry: Entry; onAudit: (requestId: string) => void }) {
   const def = ACTIONS[entry.action];
   const r = entry.result;
   const v = r && verdict(r.status);
@@ -268,6 +275,12 @@ function ResultCard({ entry }: { entry: Entry }) {
         )}
       </header>
       {r && <ResultBody action={entry.action} result={r} />}
+      {r?.body.requestId && (
+        <div className="result-foot">
+          <button type="button" className="btn ghost small-btn" onClick={() => onAudit(r.body.requestId!)}>監査で確かめる</button>
+          <span className="muted tiny">各ホップの記録を、AWSの記録（CloudTrail）と突き合わせる。監査担当だけが使える</span>
+        </div>
+      )}
     </article>
   );
 }
@@ -290,17 +303,6 @@ function ResultBody({ action, result }: { action: ActionKey; result: ApiResult<H
   );
 }
 
-function Denial({ reason, compact }: { reason: string; compact?: boolean }) {
-  const known = REASONS[reason];
-  if (!known) return <span className="denial unknown"><code>{reason}</code></span>;
-  return (
-    <div className={`denial layer-${known.layer} ${compact ? 'compact' : ''}`}>
-      <span className="denial-layer">{LAYER_LABELS[known.layer]}で{known.layer === 'state' ? '止まった' : '拒否'}</span>
-      {!compact && <span className="denial-text">{known.text}</span>}
-      <code>{reason}</code>
-    </div>
-  );
-}
 
 function CaseView({ c }: { c: Case }) {
   return (

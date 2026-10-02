@@ -129,7 +129,7 @@ Token Exchangeでは、認可サーバーがトークンを交換するたびに
 
 | 定義 | オーナー | 書くこと |
 |---|---|---|
-| 目的の一覧 | 入口（bff） | 取引の種類。参照実装では`profile`（本人の表示）、`case-summary`（案件を開く）、`account-unfreeze`（凍結を解除する）、`agent-analysis`（エージェントによる分析） |
+| 目的の一覧 | 入口（bff） | 取引の種類。参照実装では`profile`（本人の表示）、`case-summary`（案件を開く）、`account-unfreeze`（凍結を解除する）、`agent-analysis`（エージェントによる分析）、`audit`（取引の監査） |
 | 提供側の定義 | APIを提供するサービス | 提供するscope。影響の大きい操作のscopeには、使ってよい目的と、必要なら使ってよい呼び出し元（目的の制限があるscope） |
 | 利用側の定義 | APIを使うサービス | 呼び出し先ごとに、付けたいscope |
 
@@ -253,6 +253,7 @@ Token Exchangeでは、認可サーバーがトークンを交換するたびに
 | 共通部品と同じプロセスのアプリ | 途中のホップの乗っ取りと同じ。共通部品はアプリと同じプロセスで動くライブラリなので、アプリが乗っ取られると、受け渡されたセッションも実行roleの認証情報も読める | 同上 |
 | エージェントの子プロセス（Claude Code） | 誘導された場合：中継を通して、fraud-mcpのツールを、ユーザーの代理として、エージェントの取引（`agent-analysis`）で呼べる。任意のコードを実行させられた場合：親と同じ実行環境、同じOSのユーザーで動くので、親の持つ認証情報を読みうる。そうなると、fraud-agentのホップの乗っ取りと同じになる。トレースの受け口を通して、アカウントのトレースに任意のスパンを書き込める | 誘導された場合：ツールの範囲を越えること。凍結の解除は、fraud-mcpが付けられるscopeにないので拒否される。他の支店のデータは、業務的なアクセス権で拒否される |
 | BFF | ログイン中のユーザーのIDトークンとリフレッシュトークンを持ち、取引の目的を決める。セッションのあるユーザーとして、定めた目的のどれででも（凍結の解除の取引を含む）最初のホップを呼べる。BFFは最も価値の高い構成要素である | ログインしていないユーザーになりすますこと（Cognitoが署名したIDトークンが要る）。定めていない目的を刻むこと。最初のホップ（case-service、fraud-agent、属性サービス）以外を直接呼ぶこと |
+| 監査サービス（audit-service） | アカウントのCloudTrailのイベント履歴と、各ホップのログを読める。すべてのユーザーの取引の記録が読まれる | 委任の範囲を広げること。ホップを呼ぶこと（呼び出し先は属性サービスだけ）。CloudTrailの記録を書き換えること |
 | 属性サービスとそのデータ | 業務的なアクセス権は、属性サービスのデータがすべてを決める。書き換えられると、そのとおりに判定される（例：担当者に解除の権限を与える） | 委任の範囲を広げること。目的とscopeはIAMが強制するので、データを書き換えても、エージェントの取引で凍結を解除させることはできない |
 | 実行環境の外に持ち出した認証情報 | 実行roleの認証情報と受け渡されたセッションの両方を持ち出すと、有効期限内は、そのホップとして次のホップを呼べる。呼び出し元の関数の限定（`lambda:SourceFunctionArn`）では防げない。関数のARNは認証情報そのものに刻まれており、持ち出した認証情報で呼んでも、その関数からの呼び出しとして扱われた（[検証](../experiments/source-function-arn/RESULTS.md)） | 受け渡されたセッションやJWTだけでは、どのホップも呼べない（SR-1）。呼び出しには、呼び出し元の実行roleの署名が要る |
 | Pre Token Generationトリガー、User Poolの設定 | SourceIdentityの値は、このLambdaが決める。AWSは値の正しさを検証しない。任意のユーザーとして振る舞える | — |
@@ -343,6 +344,10 @@ filter message = "handled" and hop = "case-service"
 「誰の代理の、どの取引の、どの呼び出しだったか」は、リクエストIDを軸に、業務のデータ、ログ、CloudTrail、トレースを突き合わせて追う。
 例として、「口座A-101の凍結を、誰が、どの取引で解除したか」を追う。
 
+参照実装の監査の画面（audit-service。[README](../README.md#監査で確かめる)）は、下の2と3を取引ごとに行う。各ホップのログの`tokenId`（受け取ったJWTの`jti`）は、
+CloudTrailの`GetWebIdentityToken`のイベントの`responseElements.webIdentityTokenId`と一致する（[検証](../experiments/cloudtrail-records/RESULTS.md)）。
+そのため、ログの1行と、STSがそのJWTを発行した記録を、1対1で対応づけられる。手で追うときも、`tokenId`で照らし合わせるのが確実である。
+
 1. **業務のデータからリクエストIDを得る。** account-serviceは、解除したユーザー（`unfrozenBy`）とリクエストID（`unfreezeRequestId`）を口座に記録する。
 
    ```sh
@@ -355,7 +360,7 @@ filter message = "handled" and hop = "case-service"
 2. **ログで、各ホップが何を受け取ったかを見る。** Logs Insightsで、bffと各ホップのロググループ（`Gekko08App-*FunctionLogs*`）を選び、リクエストIDで引く。
 
    ```
-   fields @timestamp, hop, route, user, subject.id, actor, purpose, scope, status, traceId
+   fields @timestamp, hop, route, user, subject.id, actor, purpose, scope, tokenId, status, traceId
    | filter requestId = "<リクエストID>" and message = "handled"
    | sort @timestamp asc
    ```

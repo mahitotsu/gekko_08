@@ -4,7 +4,7 @@ import * as cr from 'aws-cdk-lib/custom-resources';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import { Construct } from 'constructs';
 
-// 凍結解除のデモデータ（設計書§8）。疑わしい取引で凍結された口座と、その凍結の見直しの案件。yamadaはtokyo、tanakaはosaka
+// 凍結解除のデモデータ（設計書§8）。疑わしい取引で凍結された口座と、その凍結の見直しの案件。yamadaはtokyo、tanakaはosaka、suzukiは本部（honbu）の監査担当
 export const CASES = [
   {
     caseId: 'C-1001',
@@ -38,12 +38,15 @@ export const CASES = [
 export const STAFF = [
   { userId: 'yamada', branch: 'tokyo', title: '支店長' },
   { userId: 'tanaka', branch: 'osaka', title: '担当者' },
+  { userId: 'suzuki', branch: 'honbu', title: '監査担当' },
 ];
 
-// 凍結の解除は支店長だけ
+// 凍結の解除は支店長だけ。監査は監査担当だけ
 export const TITLE_PERMISSIONS = [
   { title: '担当者', permissions: ['case:view', 'account:view'] },
   { title: '支店長', permissions: ['case:view', 'account:view', 'account:unfreeze'] },
+  // 監査担当は取引の監査だけ。案件の参照も解除もできず、支店長と担当者は監査できない（監査サービスのADR）
+  { title: '監査担当', permissions: ['audit:view'] },
 ];
 
 // デプロイの時点では、どの口座も凍結しておく

@@ -90,19 +90,20 @@ npm run test:scenario:cloudtrail  # CloudTrailでの追跡も確かめる（最�
 
 ### セットアップ（デプロイのあとに1回だけ）
 
-デモのユーザーは、yamada（tokyo・支店長）とtanaka（osaka・担当者）の2人。所属と役職は人事データ（DynamoDBのテーブル、出力`StaffTable`）に
+デモのユーザーは、yamada（tokyo・支店長）、tanaka（osaka・担当者）、suzuki（本部・監査担当）の3人。所属と役職は人事データ（DynamoDBのテーブル、出力`StaffTable`）に
 デプロイ時に入る。Cognitoにはユーザー名とパスワードだけを置くので、ユーザーを作ってパスワードを設定する。
 パスワードは12文字以上で、大文字・小文字・数字・記号を含める。すでにユーザーがあれば作成は飛ばし、パスワードだけを設定し直す。
 
 ```sh
 export AWS_REGION=ap-northeast-1
 POOL=$(aws cloudformation describe-stacks --stack-name Gekko08App --query "Stacks[0].Outputs[?OutputKey=='UserPoolId'].OutputValue" --output text)
-for u in yamada tanaka; do
+for u in yamada tanaka suzuki; do
   aws cognito-idp admin-get-user --user-pool-id "$POOL" --username "$u" >/dev/null 2>&1 ||
     aws cognito-idp admin-create-user --user-pool-id "$POOL" --username "$u" --message-action SUPPRESS >/dev/null
 done
 aws cognito-idp admin-set-user-password --user-pool-id "$POOL" --username yamada --password '<パスワード>' --permanent
 aws cognito-idp admin-set-user-password --user-pool-id "$POOL" --username tanaka --password '<パスワード>' --permanent
+aws cognito-idp admin-set-user-password --user-pool-id "$POOL" --username suzuki --password '<パスワード>' --permanent
 
 # 画面のURL
 aws cloudformation describe-stacks --stack-name Gekko08App --query "Stacks[0].Outputs[?OutputKey=='WebUrl'].OutputValue" --output text
@@ -151,6 +152,23 @@ case-serviceが乗っ取られても、「案件を開いただけ」の取引�
 
 **保証の範囲**：示しているのは「エージェントの取引からは解除できない」ことで、「人間が操作したことの証明」ではない。取引の目的を決めるのはbffで、
 bffが侵害されれば、どの目的でも刻める（[設計ガイド](docs/guide.md#5-この構成が守らないもの)）。
+
+### 監査で確かめる
+
+結果のカードの「監査で確かめる」か、画面の「監査」から、1回の取引について、各ホップのログ（アプリが書いた記録）を、CloudTrail（STSが書いた記録）と
+JWTの`jti`で突き合わせて見られる。使えるのは、監査担当のsuzukiだけである。
+
+| 操作 | yamada・tanaka | suzuki（本部・監査担当） |
+|---|---|---|
+| 「監査」を開く（目的`audit`） | 403（業務的なアクセス権）。監査の権限がない | 200。直近24時間の取引の一覧 |
+| 取引を選ぶ | 403 | 各ホップが検証した呼び出し元・ユーザー・目的・scopeと`jti`、CloudTrailのSTSのイベント、その突き合わせ |
+| 案件を開く、凍結を解除 | 上の表のとおり | 403。監査担当は案件の参照も解除もできない |
+
+- 操作したユーザーと監査するユーザーは別なので、yamadaで操作したあと、ログアウトしてsuzukiでログインする。
+- CloudTrailのイベントは届くまでに数分〜15分ほどかかる。それまでは「AWSの記録が未着」と出るので、あとで「再確認」を押す。
+- 突き合わせで一致するのは、ログに書かれた目的とscopeが、STSが実際に発行したJWT（`GetWebIdentityToken`の宛先とscopeのtag、`sourceIdentity`）と
+  同じだったことである。ログはアプリが書き、CloudTrailはSTSが書く。
+- リクエストIDはSTSもIAMも強制しないので、突き合わせられるのは、リクエストIDで引ける範囲である（[設計ガイド](docs/guide.md#監査で追う)）。
 
 ### 凍結し直す
 

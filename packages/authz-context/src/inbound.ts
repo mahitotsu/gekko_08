@@ -40,6 +40,8 @@ export interface Verified {
   actorRole: string;
   /** JWTの`sub`（呼び出し元のchain用role） */
   tokenSub: string;
+  /** JWTの`jti`。CloudTrailの`GetWebIdentityToken`の`webIdentityTokenId`と一致し、監査でAWSの記録と突き合わせる */
+  tokenId?: string;
 }
 
 const jwksByIssuer = new Map<string, Promise<JWTVerifyGetKey>>();
@@ -112,5 +114,5 @@ export async function verifyInbound(token: string | undefined, callerArn: string
   if (!rule) throw new AuthzError(403, 'scope is not provided');
   if (rule.purposes && !rule.purposes.includes(purpose)) throw new AuthzError(403, 'scope is not allowed for the purpose');
   if (rule.callers && !rule.callers.includes(caller.hop)) throw new AuthzError(403, 'scope is not allowed for the caller');
-  return { subject: { id }, purpose, scope, actor: caller.hop, actorRole, tokenSub: payload.sub };
+  return { subject: { id }, purpose, scope, actor: caller.hop, actorRole, tokenSub: payload.sub, ...(typeof payload.jti === 'string' ? { tokenId: payload.jti } : {}) };
 }

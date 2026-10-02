@@ -9,6 +9,8 @@
 - [委任の範囲と業務的なアクセス権](../adr/20260930150529-delegation-scope-and-entitlements.md)：取引の目的とscopeはSTSとIAMが強制し、業務的なアクセス権は属性サービスから得る
 - [委任の範囲の定義](../adr/20261001130745-delegation-definitions.md)：目的の一覧・提供側・利用側の定義を突き合わせる。目的は影響の大きいscopeの発行を限るためだけに使う
 - [デモは口座の凍結解除](../adr/20261001123029-demo-account-unfreeze.md)
+- [デモの画面はReactの静的なSPA](../adr/20261002065842-demo-ui-react-static.md)
+- [監査サービス](../adr/20261002074437-audit-service.md)：各ホップのログとCloudTrailを、JWTの`jti`で突き合わせる
 - [入口はBFF](../adr/20260930083437-entry-via-bff.md)
 - [IdPはCognito User Pool](../adr/20260930091026-idp-cognito-user-pool.md)
 - [ホップはLambdaとFunction URL、mTLSは使わない](../adr/20260930091257-lambda-function-url-without-mtls.md)
@@ -29,7 +31,7 @@
 | FR-4（ホップを飛ばせない） | 入口は直前のホップの実行roleだけを許可（§4、§5） |
 | FR-5（パブリッククライアントに認証情報を持たせない） | BFFとセッションcookie（§3） |
 | FR-6（処理を元のユーザーとリクエストに結びつけて追跡） | リクエストIDの引き継ぎ、構造化ログ、`RoleSessionName`、トレース（§7） |
-| FR-7（デモ） | 口座の凍結解除のシナリオ（§8） |
+| FR-7（デモ） | 口座の凍結解除のシナリオと、取引の監査（§8） |
 | FR-8（業務的なアクセス権の変更が次のリクエストから反映） | 属性サービスが判定のたびに人事データと権限マスタを読む（§6） |
 | NFR-1・NFR-2（サーバーレス、常駐コンポーネントなし） | Lambda、DynamoDB、Cognito、CloudFront、S3、SSM Parameter Store、Amazon Bedrock、CloudWatch（Logs、Transaction Search）だけで構成（§2、§7） |
 | NFR-3（レイテンシの実測と公開） | 各ホップの処理時間のログと、シナリオテストでの集計（§10） |
@@ -49,25 +51,30 @@
                                                   │          │
                                                   │          └──> Amazon Bedrock（Claude Haiku 4.5。Claude Codeの子プロセスが呼ぶ）
                                                   │
-                                                  └──> entitlement-service  <── case-service、account-service
+                                                  ├──> audit-service ──> CloudWatch Logs（各ホップのログ）、CloudTrail（STSのイベント）
+                                                  │
+                                                  └──> entitlement-service  <── case-service、account-service、audit-service
 ```
 
 | 構成要素 | 役割 | 呼び出し元 | 呼び出し先 |
 |---|---|---|---|
-| bff | ログイン、セッション、取引の目的の決定、最初のホップ | ブラウザ（CloudFront経由） | case-service、fraud-agent、entitlement-service |
+| bff | ログイン、セッション、取引の目的の決定、最初のホップ | ブラウザ（CloudFront経由） | case-service、fraud-agent、audit-service、entitlement-service |
 | case-service | 凍結の見直しの案件と取引の参照、凍結の解除の依頼 | bff、fraud-mcp | account-service、entitlement-service |
 | account-service | 口座の参照と凍結の解除 | case-service、fraud-mcp | entitlement-service |
 | fraud-agent | 案件を分析し、凍結を解除してよいかを提案するAIエージェント。Claude Agent SDKがClaude Codeを子プロセスとして動かし、MCPは関数の中の中継から呼ぶ（§8） | bff | fraud-mcp、Bedrock |
 | fraud-mcp | エージェント向けのツールを提供するMCPサーバー | fraud-agent | case-service、account-service |
-| entitlement-service | 属性サービス。ユーザー本人の業務的なアクセス権を返す（終端） | bff、case-service、account-service | なし |
+| audit-service | 監査サービス。1回の取引について、各ホップのログとCloudTrailの記録を突き合わせる（§8） | bff | entitlement-service、CloudWatch Logs、CloudTrail |
+| entitlement-service | 属性サービス。ユーザー本人の業務的なアクセス権を返す（終端） | bff、case-service、account-service、audit-service | なし |
 
-呼び出しの経路は2つある。
+呼び出しの経路は3つある。
 
 - **マイクロサービスの経路**：bff → case-service → account-service。案件を開く取引と、凍結を解除する取引が同じホップを通る
 - **エージェントの経路**：bff → fraud-agent → fraud-mcp → case-service または account-service
+- **監査の経路**：bff → audit-service（→ entitlement-service）
 
 データはDynamoDBに置き、各サービスが自分の実行roleで扱う（案件はcase-service、口座はaccount-service、人事データと権限マスタは
 entitlement-service）。デモのデータに書き込むのは、account-serviceによる口座の凍結の解除だけで、ほかは読むだけである。
+audit-serviceはデータを持たず、各ホップのロググループとCloudTrailのイベント履歴を読む。
 
 ## 3. ログインとセッション（bff）
 
@@ -108,6 +115,8 @@ IDトークンには、Pre Token Generation V2トリガーが`https://aws.amazon
 | `GET /api/cases/{id}/summary` | `case-summary` | case-service（scope＝`case:summary`） |
 | `POST /api/cases/{id}/unfreeze` | `account-unfreeze` | case-service（scope＝`case:unfreeze`） |
 | `POST /api/agent` | `agent-analysis` | fraud-agent（scope＝`agent:analyze`） |
+| `GET /api/audit/requests` | `audit` | audit-service（scope＝`audit:read`。最近の取引の一覧） |
+| `GET /api/audit/requests/{リクエストID}` | `audit` | audit-service（scope＝`audit:read`。1回の取引の突き合わせ） |
 
 目的はbffが経路ごとに決める。bffは取引の入口として、Transaction Tokensの発行サービスに当たる役割を持つ。目的の一覧はbffの定義に置き（§4）、刻める目的の値はIAMで限る（§5）。
 目的は、取引の種類として少数に保つ。画面を増やしても、既存の目的で足りるなら目的を増やさない。
@@ -163,7 +172,8 @@ IDトークンには、Pre Token Generation V2トリガーが`https://aws.amazon
 | account-service | `account:unfreeze` | 目的＝`account-unfreeze`、呼び出し元＝case-service | case-service |
 | fraud-agent | `agent:analyze` | なし | bff |
 | fraud-mcp | `mcp:tools` | なし | fraud-agent |
-| entitlement-service | `entitlements:read` | なし | bff、case-service、account-service |
+| audit-service | `audit:read` | なし | bff |
+| entitlement-service | `entitlements:read` | なし | bff、case-service、account-service、audit-service |
 
 - **突き合わせ**：合成のときに、利用側が求めるscopeが提供側にあること、目的や呼び出し元の制限があるscopeでは利用側が許された呼び出し元であること、
   提供側が名指しする目的が目的の一覧にあること、どのホップにも利用側があることを確かめる。整合しなければ合成を失敗させる。
@@ -195,7 +205,7 @@ entitlement-serviceは呼び出し先を持たないので、chain用roleを持�
 
 | 種類 | 個数 | 権限 |
 |---|---|---|
-| 実行role | Lambda関数ごとに1つ | 自分のデータ（DynamoDB）へのアクセス、ログ出力、トレースの送信（`xray:PutTraceSegments`。§7）。fraud-agentはモデル用のroleの引き受け、bffはセッションのテーブルとSSMのパラメータ。ホップの呼び出しの許可は付けない（呼び出し先のresource policyで許可する）。呼び出し先ごとに、自分の関数以外からの呼び出しをDenyする文を持つ（下の入口のresource policyのひな形の後ろ） |
+| 実行role | Lambda関数ごとに1つ | 自分のデータ（DynamoDB）へのアクセス、ログ出力、トレースの送信（`xray:PutTraceSegments`。§7）。fraud-agentはモデル用のroleの引き受け、bffはセッションのテーブルとSSMのパラメータ、audit-serviceは`cloudtrail:LookupEvents`と、各ホップのロググループに限った`logs:StartQuery`（と`logs:GetQueryResults`・`logs:StopQuery`）。ホップの呼び出しの許可は付けない（呼び出し先のresource policyで許可する）。呼び出し先ごとに、自分の関数以外からの呼び出しをDenyする文を持つ（下の入口のresource policyのひな形の後ろ） |
 | モデル用のrole | 1つ（fraud-agent） | Bedrockのモデルの呼び出し（`bedrock:InvokeModel`・`bedrock:InvokeModelWithResponseStream`）だけ。fraud-agentの実行roleが引き受け、その認証情報だけをClaude Codeの子プロセスに渡す |
 | federated role | 1つ | 目的用のroleへの`sts:AssumeRole`・`sts:TagSession`・`sts:SetSourceIdentity`だけ |
 | 目的用のrole | 1つ | bffの呼び出し先のchain用roleへのchainと、JWTの発行（§4の定義のとおり） |
@@ -255,7 +265,7 @@ chain用roleは、呼び出し元のchain用role（bffの呼び出し先では�
 }
 ```
 
-目的用のroleは、federated roleを信頼し、`sts:TagSession`をキー`purpose`だけ、値を目的の一覧（`profile`・`case-summary`・`account-unfreeze`・`agent-analysis`）だけに限る。
+目的用のroleは、federated roleを信頼し、`sts:TagSession`をキー`purpose`だけ、値を目的の一覧（`profile`・`case-summary`・`account-unfreeze`・`agent-analysis`・`audit`）だけに限る。
 federated roleは、Cognitoを指すOIDC providerをPrincipalとし、`aud`＝アプリクライアントのIDで絞る。IDトークンにtagがないので`sts:TagSession`は許さない。
 
 ### 入口のresource policyのひな形（bff以外のホップ）
@@ -334,7 +344,8 @@ bffのFunction URLを直接呼べうるが、セッションcookieがなけれ�
 
 **トレース**：受信と送信のスパンを作り、`traceparent`を引き継ぐ。応答を返す前に送り切る（§7）。
 
-**ログ**：1件を1行のJSONで標準出力に書く（Lambdaのログの形式はJSON。`timestamp`と`level`を持つので、レベルで絞り込める）。リクエストID、トレースID、ホップ名、呼び出し元のホップ名（actor）と実行role名、subject、目的、scope、JWTの`sub`、判定結果、処理時間を構造化ログに出す。
+**ログ**：1件を1行のJSONで標準出力に書く（Lambdaのログの形式はJSON。`timestamp`と`level`を持つので、レベルで絞り込める）。リクエストID、トレースID、ホップ名、呼び出し元のホップ名（actor）と実行role名、subject、目的、scope、JWTの`sub`と`jti`、判定結果、処理時間を構造化ログに出す。
+`jti`は、CloudTrailの`GetWebIdentityToken`のイベントの`webIdentityTokenId`と一致し、監査でAWSの記録と突き合わせるのに使う（[検証](../../experiments/cloudtrail-records/RESULTS.md)）。`jti`は識別子で、それだけではホップを呼べない。
 認証情報、JWT、cookieはログに出さない。
 
 ### 属性サービス（entitlement-service）
@@ -355,6 +366,7 @@ bffのFunction URLを直接呼べうるが、セッションcookieがなけれ�
 | case-service | 凍結の解除の依頼 | `case:unfreeze` | 同上。解除の可否はaccount-serviceが判定する |
 | account-service | 口座の参照 | `account:read` | `account:view`を持ち、口座の`branch`が所属と一致 |
 | account-service | 凍結の解除 | `account:unfreeze` | `account:unfreeze`を持ち、口座の`branch`が所属と一致し、口座が凍結中 |
+| audit-service | 取引の一覧と突き合わせ | `audit:read` | `audit:view`を持つ（支店を問わない） |
 | entitlement-service | アクセス権の参照 | `entitlements:read` | 本人の分だけを返す |
 
 ## 7. 追跡（FR-6）
@@ -405,8 +417,8 @@ OpenTelemetryで出し、CloudWatchのTransaction Searchに集める（[収集�
 
 ### シナリオ
 
-- **ユーザー**（人事データ）：yamada（tokyo、支店長）、tanaka（osaka、担当者）
-- **権限マスタ**：担当者は`case:view`・`account:view`、支店長はそれに加えて`account:unfreeze`
+- **ユーザー**（人事データ）：yamada（tokyo、支店長）、tanaka（osaka、担当者）、suzuki（honbu、監査担当）
+- **権限マスタ**：担当者は`case:view`・`account:view`、支店長はそれに加えて`account:unfreeze`、監査担当は`audit:view`だけ
 - **データ**：案件と取引（case-service）、口座（account-service）。それぞれ`branch`を持つ。口座は凍結の状態（`status`＝`frozen`／`active`）と凍結の理由を持ち、
   デモの口座（A-101はtokyo、A-201とA-999はosaka）はデプロイの時点で凍結しておく。案件は凍結の見直しの案件（C-1001はA-101、C-2001はA-201）。
 - **案件を開く**（目的`case-summary`）：yamadaが自分の支店の案件を開くと、case-serviceが口座の凍結の状態と理由をaccount-serviceから取得して返す。
@@ -422,6 +434,17 @@ OpenTelemetryで出し、CloudWatchのTransaction Searchに集める（[収集�
 - **ホップが侵害された場合**：画面では再現できないので、シナリオテストで確かめる（§10）。案件を開く取引やエージェントの取引のcase-serviceのセッションからは、
   account-service宛てに`account:unfreeze`のJWTを発行できない。
 - **異動**：人事データでyamadaの所属をosakaに変えると、次のリクエストから、tokyoの案件は拒否され、osakaの案件を開ける（FR-8）。
+- **監査**（目的`audit`。[監査サービスのADR](../adr/20261002074437-audit-service.md)）：suzukiが監査の画面で取引を選ぶと、audit-serviceが次の2つを集めて突き合わせる。
+  支店長と担当者は監査できず、監査担当は案件の参照も解除もできない。どちらも業務的なアクセス権で拒否される。
+  - **ホップの記録**：各ホップのロググループの`handled`と`rejected`を、リクエストIDでLogs Insightsで引く（直近7日）。一覧は、bffの`handled`の直近24時間の取引
+    （表示と監査の経路を除く）。
+  - **AWSの記録**：CloudTrailの`LookupEvents`を`Username`＝リクエストIDで引き、`AssumeRoleWithWebIdentity`・`AssumeRole`・`GetWebIdentityToken`から、
+    呼んだ主体、`sourceIdentity`、引き受け先と目的のtag、宛先とscopeのtag、`webIdentityTokenId`だけを取り出す。イベントをそのまま返さない（`AssumeRole`の
+    `responseElements`には、アクセスキーIDとセッショントークンが入る）。roleのARNは、CDKが渡す対応表（role名 → ホップ名とroleの種類）で表示名に置き換える。
+  - **突き合わせ**：ホップの記録の`jti`と`webIdentityTokenId`が一致するイベントについて、JWTを発行したrole、宛先、scope、ユーザーを比べ、bffの`AssumeRole`の目的のtagと
+    各ホップの記録の目的を比べる。結果は「一致」「不一致」「AWSの記録が未着」。bffの記録は、目的とユーザーを`AssumeRole`のイベントと比べる。
+  - CloudTrailのイベントが届くまで数分〜15分ほどかかるので、直後の取引は「未着」になる。リクエストIDはSTSもIAMも強制しないので、
+    突き合わせられるのは、リクエストIDで引ける範囲である。
 - **繰り返し**：解除は口座の状態を変える。デモを繰り返すときは、READMEのコマンドで口座を凍結し直す。
 - **保証の範囲**：示せるのは「エージェントの取引からは解除できない」ことで、「人間が操作したことの証明」ではない。bffは目的を決める信頼の起点で、
   bffが侵害されれば、どの目的でも刻める。
@@ -468,7 +491,7 @@ npmのワークスペース（`infra`、`packages/*`、`services/*`、`web`、`t
 |---|---|
 | `infra/` | CDKアプリ（単一のスタック`Gekko08App`。リージョンはap-northeast-1に固定する）と、`Hop`のテンプレートの単体テスト（`infra/test/`。§10） |
 | `packages/authz-context/` | 受信側・送信側の共通部品、MCPの部品、トレース（§6、§7） |
-| `services/<名前>/` | 各Lambdaのハンドラー（bff、case-service、account-service、entitlement-service、fraud-agent、fraud-mcp、pretoken）と、委任の範囲の定義（`authz.ts`。§4） |
+| `services/<名前>/` | 各Lambdaのハンドラー（bff、case-service、account-service、entitlement-service、fraud-agent、fraud-mcp、audit-service、pretoken）と、委任の範囲の定義（`authz.ts`。§4） |
 | `web/` | デモの画面（ReactとViteの静的なSPA。§3） |
 | `tests/` | シナリオテスト（§10） |
 | `experiments/` | 実機の検証（検証記録とその構成。本体からは参照しない） |
@@ -496,7 +519,7 @@ Cognito User Poolのカスタム属性`custom:branch`は使わない。User Pool
 
 振る舞いを確かめるシナリオテストは、デプロイしたスタックに対して実行し、要件のIDにひも付ける。
 
-テストは、デモのユーザーとは別の専用のユーザー（`test-tokyo-manager`はtokyo・支店長、`test-osaka-officer`はosaka・担当者）を使い、Cognitoのユーザーと人事データの行を
+テストは、デモのユーザーとは別の専用のユーザー（`test-tokyo-manager`はtokyo・支店長、`test-osaka-officer`はosaka・担当者、`test-auditor`はhonbu・監査担当）を使い、Cognitoのユーザーと人事データの行を
 テストの実行ごとに用意する。パスワードは実行のたびにランダムな値にし、異動のテストもこの人事データだけを書き換える。
 案件と口座も、テスト専用のもの（`TC-`、`TA-`で始まるもの。デモのデータと同じ形）を実行ごとに凍結した状態で用意し、デモのデータには触れない。
 凍結の解除のテストは、解除のテストだけが使う案件と口座を、テストごとに凍結し直して使う。
@@ -513,7 +536,7 @@ Cognito User Poolのカスタム属性`custom:branch`は使わない。User Pool
 | FR-4 | 途中のホップを飛ばした呼び出しが403 |
 | FR-5 | ブラウザに返す応答とcookieに、トークンも認証情報も含まれない |
 | FR-6 | 1回のリクエストを、各ホップのログとCloudTrailでリクエストIDとユーザーから追える。マイクロサービスとエージェントの経路が、それぞれ1つのトレースにつながり（各ホップの受信のスパンが直前のホップの送信のスパンの子になる）、受信のスパンに検証した呼び出し元・目的・scope・ユーザーが入る。DynamoDBの呼び出しが各ホップの受信のスパンの子になる。Claude Codeのスパンがfraud-agentの受信の子になり、`tools/call`の送信が`claude_code.tool.execution`の子になる。ブラウザから届いた`traceparent`は引き継がない |
-| FR-7 | エージェントが誘導されて解除を試みても、口座は解除されない（`unfreeze_account`はaccount-serviceが拒否する）。他の支店の口座は参照も拒否される。人間の解除の取引では、支店長は自分の支店の口座を解除でき、担当者は解除できない。モデルの判断は毎回変わりうるので、誘導されたかどうかではなく、誘導されても口座が凍結されたままで、他の支店のデータが応答に現れないことを確かめる |
+| FR-7 | エージェントが誘導されて解除を試みても、口座は解除されない（`unfreeze_account`はaccount-serviceが拒否する）。他の支店の口座は参照も拒否される。人間の解除の取引では、支店長は自分の支店の口座を解除でき、担当者は解除できない。モデルの判断は毎回変わりうるので、誘導されたかどうかではなく、誘導されても口座が凍結されたままで、他の支店のデータが応答に現れないことを確かめる。監査担当は、取引の一覧と、各ホップの記録（呼び出し元・ユーザー・目的・scope・`jti`）を引ける。CloudTrailが届くと、bffと各ホップの記録がすべてAWSの記録と一致し、応答に認証情報とARNが含まれない（`npm run test:scenario:cloudtrail`のときだけ）。支店長は監査できず、監査担当は案件を開けず解除もできない |
 | FR-8 | 人事データで所属を変えると、次のリクエストから結果が変わる |
 | NFR-3 | 各ホップの処理時間（chain、JWTの発行、検証）を集計して公開する |
 | SR-1 | 受け渡したchainのセッションで、どのホップも呼べない。内部のホップ以外を宛先に含むJWTを作れない |
@@ -557,7 +580,7 @@ Resource, Condition）の組に分けて比べるので、文のまとめ方が�
 
 ### 規模の上限
 
-参照実装の規模（ホップ6つ）では、次のクォータには抵触しない。規模が大きくなったときに、どこが先に上限になるかの目安を示す（クォータは2026-09-30時点の文書による）。
+参照実装の規模（ホップ7つ）では、次のクォータには抵触しない。規模が大きくなったときに、どこが先に上限になるかの目安を示す（クォータは2026-09-30時点の文書による）。
 
 | クォータ（既定値→上限） | 効く場所 | 上限の目安 |
 |---|---|---|

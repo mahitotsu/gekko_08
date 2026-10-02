@@ -13,6 +13,7 @@ import { OutboundFederationCheck } from './constructs/outbound-federation-check'
 import { WebFrontend } from './constructs/web-frontend';
 import { connectHops } from './delegation';
 import { authz as accountServiceAuthz } from '../../services/account-service/authz';
+import { authz as auditServiceAuthz } from '../../services/audit-service/authz';
 import { authz as bffAuthz, PURPOSES } from '../../services/bff/authz';
 import { authz as caseServiceAuthz } from '../../services/case-service/authz';
 import { authz as entitlementServiceAuthz } from '../../services/entitlement-service/authz';
@@ -25,7 +26,7 @@ export const REGION = 'ap-northeast-1';
 const BEDROCK_MODEL = 'anthropic.claude-haiku-4-5-20251001-v1:0';
 
 /** 委任の範囲の定義。各サービスが自分の`authz.ts`に書く（設計書§4） */
-export const DELEGATION_DEFINITIONS = [bffAuthz, caseServiceAuthz, accountServiceAuthz, entitlementServiceAuthz, fraudAgentAuthz, fraudMcpAuthz];
+export const DELEGATION_DEFINITIONS = [bffAuthz, caseServiceAuthz, accountServiceAuthz, entitlementServiceAuthz, fraudAgentAuthz, fraudMcpAuthz, auditServiceAuthz];
 export const BEDROCK_PROFILE = `jp.${BEDROCK_MODEL}`;
 
 // Lambdaの関数とレイヤーを合わせた展開後の上限は250MiB（262,144,000バイト）。上限に近づいたら合成を失敗させる
@@ -118,6 +119,13 @@ export class Gekko08AppStack extends cdk.Stack {
     modelRole.grantAssumeRole(fraudAgent.execRole);
     fraudAgent.fn.addEnvironment('MODEL_ROLE_ARN', modelRole.roleArn);
 
+    // 監査。各ホップのログとCloudTrailを読み、突き合わせる（監査サービスのADR）
+    const auditService = new Hop(this, 'AuditService', {
+      hopName: 'audit-service', entry: 'services/audit-service/src/index.ts', issuer, callsOthers: true,
+    });
+    auditService.fn.addToRolePolicy(new iam.PolicyStatement({ actions: ['cloudtrail:LookupEvents'], resources: ['*'] }));
+    auditService.fn.addToRolePolicy(new iam.PolicyStatement({ actions: ['logs:GetQueryResults', 'logs:StopQuery'], resources: ['*'] }));
+
     // 入口
     const bff = new Bff(this, 'Bff');
     this.bff = bff;
@@ -130,8 +138,20 @@ export class Gekko08AppStack extends cdk.Stack {
     // 呼び出し関係と委任の範囲（設計書§4）。定義を突き合わせ、IAMと共通部品の設定を生成する
     connectHops(Object.values(PURPOSES), DELEGATION_DEFINITIONS, {
       bff, 'case-service': caseService, 'account-service': accountService, 'entitlement-service': entitlementService,
-      'fraud-agent': fraudAgent, 'fraud-mcp': fraudMcp,
+      'fraud-agent': fraudAgent, 'fraud-mcp': fraudMcp, 'audit-service': auditService,
     });
+
+    // 監査サービスが読むロググループと、CloudTrailの主体の表示名（role名→ホップ名とroleの種類）。ARNとアカウントIDは画面に出さない
+    const hops = [caseService, accountService, entitlementService, fraudAgent, fraudMcp, auditService];
+    const logGroups = { bff: bff.fn.logGroup, ...Object.fromEntries(hops.map((h) => [h.hopName, h.fn.logGroup])) };
+    auditService.fn.addToRolePolicy(new iam.PolicyStatement({ actions: ['logs:StartQuery'], resources: Object.values(logGroups).map((g) => g.logGroupArn) }));
+    auditService.fn.addEnvironment('AUDIT_LOG_GROUPS', this.toJsonString(Object.fromEntries(Object.entries(logGroups).map(([k, g]) => [k, g.logGroupName]))));
+    const principals: [iam.IRole | undefined, string][] = [
+      [auth.federatedRole, 'bff（federated role）'], [bff.asCaller().chainRole, 'bff（目的用のrole）'], [bff.fn.role, 'bff（実行role）'],
+      ...hops.flatMap((h): [iam.IRole | undefined, string][] => [[h.execRole, `${h.hopName}（実行role）`], [h.chainRole, `${h.hopName}（chain用role）`]]),
+    ];
+    auditService.fn.addEnvironment('AUDIT_PRINCIPALS', this.toJsonString(Object.fromEntries(principals.filter(([r]) => r).map(([r, label]) => [r!.roleName, label]))));
+    auditService.fn.addEnvironment('AUDIT_AUDIENCE_PREFIX', `${this.stackName}:`);
 
     bff.writeSettings(auth, callbackUrl);
 
@@ -145,7 +165,7 @@ export class Gekko08AppStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'CasesTable', { value: data.cases.tableName });
     new cdk.CfnOutput(this, 'AccountsTable', { value: data.accounts.tableName });
     new cdk.CfnOutput(this, 'Issuer', { value: issuer });
-    for (const hop of [caseService, accountService, entitlementService, fraudAgent, fraudMcp]) {
+    for (const hop of hops) {
       const key = hop.hopName.replace(/(^|-)(\w)/g, (_, __, c: string) => c.toUpperCase());
       new cdk.CfnOutput(this, `${key}Url`, { value: hop.url.url });
       new cdk.CfnOutput(this, `${key}Audience`, { value: hop.audience });

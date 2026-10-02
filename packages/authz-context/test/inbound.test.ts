@@ -46,6 +46,11 @@ describe('verifyInbound', () => {
     expect(v).toEqual({ subject: { id: 'yamada' }, purpose: 'case-summary', scope: 'account:read', actor: 'case-service', actorRole: 'case-exec', tokenSub: CHAIN });
   });
 
+  it('JWTの`jti`を、AWSの記録と突き合わせるための識別子として返す', async () => {
+    const v = await verifyInbound(await sign({ ...claims, jti: 'b6f0c2de-0000-4000-8000-000000000001' }), CALLER_ARN, opts);
+    expect(v.tokenId).toBe('b6f0c2de-0000-4000-8000-000000000001');
+  });
+
   it('tagの値が配列でも読める', async () => {
     const t = await sign(ns({ principal_tags: { purpose: ['case-summary'] } }));
     expect((await verifyInbound(t, CALLER_ARN, opts)).purpose).toBe('case-summary');

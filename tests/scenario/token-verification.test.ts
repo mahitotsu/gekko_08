@@ -47,6 +47,8 @@ describe('FR-1: 各ホップは、STSが署名したJWTでsubject・宛先・委
     const v = await verifyInbound(await toCase(), callerArn('bff-exec'), caseOpts());
     expect(v).toEqual({
       subject: { id: USERS.tokyoManager }, purpose: 'case-summary', scope: 'case:summary', actor: 'bff-exec', actorRole: 'bff-exec', tokenSub: o.PurposeRoleArn,
+      // JWTの`jti`。CloudTrailの`webIdentityTokenId`と一致し、監査で突き合わせる
+      tokenId: expect.stringMatching(/^[0-9a-f-]{36}$/),
     });
   });
 
