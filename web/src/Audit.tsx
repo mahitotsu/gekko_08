@@ -1,86 +1,14 @@
 import { useCallback, useEffect, useState } from 'react';
 import { get, type ApiResult } from './api';
+import type { Check, EventRef, Field, Reconciled as AuditResponse, Transaction, TransactionList } from '../../services/audit-service/src/api';
 import { PURPOSE_LABELS, ROUTE_LABELS } from './labels';
 import { Denial, PurposeChip } from './parts';
 
 // 監査の画面。1回の取引について、各ホップのログ（アプリが書いた記録）と、CloudTrail（STSが書いた記録）を突き合わせる。
 // 判定は監査サービスが行い、画面は表示だけを行う
 
-type Check = { result: 'match' } | { result: 'mismatch'; fields: string[] } | { result: 'pending' } | { result: 'n/a' };
-
-/** 比べたAWSの記録（CloudTrailのイベント） */
-interface EventRef {
-  event: string;
-  eventId?: string;
-  time: string;
-}
-
-/** 1つの項目について、アプリの記録の値とAWSの記録の値を、監査サービスが比べた結果 */
-interface Field {
-  name: string;
-  app?: string;
-  aws?: string;
-  awsEvent?: EventRef;
-  result: 'match' | 'mismatch' | 'pending';
-}
-
-interface Transaction {
-  time: string;
-  requestId: string;
-  route: string;
-  purpose: string;
-  user: string;
-  status?: number;
-  sessionRef?: string;
-  /** ログインした時刻（UNIX秒） */
-  loggedInAt?: number;
-  caseId?: string;
-  /** 監査の操作なら、監査した取引のリクエストID */
-  auditTarget?: string;
-}
-
-interface HopRecord {
-  time: string;
-  startedAt?: string;
-  depth: number;
-  hop: string;
-  outcome: 'handled' | 'rejected';
-  actor?: string;
-  tokenIssuer?: string;
-  tokenId?: string;
-  subject?: string;
-  purpose?: string;
-  scope?: string;
-  status?: number;
-  reason?: string;
-  claimedRequestId?: string;
-  logGroup?: string;
-  tokenEvent?: EventRef & { tokenId?: string };
-  fields?: Field[];
-  check: Check;
-}
-
-interface AwsRecord {
-  time: string;
-  event: string;
-  eventId?: string;
-  caller: string;
-  sourceIdentity?: string;
-  role?: string;
-  purpose?: string;
-  audience?: string;
-  scope?: string;
-  tokenId?: string;
-  error?: string;
-}
-
-interface Reconciled {
-  /** bffが付けた、この監査の操作のリクエストID（監査した取引のものではない） */
-  requestId: string;
-  transaction: (Omit<Transaction, 'requestId'> & { logGroup?: string; fields: Field[]; check: Check }) | null;
-  hops: HopRecord[];
-  awsRecords: AwsRecord[];
-}
+/** bffは、監査サービスの応答に、この監査の操作のリクエストIDと目的を加える（監査した取引のものではない） */
+type Reconciled = AuditResponse & { requestId: string; purpose: string };
 
 interface Denied {
   error?: string;
@@ -101,7 +29,7 @@ function day(t: string): string {
 const short = (id?: string) => (id ? `${id.slice(0, 8)}…` : '—');
 
 export function Audit({ requestId, onSelect }: { requestId?: string; onSelect: (id: string) => void }) {
-  const [list, setList] = useState<ApiResult<{ transactions?: Transaction[] } & Denied>>();
+  const [list, setList] = useState<ApiResult<Partial<TransactionList> & Denied>>();
   const [loadingList, setLoadingList] = useState(false);
 
   const loadList = useCallback(async () => {

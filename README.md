@@ -79,7 +79,7 @@ AWS上のマイクロサービスで、Authorization Context（誰の権限で�
 ```sh
 export AWS_REGION=ap-northeast-1
 npm install
-npm test                          # 単体テスト（共通部品、Hopのテンプレート、委任の範囲の定義）
+npm test                          # 単体テスト（共通部品、監査の突き合わせ、Hopと目的用のroleのテンプレート、委任の範囲の定義）
 npm run deploy                    # スタック Gekko08App をデプロイする（5分ほど）
 npm run test:scenario             # デプロイしたスタックに対するシナリオテスト（4〜5分。トレースの到着を待つ）
 npm run test:scenario:cloudtrail  # CloudTrailでの追跡も確かめる（最大15分ほどかかる）

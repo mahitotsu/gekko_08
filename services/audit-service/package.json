@@ -3,6 +3,9 @@
   "private": true,
   "license": "Apache-2.0",
   "type": "module",
+  "scripts": {
+    "test": "vitest run"
+  },
   "dependencies": {
     "@aws-sdk/client-cloudtrail": "^3.1145.0",
     "@aws-sdk/client-cloudwatch-logs": "^3.1145.0",

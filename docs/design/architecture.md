@@ -576,7 +576,12 @@ FR-6・SR-3・NFR-3のテストは、各ホップの構造化ログをCloudWatch
 最大15分ほどかかるため、`npm run test:scenario:cloudtrail`のときだけ実行する。CloudTrailのイベントは、`Username`（＝`RoleSessionName`＝リクエストID）で引ける。
 NFR-3のテストは、集計結果を`tests/out-latency.json`（git管理外）に書く。
 
-共通部品の単体テストと、`Hop`のテンプレートの単体テスト（`infra/test/`、`npm test`）は、要件のIDにはひも付けない。
+共通部品の単体テスト、監査の突き合わせの単体テスト（`services/audit-service/test/`）、`Hop`と目的用のroleのテンプレートの単体テスト（`infra/test/`）は、
+いずれも`npm test`で実行し、要件のIDにはひも付けない。
+
+監査の突き合わせの単体テストは、AWSを呼ばない純粋な関数（`services/audit-service/src/reconcile.ts`）を確かめる。CloudTrailのイベントから突き合わせの項目だけを
+取り出し、認証情報もARNも残さないこと、`jti`と`webIdentityTokenId`での対応づけと項目ごとの比較（JWTを発行したroleはrole名で比べる）、未着の扱い、
+呼び出しの順、ヘッダーを偽った呼び出しの拒否の記録が本当の取引の下にだけ出ること、一覧の並び順である。応答の型（`src/api.ts`）は、画面とシナリオテストも参照する。
 
 `Hop`のテンプレートの単体テストは、デモの配線に依存しない試験用の小さなスタックを合成し、§5のIAMの条件を確かめる。確かめるのは、
 入口のresource policy（Function URLが`AWS_IAM`であること、許可した呼び出し元の実行role以外へのDeny、許可の相手）、呼び出し元の実行roleのDeny

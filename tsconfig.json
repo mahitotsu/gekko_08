@@ -11,6 +11,6 @@
     "noEmit": true,
     "jsx": "react-jsx"
   },
-  "include": ["infra", "packages/*/src", "packages/*/test", "services/*/src", "services/*/authz.ts", "tests", "web/src", "web/vite.config.ts"],
+  "include": ["infra", "packages/*/src", "packages/*/test", "services/*/src", "services/*/test", "services/*/authz.ts", "tests", "web/src", "web/vite.config.ts"],
   "exclude": ["**/node_modules", "**/cdk.out"]
 }

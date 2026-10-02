@@ -1,22 +1,10 @@
 import { beforeAll, describe, expect, it } from 'vitest';
+import type { HopRecord, Reconciled as AuditResponse } from '../../services/audit-service/src/api';
 import { browserGet, browserPost, eventually, loginSession, provisionTestData, TEST_DATA as T, USERS } from './helpers';
 
 // FR-7(d)：監査の画面で、1回の取引について、各ホップの記録をAWSの記録と突き合わせて示す。監査は、監査の権限を持つユーザーだけが使える
-interface Check { result: 'match' | 'mismatch' | 'pending' | 'n/a'; fields?: string[] }
-interface EventRef { event: string; eventId?: string; time: string }
-interface Field { name: string; app?: string; aws?: string; awsEvent?: EventRef; result: 'match' | 'mismatch' | 'pending' }
-interface HopRecord {
-  hop: string; depth: number; outcome: string; actor?: string; subject?: string; purpose?: string; scope?: string; status?: number; tokenId?: string;
-  logGroup?: string; tokenEvent?: EventRef & { tokenId?: string }; fields?: Field[]; check: Check;
-}
-interface Reconciled {
-  /** bffが付けた、この監査の操作のリクエストID */
-  requestId: string;
-  purpose: string;
-  transaction: { user: string; route: string; purpose: string; status: number; logGroup?: string; fields: Field[]; check: Check } | null;
-  hops: HopRecord[];
-  awsRecords: Record<string, unknown>[];
-}
+/** bffは、監査サービスの応答に、この監査の操作のリクエストIDと目的を加える */
+type Reconciled = AuditResponse & { requestId: string; purpose: string };
 
 let manager: string;
 let auditor: string;
