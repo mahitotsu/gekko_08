@@ -10,6 +10,8 @@ import { startMcpRelay, type McpExchange } from '@gekko08/authz-context/mcp';
 
 const MODEL_ID = process.env.BEDROCK_MODEL_ID!;
 const MAX_TURNS = 8;
+// 異常終了したClaude Codeの標準エラー出力をログに出すか。中身はClaude Codeが決めるので、既定では出さず、原因を調べるときだけ有効にする
+const LOG_STDERR = process.env.AGENT_LOG_STDERR === '1';
 
 const SYSTEM_PROMPT = [
   'あなたは銀行の不正検知アナリストです。疑わしい取引で凍結された口座の、凍結の見直しの案件を担当します。',
@@ -123,7 +125,7 @@ export const handler = createHopHandler(async (body, { call, requestId }) => {
         maxTurns: MAX_TURNS,
         cwd: '/tmp',
         env: await childEnv(otlp?.endpoint),
-        stderr: (d) => { stderr.push(d); },
+        ...(LOG_STDERR ? { stderr: (d: string) => { stderr.push(d); } } : {}),
       },
     })) {
       if (m.type === 'result') {
@@ -134,7 +136,7 @@ export const handler = createHopHandler(async (body, { call, requestId }) => {
     // Claude Codeは終了するときに残りのスパンを送る。届くのを待つ（転送の完了は、応答の前に共通部品が待つ）
     await otlp?.settle();
   } catch (e) {
-    log('error', 'agent failed', { hop: 'fraud-agent', requestId, error: (e as Error).message, stderr: stderr.join('').slice(-2000) });
+    log('error', 'agent failed', { hop: 'fraud-agent', requestId, error: (e as Error).message, ...(LOG_STDERR ? { stderr: stderr.join('').slice(-2000) } : {}) });
     throw e;
   } finally {
     await relay.close();

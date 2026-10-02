@@ -93,7 +93,12 @@ export class Gekko08AppStack extends cdk.Stack {
     // エージェントはClaude Agent SDKで、Claude Code（linux-arm64の実行ファイル）を子プロセスとして動かす（Claude Agent SDKのADR）
     const fraudAgent = new Hop(this, 'FraudAgent', {
       hopName: 'fraud-agent', entry: 'services/fraud-agent/src/index.ts', issuer, callsOthers: true,
-      environment: { BEDROCK_MODEL_ID: BEDROCK_PROFILE }, timeout: cdk.Duration.seconds(55), memorySize: 1024,
+      environment: {
+        BEDROCK_MODEL_ID: BEDROCK_PROFILE,
+        // 原因を調べるときだけ（`cdk deploy -c agentLogStderr=true`）、異常終了したClaude Codeの標準エラー出力をログに出す（設計書§8）
+        ...(this.node.tryGetContext('agentLogStderr') === 'true' ? { AGENT_LOG_STDERR: '1' } : {}),
+      },
+      timeout: cdk.Duration.seconds(55), memorySize: 1024,
       bundling: claudeCodeBundling(),
     });
     // Claude Haiku 4.5を、日本国内の推論プロファイル（東京・大阪）で呼ぶ
