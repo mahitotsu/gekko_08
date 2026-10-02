@@ -330,7 +330,7 @@ Token Exchangeと同じく「どのサービスから来たか（actor）」と�
 - **scopeの絞り込みは、デプロイ時の宣言で決まる**：Token Exchangeのように、実行時の状況に応じて絞ることはできない。
 - **STSへの呼び出しは毎ホップ残る**：認可サーバーへの往復はなくなるが、STSのスロットリングは見積もる必要がある。
   `AssumeRole`のリクエスト数の上限は文書にあるが、ホップへの呼び出しのたびに使う`GetWebIdentityToken`と、ログインの
-  `AssumeRoleWithWebIdentity`の上限は、文書にもService Quotasにもない。大きな規模で使う前に、負荷をかけて確かめる必要がある。
+  `AssumeRoleWithWebIdentity`の上限は、文書にもService Quotasにもなく、確認できなかった。
 - **AWSへのロックイン**：AWS外との相互運用には、`GetWebIdentityToken`などでの変換が必要になる。
   受け手には「ユーザーは`sub`（roleのARN）ではなく`source_identity`で表される」と取り決めてもらう必要がある。
 - **受信側の実装の正しさ**：入口のIAMが確かめるのはactorだけで、JWTの検証は各サービスが正しく実装する必要がある。共通部品として提供する。
