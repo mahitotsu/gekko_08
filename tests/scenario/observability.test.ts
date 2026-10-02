@@ -24,7 +24,7 @@ beforeAll(async () => {
     return r.body.requestId as string;
   };
   allowedId = await summary(T.tokyoCase);
-  deniedId = await summary(T.osakaCase); // case-serviceが業務的なアクセス権で拒否する
+  deniedId = await summary(T.osakaCase); // case-serviceが業務上のアクセス権で拒否する
   latencyIds = [];
   for (let i = 0; i < LATENCY_SAMPLES; i++) latencyIds.push(await summary(T.tokyoCase));
   logsById = await handledLogs([allowedId, ...latencyIds], HOPS, startTime);
@@ -37,7 +37,7 @@ describe('FR-6: 1回のリクエストを、各ホップのログでリクエス
     expect(l['case-service']).toMatchObject({ subject: { id: USERS.tokyoManager }, purpose: 'case-summary', scope: 'case:summary', status: 200 });
     expect(l['account-service']).toMatchObject({ subject: { id: USERS.tokyoManager }, purpose: 'case-summary', scope: 'account:read', status: 200 });
     expect(l['entitlement-service']).toMatchObject({ subject: { id: USERS.tokyoManager }, scope: 'entitlements:read', status: 200 });
-    // actorは直前のホップ（入口の実行role）、JWTの`sub`は直前のホップのchain用role（bffでは目的用のrole）
+    // actorは直前のホップ（入口の実行role）、JWTの`sub`は直前のホップのchain用role（bffでは目的を刻むrole）
     expect(l['case-service']).toMatchObject({ actor: 'bff' });
     expect(l['case-service']!.actorRole).toMatch(/BffFunction/);
     expect(l['case-service']!.tokenSub).toMatch(/PurposeRole/);

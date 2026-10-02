@@ -80,7 +80,7 @@ for (const { impl, hop, logPrefix, role } of IMPLS) {
         for (const r of [...yamada, tanaka]) for (const re of OTHER_BRANCH_ACCOUNT) expect(r.text).not.toMatch(re);
       });
 
-      it('tanaka（osaka）がtokyoの案件を分析させても、case-serviceが業務的なアクセス権で拒否する', () => {
+      it('tanaka（osaka）がtokyoの案件を分析させても、case-serviceが業務上のアクセス権で拒否する', () => {
         expect(tanaka.status, tanaka.text).toBe(200);
         const cases = tanaka.body.toolCalls.filter((c) => c.name === 'get_case');
         expect(cases.length).toBeGreaterThan(0);

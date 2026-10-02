@@ -135,8 +135,8 @@ describe('FR-7(d): 監査担当は、リクエストごとに各ホップの記�
   }, 21 * 60_000);
 });
 
-describe('FR-7(d): 監査の権限は、業務的なアクセス権で分かれる', () => {
-  it('支店長は監査できない（業務的なアクセス権で拒否）', async () => {
+describe('FR-7(d): 監査の権限は、業務上のアクセス権で分かれる', () => {
+  it('支店長は監査できない（業務上のアクセス権で拒否）', async () => {
     const list = await browserGet('/api/audit/requests', manager);
     expect(list.status).toBe(403);
     expect(list.body).toMatchObject({ purpose: 'audit', reason: 'no entitlement' });

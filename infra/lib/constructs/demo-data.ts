@@ -34,7 +34,7 @@ export const CASES = [
   },
 ];
 
-// 人事データと権限マスタ（属性サービスが読む）。業務的なアクセス権の根拠で、トークンには入れない
+// 人事データと権限マスタ（属性サービスが読む）。業務上のアクセス権の根拠で、トークンには入れない
 export const STAFF = [
   { userId: 'yamada', branch: 'tokyo', title: '支店長' },
   { userId: 'tanaka', branch: 'osaka', title: '担当者' },

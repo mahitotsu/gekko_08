@@ -34,12 +34,12 @@ export interface DelegatedScope {
   purposes?: string[];
 }
 
-/** 他のホップを呼ぶ側。bffも、目的用のroleをchain用roleとして同じ形で扱う */
+/** 他のホップを呼ぶ側。bffも、目的を刻むroleをchain用roleとして同じ形で扱う */
 export interface HopCaller {
   readonly hopName: string;
   readonly execRole: iam.IRole;
   readonly fn: lambda.IFunction;
-  /** 次のホップ宛てのJWTを作るセッションのrole（bffでは目的用のrole） */
+  /** 次のホップ宛てのJWTを作るセッションのrole（bffでは目的を刻むrole） */
   readonly chainRole: iam.Role;
   addTarget(name: string, target: HopTarget): void;
 }

@@ -207,7 +207,7 @@ async function logout(event: LambdaFunctionURLEvent): Promise<LambdaFunctionURLR
 /**
  * ログイン中のユーザーの代理で、リクエストの目的を刻んだセッションを作り、最初のホップを呼ぶ。STSの認証情報はどこにも保存しない
  * 1. IDトークンでfederated roleのセッションを得る（SourceIdentity＝ユーザー識別子）
- * 2. 目的用のroleへchainし、目的とリクエストIDをtransitive session tagとして刻む。以降のホップは目的もリクエストIDも変えられない（FR-6）
+ * 2. 目的を刻むroleへchainし、目的とリクエストIDをtransitive session tagとして刻む。以降のホップは目的もリクエストIDも変えられない（FR-6）
  */
 async function withChain<T>(s: Session, requestId: string, purpose: string, timings: Timings, f: (call: Call) => Promise<T>): Promise<T> {
   const { config } = await settings();

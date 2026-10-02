@@ -8,7 +8,7 @@ import { PURPOSE_TAG, REQUEST_ID_TAG } from '../lib/constructs/hop';
 import { atoms, canonical, diffAtoms, roleStatements, type Json } from './policy';
 
 /**
- * bffの目的用のroleの信頼ポリシーの回帰テスト（設計書§5）。刻める目的の値と、セッション名をリクエストIDのtagに縛る条件を確かめる。
+ * bffの目的を刻むroleの信頼ポリシーの回帰テスト（設計書§5）。刻める目的の値と、セッション名をリクエストIDのtagに縛る条件を確かめる。
  * 後半では、条件をわざと壊したテンプレートを見逃さないことを確かめる
  */
 
@@ -18,7 +18,7 @@ function buildFixture() {
   // バンドルを飛ばす（テンプレートだけを見る）
   const app = new cdk.App({ context: { 'aws:cdk:bundling-stacks': [] } });
   const stack = new cdk.Stack(app, 'PurposeRoleTest', { env: { account: '111111111111', region: 'ap-northeast-1' } });
-  // 目的用のroleの配線が使うのはfederated roleだけ。Cognitoは作らない
+  // 目的を刻むroleの配線が使うのはfederated roleだけ。Cognitoは作らない
   const federatedRole = new iam.Role(stack, 'Federated', { assumedBy: new iam.AccountRootPrincipal() });
   const bff = new Bff(stack, 'Bff');
   bff.connect({ federatedRole } as unknown as AuthFoundation, PURPOSES);
@@ -32,7 +32,7 @@ type Fixture = ReturnType<typeof buildFixture>;
 const fixture = buildFixture();
 const r = (f: Fixture, v: unknown): Json => f.stack.resolve(v);
 
-/** 目的用のroleの信頼：federated roleだけを、刻むリクエストIDと同じセッション名でだけ信頼し、刻めるのは目的とリクエストIDのtagだけ */
+/** 目的を刻むroleの信頼：federated roleだけを、刻むリクエストIDと同じセッション名でだけ信頼し、刻めるのは目的とリクエストIDのtagだけ */
 function checkTrust(f: Fixture): string[] {
   const doc = f.template.Resources[f.purposeRoleId].Properties.AssumeRolePolicyDocument;
   const principal = { AWS: r(f, f.federatedRole.roleArn) };
@@ -53,7 +53,7 @@ function checkTrust(f: Fixture): string[] {
   return diffAtoms('purpose role trust', atoms(doc.Statement), expected);
 }
 
-/** federated roleは、目的用のroleへのchainだけを持つ */
+/** federated roleは、目的を刻むroleへのchainだけを持つ */
 function checkFederated(f: Fixture): string[] {
   const resource = r(f, f.purposeRole.roleArn);
   const expected = atoms([{ Effect: 'Allow', Action: ['sts:AssumeRole', 'sts:TagSession', 'sts:SetSourceIdentity'], Resource: resource }]);
@@ -62,12 +62,12 @@ function checkFederated(f: Fixture): string[] {
 
 const checks: Record<string, (f: Fixture) => string[]> = { trust: checkTrust, federated: checkFederated };
 
-describe('目的用のroleのテンプレート', () => {
+describe('目的を刻むroleのテンプレート', () => {
   it('信頼：federated roleだけを、リクエストIDのtagと同じセッション名でだけ信頼し、tagのキーは目的とリクエストID、目的の値は一覧だけ', () => {
     expect(checks.trust(fixture)).toEqual([]);
   });
 
-  it('federated roleは、目的用のroleへのchainだけを持つ', () => {
+  it('federated roleは、目的を刻むroleへのchainだけを持つ', () => {
     expect(checks.federated(fixture)).toEqual([]);
   });
 });

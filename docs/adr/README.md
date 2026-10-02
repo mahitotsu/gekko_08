@@ -12,7 +12,7 @@
 | [BFFの公開とセッション](20260930093744-bff-hosting-and-session.md) | CloudFront経由のFunction URL（OAC）、セッションはDynamoDB | 有効 |
 | [TypeScript](20260930093745-implementation-language-typescript.md) | LambdaはTypeScript、AWS SDKを関数に同梱 | 有効 |
 | [エージェントとMCPもホップ](20260930093746-agent-and-mcp-on-lambda.md) | エージェントとMCPサーバーもLambdaのホップ。MCPはOAuthではなく他のホップと同じ入口で守る | 決定1を[Claude Agent SDK](20261001040729-fraud-agent-on-claude-agent-sdk.md)で置き換え |
-| [委任の範囲と業務的なアクセス権](20260930150529-delegation-scope-and-entitlements.md) | リクエストの目的とホップごとのscopeはSTSとIAMに強制させ、業務的なアクセス権は属性サービスから得る | 一部を[委任の範囲の定義](20261001130745-delegation-definitions.md)で置き換え（scopeの宣言、目的の使い方） |
+| [委任の範囲と業務上のアクセス権](20260930150529-delegation-scope-and-entitlements.md) | リクエストの目的とホップごとのscopeはSTSとIAMに強制させ、業務上のアクセス権は属性サービスから得る | 一部を[委任の範囲の定義](20261001130745-delegation-definitions.md)で置き換え（scopeの宣言、目的の使い方） |
 | [トレースの収集先](20261001020115-telemetry-destination-cloudwatch.md) | トレースはOTLPでCloudWatch（Transaction Search）へ。メトリクスは出さず、ログから集計する | 有効（同日に改訂） |
 | [エージェントはClaude Agent SDK](20261001040729-fraud-agent-on-claude-agent-sdk.md) | Claude Codeを子プロセスで動かし、MCPは関数の中の中継から共通部品で呼ぶ | 有効 |
 | [トレースの送り方](20261001053646-telemetry-direct-export.md) | 関数の中のSDKが署名してX-RayのOTLPの受け口に直接送り、応答の前に送り切る | 有効（同日に改訂） |

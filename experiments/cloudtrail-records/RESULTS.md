@@ -17,8 +17,8 @@
 
 | イベント | 呼んだ主体（`userIdentity`） | `requestParameters` | `responseElements` |
 |---|---|---|---|
-| `GetWebIdentityToken` | `arn`＝chain用role（bffでは目的用のrole）のセッション（セッション名＝リクエストID）。`sessionContext.sessionIssuer.arn`＝そのroleのARN。`sessionContext.sourceIdentity`＝ユーザー | `audience`（配列。例：`Gekko08App:entitlement-service`）、`durationSeconds`、`signingAlgorithm`、`tags`（`[{key: "scope", value: …}]`） | `webIdentityTokenId`、`expiration` |
-| `AssumeRole`（bffが目的を刻む） | federated roleのセッション。`sessionContext.sourceIdentity`＝ユーザー | `roleArn`＝目的用のrole、`roleSessionName`＝リクエストID、`tags`（`[{key: "purpose", value: …}]`）、`transitiveTagKeys`（`["purpose"]`） | `credentials`（`accessKeyId`、`sessionToken`、`expiration`）、`assumedRoleUser`、`sourceIdentity` |
+| `GetWebIdentityToken` | `arn`＝chain用role（bffでは目的を刻むrole）のセッション（セッション名＝リクエストID）。`sessionContext.sessionIssuer.arn`＝そのroleのARN。`sessionContext.sourceIdentity`＝ユーザー | `audience`（配列。例：`Gekko08App:entitlement-service`）、`durationSeconds`、`signingAlgorithm`、`tags`（`[{key: "scope", value: …}]`） | `webIdentityTokenId`、`expiration` |
+| `AssumeRole`（bffが目的を刻む） | federated roleのセッション。`sessionContext.sourceIdentity`＝ユーザー | `roleArn`＝目的を刻むrole、`roleSessionName`＝リクエストID、`tags`（`[{key: "purpose", value: …}]`）、`transitiveTagKeys`（`["purpose"]`） | `credentials`（`accessKeyId`、`sessionToken`、`expiration`）、`assumedRoleUser`、`sourceIdentity` |
 
 - 手元で発行したJWTのクレームは`aud`、`exp`、`https://sts.amazonaws.com/`、`iat`、`iss`、`jti`、`sub`だった。
 - 手元で発行したJWTのイベントは、発行から数分で`lookup-events`で引けた（30秒ごとに引き直した）。

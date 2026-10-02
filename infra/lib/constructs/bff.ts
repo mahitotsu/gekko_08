@@ -56,7 +56,7 @@ export class Bff extends Construct {
   }
 
   /**
-   * 目的用のroleを作り、federated roleとつなぐ。bffはリクエストごとにfederated roleのセッションからこのroleへchainし、
+   * 目的を刻むroleを作り、federated roleとつなぐ。bffはリクエストごとにfederated roleのセッションからこのroleへchainし、
    * リクエストの目的とリクエストIDをtransitive session tagとして刻む。刻める目的はpurposesに限る。
    * セッション名はリクエストIDのtagと同じ値に限り、以降のchainもその値に縛る（FR-6）
    */
@@ -82,7 +82,7 @@ export class Bff extends Construct {
     }));
   }
 
-  /** 目的用のroleを最初のホップ宛てのJWTを作るroleとして、bffをホップの呼び出し元として扱う */
+  /** 目的を刻むroleを最初のホップ宛てのJWTを作るroleとして、bffをホップの呼び出し元として扱う */
   asCaller(): HopCaller {
     if (!this.purposeRole) throw new Error('call connect() first');
     return {

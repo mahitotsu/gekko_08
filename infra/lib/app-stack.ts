@@ -148,7 +148,7 @@ export class Gekko08AppStack extends cdk.Stack {
     auditService.fn.addToRolePolicy(new iam.PolicyStatement({ actions: ['logs:StartQuery'], resources: Object.values(logGroups).map((g) => g.logGroupArn) }));
     auditService.fn.addEnvironment('AUDIT_LOG_GROUPS', this.toJsonString(Object.fromEntries(Object.entries(logGroups).map(([k, g]) => [k, g.logGroupName]))));
     const principals: [iam.IRole | undefined, string][] = [
-      [auth.federatedRole, 'bff（federated role）'], [bff.asCaller().chainRole, 'bff（目的用のrole）'], [bff.fn.role, 'bff（実行role）'],
+      [auth.federatedRole, 'bff（federated role）'], [bff.asCaller().chainRole, 'bff（目的を刻むrole）'], [bff.fn.role, 'bff（実行role）'],
       ...hops.flatMap((h): [iam.IRole | undefined, string][] => [[h.execRole, `${h.hopName}（実行role）`], [h.chainRole, `${h.hopName}（chain用role）`]]),
     ];
     auditService.fn.addEnvironment('AUDIT_PRINCIPALS', this.toJsonString(Object.fromEntries(principals.filter(([r]) => r).map(([r, label]) => [r!.roleName, label]))));

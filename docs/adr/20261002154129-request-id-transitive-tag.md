@@ -19,9 +19,9 @@ CloudTrailのイベントをリクエストIDで引き、ホップの記録と�
 **bffは、リクエストIDをリクエストの目的と同じくtransitive session tag（キー`requestId`）として刻む。IAMは、各chainの`RoleSessionName`を、
 刻まれたリクエストIDと同じ値に限る。受信側は、JWTの`principal_tags.requestId`とヘッダーのリクエストIDを照合する。**
 
-1. **刻む**：bffは、目的用のroleへのchainで、`Tags`に`purpose`と`requestId`を、`TransitiveTagKeys`に両方を指定する。`RoleSessionName`もリクエストIDにする。
+1. **刻む**：bffは、目的を刻むroleへのchainで、`Tags`に`purpose`と`requestId`を、`TransitiveTagKeys`に両方を指定する。`RoleSessionName`もリクエストIDにする。
 2. **IAMで縛る**：
-   - 目的用のroleの信頼ポリシー：`sts:AssumeRole`に`"StringEquals": { "sts:RoleSessionName": "${aws:RequestTag/requestId}" }`を付ける。
+   - 目的を刻むroleの信頼ポリシー：`sts:AssumeRole`に`"StringEquals": { "sts:RoleSessionName": "${aws:RequestTag/requestId}" }`を付ける。
      刻むtagとセッション名が同じ値でなければ引き受けられない。`sts:TagSession`で許すキーに`requestId`を加える。
    - 各chain用roleの信頼ポリシー：呼び出し元からの`sts:AssumeRole`に`"StringEquals": { "sts:RoleSessionName": "${aws:PrincipalTag/requestId}" }`を付ける。
      `sts:SetSourceIdentity`は別の文にし、`sts:TagSession`で許すキーに`requestId`を加える（transitive tagは引き継ぐだけで、上書きはSTSが拒否する）。

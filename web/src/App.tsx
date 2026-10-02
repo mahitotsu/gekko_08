@@ -210,7 +210,7 @@ function Layers() {
         <div className="layer-by">リクエストの目的とscope。IAMが強制する</div>
       </div>
       <div className="layer l-entitlement">
-        <div className="layer-name">業務的なアクセス権</div>
+        <div className="layer-name">業務上のアクセス権</div>
         <div className="layer-q">このユーザーは、このデータを扱ってよいか</div>
         <div className="layer-by">属性サービス（人事データと権限マスタ）</div>
       </div>

@@ -6,7 +6,7 @@ const db = DynamoDBDocumentClient.from(traceAwsClient(new DynamoDBClient({})));
 const STAFF = process.env.STAFF_TABLE!;
 const TITLE_PERMISSIONS = process.env.TITLE_PERMISSIONS_TABLE!;
 
-// 属性サービス。人事データと権限マスタから、JWTのsubject本人の業務的なアクセス権だけを返す。
+// 属性サービス。人事データと権限マスタから、JWTのsubject本人の業務上のアクセス権だけを返す。
 // 照会する相手を引数に取らないので、誘導されたエージェントや侵害されたホップが他人のアクセス権を問い合わせることはできない。
 // 判定のたびに読むので、人事データや権限マスタの変更は次のリクエストから効く（FR-8）
 export const handler = createHopHandler(async (_body, { subject, scope }) => {

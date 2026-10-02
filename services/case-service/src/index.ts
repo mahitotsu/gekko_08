@@ -14,13 +14,13 @@ const REQUIRED_SCOPE: Record<string, string> = {
 
 interface Entitlements { branch: string; title: string; permissions: string[] }
 
-// 業務的なアクセス権は属性サービスから得る。得られなければ拒否する（fail closed）
+// 業務上のアクセス権は属性サービスから得る。得られなければ拒否する（fail closed）
 async function entitlementsOf(call: Call): Promise<Entitlements | undefined> {
   const r = await call('entitlement-service', {});
   return r.status === 200 ? (r.body as Entitlements) : undefined;
 }
 
-// 凍結の見直しの案件。委任の範囲が操作を許し、かつ業務的なアクセス権が案件を許すときだけ行う
+// 凍結の見直しの案件。委任の範囲が操作を許し、かつ業務上のアクセス権が案件を許すときだけ行う
 export const handler = createHopHandler(async (body, { scope, call }) => {
   const action = typeof body.action === 'string' && Object.hasOwn(REQUIRED_SCOPE, body.action) ? body.action : undefined;
   if (!action || REQUIRED_SCOPE[action] !== scope) {

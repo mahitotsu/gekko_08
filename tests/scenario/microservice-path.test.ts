@@ -15,7 +15,7 @@ beforeAll(async () => {
   [manager, officer] = await Promise.all([loginSession('tokyoManager'), loginSession('osakaOfficer')]);
 });
 
-describe('FR-1, FR-2: 委任の範囲と業務的なアクセス権の両方で判定する', () => {
+describe('FR-1, FR-2: 委任の範囲と業務上のアクセス権の両方で判定する', () => {
   it('支店長（tokyo）は自分の支店の案件を開ける。口座の凍結の状態と理由はaccount-serviceから届く', async () => {
     const r = await browserGet(`/api/cases/${T.tokyoCase}/summary`, manager);
     expect(r.status).toBe(200);
@@ -29,7 +29,7 @@ describe('FR-1, FR-2: 委任の範囲と業務的なアクセス権の両方で�
     expect(r.body.account).toMatchObject({ accountId: T.osakaAccount, branch: 'osaka' });
   });
 
-  it('他の支店の案件は、case-serviceが業務的なアクセス権で拒否する', async () => {
+  it('他の支店の案件は、case-serviceが業務上のアクセス権で拒否する', async () => {
     expect((await browserGet(`/api/cases/${T.tokyoCase}/summary`, officer)).status).toBe(403);
     expect((await browserGet(`/api/cases/${T.osakaCase}/summary`, manager)).status).toBe(403);
   });
@@ -43,7 +43,7 @@ describe('FR-1, FR-2: 委任の範囲と業務的なアクセス権の両方で�
 });
 
 describe('FR-6: リクエストIDは入口で確定し、途中のホップは変えられない', () => {
-  it('目的用のroleは、刻んだリクエストIDと違うセッション名では引き受けられない', async () => {
+  it('目的を刻むroleは、刻んだリクエストIDと違うセッション名では引き受けられない', async () => {
     await expect(purposeSession('tokyoManager', 'case-summary', [], { sessionName: 'other-request' }))
       .rejects.toThrow(/not authorized to perform: sts:AssumeRole/);
   });
@@ -97,7 +97,7 @@ describe('FR-3: ユーザーとリクエストの目的は入口で確定し、�
     await expect(mintJwt(s, o.AccountServiceAudience, 'account:unfreeze')).resolves.toBeTypeOf('string');
   });
 
-  it('bffの目的用のroleでも、解除の依頼のscopeは凍結を解除するリクエストでだけ発行できる', async () => {
+  it('bffの目的を刻むroleでも、解除の依頼のscopeは凍結を解除するリクエストでだけ発行できる', async () => {
     await expect(mintJwt(await purposeSession('tokyoManager', 'case-summary'), o.CaseServiceAudience, 'case:unfreeze'))
       .rejects.toThrow(/not authorized to perform: sts:TagGetWebIdentityToken/);
     await expect(mintJwt(await purposeSession('tokyoManager', 'account-unfreeze'), o.CaseServiceAudience, 'case:unfreeze')).resolves.toBeTypeOf('string');

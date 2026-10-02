@@ -5,7 +5,7 @@ import { createHopHandler, traceAwsClient, type Call } from '@gekko08/authz-cont
 const db = DynamoDBDocumentClient.from(traceAwsClient(new DynamoDBClient({})));
 const TABLE = process.env.ACCOUNTS_TABLE!;
 
-// 操作ごとに必要なscope（委任の範囲）と業務的なアクセス権。目的との組み合わせはIAMと共通部品が守るので、ここではscopeだけを見る
+// 操作ごとに必要なscope（委任の範囲）と業務上のアクセス権。目的との組み合わせはIAMと共通部品が守るので、ここではscopeだけを見る
 const OPERATIONS: Record<string, { scope: string; permission: string }> = {
   get: { scope: 'account:read', permission: 'account:view' },
   unfreeze: { scope: 'account:unfreeze', permission: 'account:unfreeze' },
@@ -13,13 +13,13 @@ const OPERATIONS: Record<string, { scope: string; permission: string }> = {
 
 interface Entitlements { branch: string; title: string; permissions: string[] }
 
-// 業務的なアクセス権は属性サービスから得る。得られなければ拒否する（fail closed）
+// 業務上のアクセス権は属性サービスから得る。得られなければ拒否する（fail closed）
 async function entitlementsOf(call: Call): Promise<Entitlements | undefined> {
   const r = await call('entitlement-service', {});
   return r.status === 200 ? (r.body as Entitlements) : undefined;
 }
 
-// 口座の参照と凍結の解除。委任の範囲が操作を許し、かつ業務的なアクセス権が口座を許すときだけ行う
+// 口座の参照と凍結の解除。委任の範囲が操作を許し、かつ業務上のアクセス権が口座を許すときだけ行う
 export const handler = createHopHandler(async (body, { subject, scope, requestId, call }) => {
   const action = typeof body.action === 'string' ? body.action : 'get';
   const op = Object.hasOwn(OPERATIONS, action) ? OPERATIONS[action] : undefined;

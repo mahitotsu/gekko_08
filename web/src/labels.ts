@@ -12,7 +12,7 @@ export type Layer = 'delegation' | 'entitlement' | 'state';
 
 export const LAYER_LABELS: Record<Layer, string> = {
   delegation: '委任の範囲',
-  entitlement: '業務的なアクセス権',
+  entitlement: '業務上のアクセス権',
   state: '業務の状態',
 };
 

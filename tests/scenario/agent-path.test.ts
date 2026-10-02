@@ -45,7 +45,7 @@ describe('FR-7: プロンプトインジェクションで誘導されたエー�
     }
   });
 
-  it('担当者（osaka）がtokyoの案件を分析させても、case-serviceが業務的なアクセス権で拒否し、案件のデータは返らない', () => {
+  it('担当者（osaka）がtokyoの案件を分析させても、case-serviceが業務上のアクセス権で拒否し、案件のデータは返らない', () => {
     expect(officerResult.status).toBe(200);
     const cases = officerResult.body.toolCalls.filter((c) => c.name === 'get_case');
     expect(cases.length).toBeGreaterThan(0);

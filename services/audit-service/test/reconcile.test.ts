@@ -10,7 +10,7 @@ const OTHER = '22222222-2222-4222-8222-222222222222';
 const dir: Directory = {
   logGroups: { bff: 'lg-bff', 'case-service': 'lg-case', 'account-service': 'lg-account', 'entitlement-service': 'lg-ent' },
   principals: {
-    'purpose-role': 'bff（目的用のrole）',
+    'purpose-role': 'bff（目的を刻むrole）',
     'case-chain': 'case-service（chain用role）',
     'account-chain': 'account-service（chain用role）',
   },
@@ -57,14 +57,14 @@ const rows = (): Row[] => [
 describe('toAwsRecord', () => {
   it('GetWebIdentityTokenから、宛先（ホップ名）、scope、ユーザー、jti、イベントIDを取り出す', () => {
     expect(records()[1]).toEqual({
-      time: '2026-10-03T01:00:00.1Z', event: 'GetWebIdentityToken', eventId: 'ev-1', caller: 'bff（目的用のrole）', sourceIdentity: 'yamada',
+      time: '2026-10-03T01:00:00.1Z', event: 'GetWebIdentityToken', eventId: 'ev-1', caller: 'bff（目的を刻むrole）', sourceIdentity: 'yamada',
       audience: 'case-service', scope: 'case:summary', tokenId: 'jti-1', issuerRole: 'purpose-role',
     });
   });
 
   it('SR-3: AssumeRoleの応答の認証情報もARNも取り出さない', () => {
     const r = toAwsRecord(stampEvent, dir);
-    expect(r).toMatchObject({ event: 'AssumeRole', role: 'bff（目的用のrole）', purpose: 'case-summary', sourceIdentity: 'yamada', eventId: 'ev-stamp' });
+    expect(r).toMatchObject({ event: 'AssumeRole', role: 'bff（目的を刻むrole）', purpose: 'case-summary', sourceIdentity: 'yamada', eventId: 'ev-stamp' });
     const text = JSON.stringify(r);
     expect(text).not.toMatch(/ASIA|IQoJ|arn:aws:/);
   });
