@@ -3,30 +3,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>gekko08 demo</title>
-  <link rel="stylesheet" href="style.css">
+  <title>口座の凍結解除デモ — gekko08</title>
 </head>
 <body>
-  <main>
-    <h1>口座の凍結解除デモ</h1>
-    <section id="signed-out" hidden>
-      <p>ログインしていません。</p>
-      <a class="button" href="/api/login">ログイン</a>
-    </section>
-    <section id="signed-in" hidden>
-      <p><span id="who"></span> <button id="logout" type="button">ログアウト</button></p>
-      <form id="summary-form">
-        <label>案件ID <input id="case-id" value="C-1001" required pattern="[\w-]{1,64}"></label>
-        <button type="submit">案件を開く</button>
-        <button id="unfreeze" type="button">凍結を解除</button>
-      </form>
-      <form id="agent-form">
-        <label>案件ID <input id="agent-case-id" value="C-1001" required pattern="[\w-]{1,64}"></label>
-        <button type="submit">エージェントに分析させる</button>
-      </form>
-      <pre id="result"></pre>
-    </section>
-  </main>
-  <script src="app.js"></script>
+  <div id="root"></div>
+  <script type="module" src="/src/main.tsx"></script>
 </body>
 </html>

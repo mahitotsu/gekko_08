@@ -114,6 +114,14 @@ IDトークンには、Pre Token Generation V2トリガーが`https://aws.amazon
 
 フロントエンドは、POSTの本文のSHA-256を`x-amz-content-sha256`ヘッダーに付ける（CloudFrontのOACの要件）。
 
+最初のホップを呼ぶ経路（`/api/me`を除く）の応答は、ホップの応答の本文に、bffが付けた`requestId`と`purpose`（刻んだ取引の目的）を加えたものである。
+`purpose`は画面に見せるためのもので、ブラウザから目的は受け取らない。fraud-agentの応答の`toolCalls`は、各要素に`name`、`input`、`status`と、
+拒否されたときは呼び出し先のホップが返した`reason`を持つ。
+
+画面（`web/`）は、ReactとViteで作る静的なSPAである（[画面のADR](../adr/{ts}-demo-ui-react-static.md)）。操作ごとに、取引の目的、リクエストID、結果、
+拒否したときはその層を表示する。理由から層への対応（`scope does not allow the action`は委任の範囲、`no entitlement`と`branch mismatch`は業務的なアクセス権）は
+表示にだけ使い、画面はユーザーに応じて操作を隠さない。
+
 ## 4. ホップ間の呼び出し
 
 呼び出し元は、1回の呼び出しで次のものを送る。
@@ -454,14 +462,14 @@ OpenTelemetryで出し、CloudWatchのTransaction Searchに集める（[収集�
 
 ## 9. CDKの構成
 
-npmのワークスペース（`infra`、`packages/*`、`services/*`、`tests`）と、静的なフロントエンドで次のように分ける。
+npmのワークスペース（`infra`、`packages/*`、`services/*`、`web`、`tests`）で次のように分ける。
 
 | ディレクトリ | 内容 |
 |---|---|
 | `infra/` | CDKアプリ（単一のスタック`Gekko08App`。リージョンはap-northeast-1に固定する）と、`Hop`のテンプレートの単体テスト（`infra/test/`。§10） |
 | `packages/authz-context/` | 受信側・送信側の共通部品、MCPの部品、トレース（§6、§7） |
 | `services/<名前>/` | 各Lambdaのハンドラー（bff、case-service、account-service、entitlement-service、fraud-agent、fraud-mcp、pretoken）と、委任の範囲の定義（`authz.ts`。§4） |
-| `web/` | 静的なフロントエンド（ワークスペースではない） |
+| `web/` | デモの画面（ReactとViteの静的なSPA。§3） |
 | `tests/` | シナリオテスト（§10） |
 | `experiments/` | 実機の検証（検証記録とその構成。本体からは参照しない） |
 
@@ -478,7 +486,7 @@ esbuildでESMの1ファイルにまとめ、AWS SDKも同梱し、ソースマ�
 | `connectHops(purposes, definitions, hops)` | 委任の範囲の定義（§4）を突き合わせ、整合しなければ合成を失敗させる。整合していれば、利用側と提供側の組ごとに`Hop#allowCaller`を呼び、提供側の受信時の照合の設定を渡す |
 | `Hop#allowCaller(caller, scopes)` | 呼び出し元と呼び出し先をつなぐ。入口のresource policyへの追加、chain用roleの信頼とchain権限、JWTの発行の権限（宛先、scope、目的の制限）、`sub`の対応表、呼び出し元の設定（URL、aud、付けられるscope） |
 | `Bff` | bffの`NodejsFunction`とFunction URL、目的用のrole、セッションのテーブル、SSMのパラメータ（設定とシークレット）。`Bff#asCaller`で目的用のroleをchain用roleとして渡す |
-| `WebFrontend` | CloudFront、S3（静的なフロントエンド）、bffのFunction URLへのOAC |
+| `WebFrontend` | CloudFront、S3（静的なフロントエンド）、bffのFunction URLへのOAC。合成のときに`web/`をビルドして（`vite build`）、出力をS3に置く |
 | `DemoData` | DynamoDBのテーブル（案件、口座、人事データ、権限マスタ）とデモ用データ |
 | `OutboundFederationCheck` | デプロイ時の前提条件の確認と、JWTの発行者URLの取得（§11） |
 

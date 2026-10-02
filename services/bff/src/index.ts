@@ -311,7 +311,8 @@ async function handle(event: LambdaFunctionURLEvent, span: Span): Promise<Lambda
       const e = r.body as { branch?: string; title?: string };
       return r.status === 200 ? json(200, { username: s.username, branch: e.branch, title: e.title }) : json(r.status, { username: s.username });
     }
-    return json(r.status, { requestId, ...(typeof r.body === 'object' ? r.body : { detail: r.body }) });
+    // 画面に、bffが刻んだ取引の目的を見せる（表示用。ブラウザから目的は受け取らない）
+    return json(r.status, { requestId, purpose: route.purpose, ...(typeof r.body === 'object' ? r.body : { detail: r.body }) });
   } catch (e) {
     log('error', 'handler failed', { path, error: (e as Error).name, detail: (e as Error).message });
     return json(500, { error: 'internal error' });

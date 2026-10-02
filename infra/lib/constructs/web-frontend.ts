@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import * as path from 'node:path';
 import * as cdk from 'aws-cdk-lib';
 import * as cloudfront from 'aws-cdk-lib/aws-cloudfront';
@@ -53,7 +54,19 @@ export class WebFrontend extends Construct {
     });
 
     new s3deploy.BucketDeployment(this, 'Deploy', {
-      sources: [s3deploy.Source.asset(path.join(REPO_ROOT, 'web'))],
+      sources: [s3deploy.Source.asset(path.join(REPO_ROOT, 'web'), {
+        exclude: ['node_modules', 'dist'],
+        // 画面（React）は合成のときに開発機でビルドし、静的なファイルだけを置く。Dockerは使わない
+        bundling: {
+          image: cdk.DockerImage.fromRegistry('public.ecr.aws/docker/library/node:24'),
+          local: {
+            tryBundle(outputDir) {
+              execFileSync('npm', ['run', 'build', '-w', '@gekko08/web', '--', '--outDir', outputDir], { cwd: REPO_ROOT, stdio: 'inherit' });
+              return true;
+            },
+          },
+        },
+      })],
       destinationBucket: bucket,
       distribution: this.distribution,
     });

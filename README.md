@@ -29,7 +29,7 @@ AWS上のマイクロサービスで、Authorization Context（誰の権限で�
 | [infra/](infra/) | CDKアプリ（単一のスタック`Gekko08App`）と、`Hop`のテンプレートと委任の範囲の定義の単体テスト |
 | [packages/authz-context/](packages/authz-context/) | 各ホップが使う共通部品。JWTの検証、chain、JWTの発行、署名付きの呼び出し、エージェントからMCPサーバーを呼ぶ部品、トレースと構造化ログ |
 | [services/](services/) | 各Lambdaのハンドラーと、サービスごとの委任の範囲の定義（`authz.ts`） |
-| [web/](web/) | デモの画面 |
+| [web/](web/) | デモの画面（ReactとViteの静的なSPA。合成のときにビルドする） |
 | [tests/](tests/) | 要件のIDにひも付けたシナリオテスト |
 
 ## 守れるもの・守れないもの
@@ -114,7 +114,8 @@ aws cloudformation describe-stacks --stack-name Gekko08App --query "Stacks[0].Ou
 ### 試す
 
 題材は、疑わしい取引で凍結された口座の解除である。デモの口座（A-101はtokyo、A-201とA-999はosaka）は、デプロイの時点で凍結されている。
-画面のURL（スタックの出力`WebUrl`）をブラウザで開き、yamadaかtanakaでログインする。
+画面のURL（スタックの出力`WebUrl`）をブラウザで開き、yamadaかtanakaでログインする。画面には、操作ごとに、bffが刻んだ取引の目的、リクエストID、結果と、
+拒否されたときはその層（委任の範囲か、業務的なアクセス権か）が出る。
 
 | 操作 | 取引の目的 | yamada（tokyo・支店長）の結果 | tanaka（osaka・担当者）の結果 |
 |---|---|---|---|
@@ -131,8 +132,8 @@ yamadaがエージェントに分析させると、応答の`toolCalls`で次の
 "toolCalls": [
   { "name": "get_case", "input": { "caseId": "C-1001" }, "status": 200 },
   { "name": "get_account", "input": { "accountId": "A-101" }, "status": 200 },
-  { "name": "unfreeze_account", "input": { "accountId": "A-101" }, "status": 403 },
-  { "name": "unfreeze_account", "input": { "accountId": "A-999" }, "status": 403 }
+  { "name": "unfreeze_account", "input": { "accountId": "A-101" }, "status": 403, "reason": "scope does not allow the action" },
+  { "name": "unfreeze_account", "input": { "accountId": "A-999" }, "status": 403, "reason": "scope does not allow the action" }
 ]
 ```
 

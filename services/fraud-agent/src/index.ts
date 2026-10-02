@@ -25,6 +25,8 @@ interface ToolCallRecord {
   input: unknown;
   /** 呼び出し先のホップが返したHTTPステータス */
   status: number;
+  /** 呼び出し先のホップが拒否したときの理由（ホップのコードが決める固定の文字列） */
+  reason?: string;
 }
 
 // モデルの呼び出しだけを許すroleの認証情報。実行環境ごとに使い回し、期限の10分前に引き受け直す
@@ -90,8 +92,12 @@ function recordToolCall(toolCalls: ToolCallRecord[]) {
   return ({ request, response }: McpExchange) => {
     const req = request as { method?: string; params?: { name?: string; arguments?: unknown } };
     if (req.method !== 'tools/call' || !response) return;
-    const result = (response as { result?: { structuredContent?: { status?: number }; isError?: boolean } }).result;
-    toolCalls.push({ name: req.params?.name ?? '', input: req.params?.arguments, status: result?.structuredContent?.status ?? (result?.isError ? 500 : 200) });
+    const result = (response as { result?: { structuredContent?: { status?: number; body?: { reason?: unknown } }; isError?: boolean } }).result;
+    const reason = result?.structuredContent?.body?.reason;
+    toolCalls.push({
+      name: req.params?.name ?? '', input: req.params?.arguments, status: result?.structuredContent?.status ?? (result?.isError ? 500 : 200),
+      ...(typeof reason === 'string' ? { reason } : {}),
+    });
   };
 }
 
