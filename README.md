@@ -9,7 +9,7 @@ AWS上のマイクロサービスで、Authorization Context（誰の権限で�
 | 層 | 問い | 担い手 |
 |---|---|---|
 | 身元 | 誰の代理か、どのサービスから来たか | SourceIdentity、入口のIAM、STSが署名したJWT |
-| 委任の範囲（OAuthのscopeに相当） | この取引で、この呼び出し元に何を許すか | 取引の目的（transitive session tag）とホップごとのscope（JWTのtag）。値はIAMが強制する |
+| 委任の範囲（OAuthのscopeに相当） | この取引で、この呼び出し元に何を許すか | ホップごとのscope（JWTのtag）がその1ホップで渡す操作を、取引の目的（transitive session tag）が取引全体で得られる影響の大きい操作の上限を決める。値はIAMが強制する |
 | 業務的なアクセス権 | このユーザーは、このデータを扱ってよいか | 属性サービス（人事データと権限マスタ） |
 
 仕組みと当てはめ方は[設計ガイド](docs/guide.md)に、背景と設計の詳細は[docs/](docs/README.md)にある。

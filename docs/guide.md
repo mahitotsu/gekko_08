@@ -47,7 +47,7 @@ AWSが保証した値ではないので、受信側の判定は変わらない�
 取引の開始   bff ─AssumeRole（purpose＝agent-analysisをtransitive tagで刻む）─> 目的用のroleのセッション
 ホップ間     呼び出し元                                                           受信側
              ① 受け取ったセッションで自分のchain用roleにchain（目的は引き継がれ、変えられない）
-             ② GetWebIdentityToken（aud＝受信側、Tags＝scope）。IAMが目的・宛先・scopeを限る
+             ② GetWebIdentityToken（aud＝受信側、Tags＝scope）。IAMが宛先とscopeを限り、影響の大きいscopeは目的でも限る
              ③ 自分の実行roleでSigV4署名して呼ぶ ──────────────────────────────> 入口のIAM：実行roleと関数を確かめる（actor）
                 x-authz-context: JWT                                             アプリ：JWTを検証する（subject、aud、目的、scope）
                 x-authz-session: chainのセッション（受信側がさらに先を呼ぶ場合）   業務のコード：属性サービスからアクセス権を得て判定
@@ -60,8 +60,8 @@ AWSが保証した値ではないので、受信側の判定は変わらない�
 | STSのSourceIdentity（JWTの`source_identity`） | subject：誰の代理か | トークンの`sub` |
 | 呼び出し元の実行role（SigV4の署名を入口のIAMが確かめる） | actor：どのサービスから来たか | クライアント認証、Token Exchangeの`act` |
 | JWTの`aud`（`GetWebIdentityToken`の宛先） | 受信側：自分宛てか | トークンの`aud` |
-| transitive session tag `purpose`（JWTの`principal_tags`） | 取引の目的：何のための取引か。入口で刻み、途中で変えられない | Transaction Tokensの`purp` |
-| JWTの`request_tags.scope` | scope：この呼び出し元に許す操作 | トークンの`scope` |
+| transitive session tag `purpose`（JWTの`principal_tags`） | 取引の目的：取引全体で得られる、影響の大きい操作の上限。入口で刻み、途中で変えられない。影響の大きいscopeは、許された目的の取引でだけ発行される。業務のコードは使わない | Transaction Tokensの`purp` |
+| JWTの`request_tags.scope` | scope：この1ホップで、この呼び出し元に渡す操作。業務のコードはこれで判定する | トークンの`scope` |
 | 属性サービス（人事データ、権限マスタ） | 今の業務的なアクセス権：このユーザーはこのデータを扱ってよいか | リソースサーバーが持つ権限のデータ（トークンには入れない） |
 
 用語：
@@ -74,7 +74,7 @@ AWSが保証した値ではないので、受信側の判定は変わらない�
 | 目的用のrole | bffが、federated roleのセッションからchainし、取引の目的をtransitive session tagとして刻むrole |
 | chain用role | 呼び出し先を持つホップごとのrole。受け取ったセッションからchainし、次のホップ宛てのJWTを作ることだけができる |
 | 受け渡すセッション | 呼び出し元が`x-authz-session`で渡すchainのセッション。漏れても、どのホップも呼べない |
-| 取引の目的（purpose） | 入口が経路ごとに決める、何のための取引か。途中で変えられない |
+| 取引の目的（purpose） | 入口が経路ごとに決める、何のための取引か。途中で変えられない。取引全体で得られる、影響の大きい操作の上限として使う |
 | scope | 呼び出し元と呼び出し先の組ごとに宣言する、呼び出し元に許す操作。JWTに付く |
 | 属性サービス | 本人の業務的なアクセス権（所属、役職ごとの権限）を返すホップ |
 
