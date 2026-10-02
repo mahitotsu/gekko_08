@@ -1,4 +1,11 @@
-# gekko08
+# gekko_08 — 「誰の権限で」を最後のホップまでAWS IAMに強制させる参照実装
+
+> **English summary.** A reference implementation that carries *on whose behalf* (the user) and *for what* (the purpose) through
+> every hop of a multi-hop call chain on AWS, with no authorization server and no sidecar — only Cognito, STS (role chaining with
+> transitive session tags, and `GetWebIdentityToken` from IAM outbound identity federation), IAM and Lambda. Each hop verifies who
+> the user is, which service called it, that the token is for itself, and what it may do; IAM, not application code, enforces the
+> delegated scope. Includes an AI agent (Claude Agent SDK) and an MCP server as hops, and an audit view that matches each hop's
+> log against CloudTrail. Documentation is in Japanese. Not for production use; no support.
 
 AWS上のマイクロサービスで、Authorization Context（誰の権限で処理するのか）とWorkload Identity（どのサービスが呼んでいるのか）を分け、
 多段呼び出しの奥まで届ける仕組みの参照実装。認可サーバーもサイドカーも置かず、Cognito・STS・IAM・Lambdaだけで、OAuth Token Exchangeと
@@ -6,6 +13,8 @@ AWS上のマイクロサービスで、Authorization Context（誰の権限で�
 委任の範囲は、実行時の交換ではなくデプロイ時の宣言で絞る（違いは[PRFAQ Q1](docs/prfaq/aws-authorization-context-propagation.md#q1-oauth-token-exchangeと何が違うのか)）。
 
 仕組みを確かめ、自分のシステムに当てはめるための参照実装である。本番での利用は想定しておらず、サポートやSLAもない。
+前作では、同じ問題をOAuth Token Exchangeで解き（[記事](https://zenn.dev/akring/articles/1a9f25fd6b04ab)）、AIエージェントへのプロンプトインジェクションを
+認可で止められることを確かめた（[記事](https://zenn.dev/akring/articles/1c25b8f471f92d)）。この参照実装は、それを認可サーバーなしで行う。
 
 認可の根拠は、身元（誰の代理か、どのサービスから来たか）、委任の範囲（このリクエストで何を許すか。IAMが強制する）、
 業務上のアクセス権（このユーザーはこのデータを扱ってよいか。属性サービスが答える）の3つの層に分け、すべてが許すときだけ処理する
