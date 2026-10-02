@@ -19,8 +19,11 @@
   },
   "devDependencies": {
     "@types/aws-lambda": "^8.10.160",
-    "@types/node": "^22.0.0",
+    "@types/node": "^24.0.0",
     "typescript": "~5.9.3",
     "vitest": "^4.0.0"
+  },
+  "engines": {
+    "node": ">=24"
   }
 }
