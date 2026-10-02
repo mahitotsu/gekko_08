@@ -51,11 +51,23 @@ export interface CallerOptions {
 export interface CallOptions {
   /** JWTに付けるscope。呼び出し先に付けられるscopeが1つだけなら省ける */
   scope?: string;
-  /** 追加のヘッダー（MCPの`Accept`など）。認可に関わるヘッダーは上書きできない */
+  /** 追加のヘッダー（MCPの`Accept`など）。認可・追跡・署名に使うヘッダーは、渡しても除く */
   headers?: Record<string, string>;
 }
 
 export type Call = (target: string, body: unknown, options?: CallOptions) => Promise<CallResult>;
+
+/** 業務のコードが付けられないヘッダー。認可、追跡、署名に使う。HTTPのヘッダー名は大文字と小文字を区別しないので、小文字で比べる */
+const RESERVED_HEADERS = new Set([
+  HEADER_CONTEXT, HEADER_SESSION, HEADER_REQUEST_ID,
+  'traceparent', 'tracestate', 'baggage',
+  'host', 'content-type', 'authorization', 'x-amz-date', 'x-amz-security-token', 'x-amz-content-sha256',
+]);
+
+/** 業務のコードが渡した追加のヘッダーから、予約したヘッダーを除く */
+export function extraHeaders(headers: Record<string, string> = {}): Record<string, string> {
+  return Object.fromEntries(Object.entries(headers).filter(([name]) => !RESERVED_HEADERS.has(name.toLowerCase())));
+}
 
 /** 時間を測る（NFR-3）。spanNameがあれば、同じ区切りでスパンも作る */
 export async function timed<T>(timings: Timings, key: string, f: () => Promise<T>, spanName?: string): Promise<T> {
@@ -133,7 +145,7 @@ export function createCaller(opts: CallerOptions): Call {
     const url = new URL(target.url);
     const payload = JSON.stringify(body ?? {});
     const headers: Record<string, string> = {
-      ...options.headers,
+      ...extraHeaders(options.headers),
       host: url.host,
       'content-type': 'application/json',
       [HEADER_CONTEXT]: token,
