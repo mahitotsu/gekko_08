@@ -115,7 +115,7 @@ aws cloudformation describe-stacks --stack-name Gekko08App --query "Stacks[0].Ou
 ### 試す
 
 題材は、疑わしい取引で凍結された口座の解除である。デモの口座（A-101はtokyo、A-201とA-999はosaka）は、デプロイの時点で凍結されている。
-画面のURL（スタックの出力`WebUrl`）をブラウザで開き、yamadaかtanakaでログインする。画面には、操作ごとに、bffが刻んだ取引の目的、リクエストID、結果と、
+画面のURL（スタックの出力`WebUrl`）をブラウザで開き、yamadaかtanakaでログインする（suzukiは監査に使う。[監査で確かめる](#監査で確かめる)）。画面には、操作ごとに、bffが刻んだ取引の目的、リクエストID、結果と、
 拒否されたときはその層（委任の範囲か、業務的なアクセス権か）が出る。
 
 | 操作 | 取引の目的 | yamada（tokyo・支店長）の結果 | tanaka（osaka・担当者）の結果 |

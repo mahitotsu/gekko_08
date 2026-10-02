@@ -88,7 +88,11 @@ audit-serviceはデータを持たず、各ホップのロググループとClou
    テーブルのキーはセッションIDのSHA-256にし、テーブルを読めてもcookieとして使える値が得られないようにする。
    cookieの名前には`__Host-`を付ける（`__Host-sid`、`__Host-login`）。
 
-bffの設定（アプリクライアントのID、マネージドログインのドメイン、コールバックURL、federated roleと目的用のroleのARN、呼び出し先）は、
+ログアウト（`POST /api/logout`）では、bffがセッションを消し、リフレッシュトークンを取り消し、セッションのcookieを消す。あわせて、Cognitoのログアウトの
+URL（`/logout`、`client_id`と`logout_uri`＝画面のURL）を返し、画面はブラウザをそこへ送る。マネージドログインのログインの状態（Cognitoのcookie）を消さないと、
+次のログインでユーザー名とパスワードを聞かれず、同じユーザーでログインしてしまうため。
+
+bffの設定（アプリクライアントのID、マネージドログインのドメイン、コールバックURL、ログアウトの戻り先、federated roleと目的用のroleのARN、呼び出し先）は、
 SSM Parameter StoreのStringパラメータに置き、実行時に読む。環境変数にすると、bff→CloudFront→Cognitoのアプリクライアント
 （コールバックURL）→federated role→目的用のrole→case-serviceのchain用role→case-service→bffという循環参照になるため。
 アプリクライアントのシークレットは、デプロイ時にカスタムリソースがSecureStringとして書く（CloudFormationはSecureStringを作れない）。

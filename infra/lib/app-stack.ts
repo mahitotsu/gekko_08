@@ -131,7 +131,8 @@ export class Gekko08AppStack extends cdk.Stack {
     this.bff = bff;
     const web = new WebFrontend(this, 'Web', { bff });
     const callbackUrl = `${web.origin}/api/callback`;
-    const auth = new AuthFoundation(this, 'Auth', { callbackUrl, logoutUrl: `${web.origin}/` });
+    const logoutUrl = `${web.origin}/`;
+    const auth = new AuthFoundation(this, 'Auth', { callbackUrl, logoutUrl });
 
     bff.connect(auth, Object.values(PURPOSES));
 
@@ -153,7 +154,7 @@ export class Gekko08AppStack extends cdk.Stack {
     auditService.fn.addEnvironment('AUDIT_PRINCIPALS', this.toJsonString(Object.fromEntries(principals.filter(([r]) => r).map(([r, label]) => [r!.roleName, label]))));
     auditService.fn.addEnvironment('AUDIT_AUDIENCE_PREFIX', `${this.stackName}:`);
 
-    bff.writeSettings(auth, callbackUrl);
+    bff.writeSettings(auth, callbackUrl, logoutUrl);
 
     new cdk.CfnOutput(this, 'WebUrl', { value: web.origin });
     new cdk.CfnOutput(this, 'UserPoolId', { value: auth.userPool.userPoolId });

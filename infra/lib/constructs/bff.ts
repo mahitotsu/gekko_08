@@ -94,7 +94,7 @@ export class Bff extends Construct {
   }
 
   /** 設定とシークレットをSSM Parameter Storeに書く。CloudFront・Cognitoと循環参照にならないよう、関数とは別に作る */
-  writeSettings(auth: AuthFoundation, redirectUri: string): void {
+  writeSettings(auth: AuthFoundation, redirectUri: string, logoutUri: string): void {
     const stack = cdk.Stack.of(this);
     new ssm.StringParameter(this, 'Config', {
       parameterName: this.configParamName,
@@ -103,6 +103,7 @@ export class Bff extends Construct {
           clientId: auth.client.userPoolClientId,
           authDomain: auth.authDomain,
           redirectUri,
+          logoutUri,
           federatedRoleArn: auth.federatedRole.roleArn,
           purposeRoleArn: this.purposeRole!.roleArn,
           targets: this.targets,

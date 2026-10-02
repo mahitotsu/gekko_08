@@ -25,6 +25,8 @@ interface BffConfig {
   /** Cognitoのマネージドログインのドメイン（https://...） */
   authDomain: string;
   redirectUri: string;
+  /** ログアウトのあとにCognitoが戻す先（アプリクライアントの`logoutUrls`） */
+  logoutUri: string;
   federatedRoleArn: string;
   /** 取引の目的を刻むrole */
   purposeRoleArn: string;
@@ -185,7 +187,12 @@ async function logout(event: LambdaFunctionURLEvent): Promise<LambdaFunctionURLR
       }).catch((e) => log('warn', 'revoke failed', { error: (e as Error).message }));
     }
   }
-  return json(200, { loggedOut: true }, [cookie(SESSION_COOKIE, '', 0, 'Strict')]);
+  // マネージドログインにもログインの状態（Cognitoのcookie）が残るので、ブラウザをCognitoのログアウトに送って消す。
+  // 消さないと、次のログインで、ユーザー名とパスワードを聞かれずに同じユーザーでログインする
+  const { config } = await settings();
+  const cognitoLogout = new URL(`${config.authDomain}/logout`);
+  cognitoLogout.search = new URLSearchParams({ client_id: config.clientId, logout_uri: config.logoutUri }).toString();
+  return json(200, { loggedOut: true, logoutUrl: cognitoLogout.toString() }, [cookie(SESSION_COOKIE, '', 0, 'Strict')]);
 }
 
 /**

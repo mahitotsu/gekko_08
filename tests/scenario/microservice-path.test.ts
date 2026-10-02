@@ -158,6 +158,11 @@ describe('FR-5: ブラウザには認証情報を持たせない', () => {
     expect(r.status).toBe(200);
     expect(r.headers.get('set-cookie')).toMatch(/__Host-sid=; .*Max-Age=0/);
     expect((await browserGet('/api/me', session)).status).toBe(401);
+    // マネージドログインのログイン状態も消すため、ブラウザをCognitoのログアウトに送る（戻り先は画面）
+    const url = new URL(r.body.logoutUrl);
+    expect(url.pathname).toBe('/logout');
+    expect(url.searchParams.get('client_id')).toBe(o.UserPoolClientId);
+    expect(url.searchParams.get('logout_uri')).toBe(`${o.WebUrl}/`);
   });
 
   it('セッションcookieがなければ401', async () => {

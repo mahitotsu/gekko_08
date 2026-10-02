@@ -75,7 +75,12 @@ export function App() {
   }, [loadMe]);
 
   const logout = async () => {
-    await post('/api/logout');
+    const r = await post<{ logoutUrl?: string }>('/api/logout');
+    // Cognitoのマネージドログインのログイン状態も消す。消さないと、別のユーザーでログインし直せない
+    if (r.body.logoutUrl) {
+      location.assign(r.body.logoutUrl);
+      return;
+    }
     await loadMe();
   };
 
@@ -130,7 +135,7 @@ function SignedOut() {
     <section className="card hero">
       <h1>ログインしてください</h1>
       <p>
-        yamada（東京支店・支店長）か tanaka（大阪支店・担当者）でログインする。ブラウザには、Cognitoのトークンも、AWSの認証情報も渡さない。
+        yamada（東京支店・支店長）か tanaka（大阪支店・担当者）で操作し、suzuki（本部・監査担当）で取引を監査する。ブラウザには、Cognitoのトークンも、AWSの認証情報も渡さない。
         サーバー側の入口（bff）とは、HttpOnlyのセッションcookieだけで結ぶ。
       </p>
       <a className="btn primary" href="/api/login">ログイン</a>
