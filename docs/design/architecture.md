@@ -30,7 +30,7 @@
 | FR-3（ユーザーと目的は入口で確定し、変更も拡大もできない） | SourceIdentityとtransitive session tagの`purpose`。刻める目的、付けられるscope、影響の大きいscopeを発行できる目的はIAMで限る。業務的なアクセス権は属性サービスが持つ（§3、§4、§5、§6） |
 | FR-4（ホップを飛ばせない） | 入口は直前のホップの実行roleだけを許可（§4、§5） |
 | FR-5（パブリッククライアントに認証情報を持たせない） | BFFとセッションcookie（§3） |
-| FR-6（処理を元のユーザーとリクエストに結びつけて追跡） | リクエストIDの引き継ぎ、構造化ログ、`RoleSessionName`、トレース（§7） |
+| FR-6（処理を元のユーザーとリクエストに結びつけて追跡） | リクエストIDの引き継ぎ（transitive session tag `requestId`と、それに縛った`RoleSessionName`）、構造化ログ、トレース（§7） |
 | FR-7（デモ） | 口座の凍結解除のシナリオと、取引の監査（§8） |
 | FR-8（業務的なアクセス権の変更が次のリクエストから反映） | 属性サービスが判定のたびに人事データと権限マスタを読む（§6） |
 | NFR-1・NFR-2（サーバーレス、常駐コンポーネントなし） | Lambda、DynamoDB、Cognito、CloudFront、S3、SSM Parameter Store、Amazon Bedrock、CloudWatch（Logs、Transaction Search）だけで構成（§2、§7） |
@@ -108,7 +108,7 @@ IDトークンには、Pre Token Generation V2トリガーが`https://aws.amazon
 2. リクエストIDを発行する（§7）。
 3. IDトークンで`AssumeRoleWithWebIdentity`を呼び、federated roleのセッションを得る（`RoleSessionName`＝リクエストID）。
    このセッションにSourceIdentityが刻まれる。
-4. 経路から取引の目的を決め、federated roleのセッションから目的用のroleへchainして、`purpose`をtransitive session tagとして刻む
+4. 経路から取引の目的を決め、federated roleのセッションから目的用のroleへchainして、`purpose`と`requestId`をtransitive session tagとして刻む
    （`RoleSessionName`＝リクエストID）。
 5. 目的用のroleのセッションで、共通部品を使って最初のホップを呼ぶ（§4）。
 
@@ -257,21 +257,27 @@ JWTの発行の権限（利用側のchain用roleに、呼び出し先ごとに�
 
 ### 信頼ポリシー
 
-chain用roleは、呼び出し元のchain用role（bffの呼び出し先では目的用のrole）を信頼する。新しいtagのキーは加えられない。
+chain用roleは、呼び出し元のchain用role（bffの呼び出し先では目的用のrole）を信頼する。セッション名は、刻まれたリクエストIDに限る。新しいtagのキーは加えられない
+（[リクエストIDのtagのADR](../adr/20261002154129-request-id-transitive-tag.md)）。
 
 ```json
 {
   "Statement": [
-    { "Effect": "Allow", "Principal": { "AWS": ["<呼び出し元のchain用role>"] }, "Action": ["sts:AssumeRole", "sts:SetSourceIdentity"] },
+    {
+      "Effect": "Allow", "Principal": { "AWS": ["<呼び出し元のchain用role>"] }, "Action": "sts:AssumeRole",
+      "Condition": { "StringEquals": { "sts:RoleSessionName": "${aws:PrincipalTag/requestId}" } }
+    },
+    { "Effect": "Allow", "Principal": { "AWS": ["<呼び出し元のchain用role>"] }, "Action": "sts:SetSourceIdentity" },
     {
       "Effect": "Allow", "Principal": { "AWS": ["<呼び出し元のchain用role>"] }, "Action": "sts:TagSession",
-      "Condition": { "ForAllValues:StringEquals": { "aws:TagKeys": ["purpose"] } }
+      "Condition": { "ForAllValues:StringEquals": { "aws:TagKeys": ["purpose", "requestId"] } }
     }
   ]
 }
 ```
 
-目的用のroleは、federated roleを信頼し、`sts:TagSession`をキー`purpose`だけ、値を目的の一覧（`profile`・`case-summary`・`account-unfreeze`・`agent-analysis`・`audit`）だけに限る。
+目的用のroleは、federated roleを信頼し、`sts:TagSession`をキー`purpose`と`requestId`だけ、`purpose`の値を目的の一覧（`profile`・`case-summary`・`account-unfreeze`・`agent-analysis`・`audit`）だけに限る。
+`sts:AssumeRole`は、`RoleSessionName`が刻む`requestId`のtagと同じ値（`"sts:RoleSessionName": "${aws:RequestTag/requestId}"`）のときだけ許す。
 federated roleは、Cognitoを指すOIDC providerをPrincipalとし、`aud`＝アプリクライアントのIDで絞る。IDトークンにtagがないので`sts:TagSession`は許さない。
 
 ### 入口のresource policyのひな形（bff以外のホップ）
@@ -331,6 +337,8 @@ bffのFunction URLを直接呼べうるが、セッションcookieがなけれ�
    chain用roleのARN）はデプロイ時に環境変数で渡す。
 5. `https://sts.amazonaws.com/`名前空間から、subject（`source_identity`）、取引の目的（`principal_tags.purpose`）、scope（`request_tags.scope`）を
    取り出す。どれかが欠けていれば拒否する（scopeのないJWTは何も許さない）。
+   bffが刻んだリクエストID（`principal_tags.requestId`）が、ヘッダーのリクエストIDと違うか、欠けていれば401を返す。
+   食い違いで拒否したときは、`rejected`のログに、刻まれていた値（`stampedRequestId`）も書く。
 6. scopeが提供側の定義にあることを確かめる。目的の制限があるscopeなら、目的と呼び出し元が許されたものであることも確かめる。合わなければ403を返す。
    IAMが発行させない組み合わせなので、通常は起きない。IAMの設定の誤りや手での変更を、提供側の定義で止めるための照合である。
 7. subject、呼び出し元のホップ名（actor）、scopeを業務のコードに渡す。目的は渡さない（ログとトレースには出す）。ヘッダーや引数に含まれるユーザー情報は使わない。
@@ -381,6 +389,8 @@ bffのFunction URLを直接呼べうるが、セッションcookieがなけれ�
 - 各ホップの構造化ログに、リクエストID、subject、目的を出す（§6）。
 - `AssumeRoleWithWebIdentity`と各chainの`RoleSessionName`をリクエストIDにする。CloudTrailの`AssumeRole`・`GetWebIdentityToken`のイベントには、
   セッション名（＝リクエストID）とSourceIdentity（＝ユーザー識別子）が記録される。
+- bffはリクエストIDを、取引の目的と同じくtransitive session tag（`requestId`）として刻む。各chain用roleの信頼ポリシーが`RoleSessionName`をこのtagの値に限り、
+  受信側がJWTの`principal_tags.requestId`とヘッダーを照合するので、途中のホップはリクエストIDを変えられない（§5、§6）。
 - ログとCloudTrailを、リクエストIDとユーザー識別子で突き合わせられる。
 
 ### トレース
@@ -442,18 +452,24 @@ OpenTelemetryで出し、CloudWatchのTransaction Searchに集める（[収集�
 - **異動**：人事データでyamadaの所属をosakaに変えると、次のリクエストから、tokyoの案件は拒否され、osakaの案件を開ける（FR-8）。
 - **監査**（目的`audit`。[監査サービスのADR](../adr/20261002074437-audit-service.md)）：suzukiが監査の画面で取引を選ぶと、audit-serviceが次の2つを集めて突き合わせる。
   支店長と担当者は監査できず、監査担当は案件の参照も解除もできない。どちらも業務的なアクセス権で拒否される。
-  - **ホップの記録**：各ホップのロググループの`handled`と`rejected`を、リクエストIDでLogs Insightsで引く（直近7日）。ログは各ホップが処理を終えたときに書くので、
+  - **ホップの記録**：各ホップのロググループの`handled`と`rejected`を、リクエストIDでLogs Insightsで引く（直近7日）。`rejected`は、刻まれていた値（`stampedRequestId`）でも引き、
+    それがある記録は、その値の取引にだけ出す（ヘッダーで名乗ったリクエストIDを、偽った値として示す）。ログは各ホップが処理を終えたときに書くので、
     ログの時刻から処理時間（`timings.totalMs`）を引いて処理の区間を求め、呼び出し元（`actor`）のホップの区間のうち、その区間を含む最も短いものを親とみなして、
     呼び出しの順（深さ優先）に並べる。
-  - **一覧**：bffの`handled`の直近24時間の取引（表示と監査の経路を除く）。1回の操作（リクエスト）を1件とし、ログインのセッション（`sessionRef`）ごとにまとめ、
+  - **一覧**：bffの`handled`の直近24時間の取引（表示の経路を除く。監査の操作も含め、監査した取引のリクエストID（`auditTarget`。bffが経路のパスから得てログに書く）を添える）。1回の操作（リクエスト）を1件とし、ログインのセッション（`sessionRef`）ごとにまとめ、
     セッションのログインの新しい順、セッションの中は時刻の順に並べる。
   - **AWSの記録**：CloudTrailの`LookupEvents`を`Username`＝リクエストIDで引き、`AssumeRoleWithWebIdentity`・`AssumeRole`・`GetWebIdentityToken`から、
     呼んだ主体、`sourceIdentity`、引き受け先と目的のtag、宛先とscopeのtag、`webIdentityTokenId`だけを取り出す。イベントをそのまま返さない（`AssumeRole`の
     `responseElements`には、アクセスキーIDとセッショントークンが入る）。roleのARNは、CDKが渡す対応表（role名 → ホップ名とroleの種類）で表示名に置き換える。
   - **突き合わせ**：ホップの記録の`jti`と`webIdentityTokenId`が一致するイベントについて、JWTを発行したrole、宛先、scope、ユーザーを比べ、bffの`AssumeRole`の目的のtagと
-    各ホップの記録の目的を比べる。結果は「一致」「不一致」「AWSの記録が未着」。bffの記録は、目的とユーザーを`AssumeRole`のイベントと比べる。
-  - CloudTrailのイベントが届くまで数分〜15分ほどかかるので、直後の取引は「未着」になる。リクエストIDはSTSもIAMも強制しないので、
-    突き合わせられるのは、リクエストIDで引ける範囲である。
+    各ホップの記録の目的を比べる。bffの記録は、目的とユーザーを`AssumeRole`のイベントと比べる。比べるのは監査サービスで、画面は比べない。
+    記録ごとに、項目ごとの結果（「一致」「不一致」「未着」）と、比べた2つの値を返す。記録全体の結果は、1つでも違えば「不一致」、未着の項目が残れば「AWSの記録が未着」とする。
+    あわせて、それぞれの情報源を返す。アプリの記録はそのホップのロググループ名、AWSの記録は、対応づけた`GetWebIdentityToken`（と目的を取り出した`AssumeRole`）の
+    イベント名、イベントID（`eventID`）、時刻と、`webIdentityTokenId`である。CloudTrailのイベント履歴で、イベントIDから同じイベントを引ける。
+  - **画面**：取引の一覧（左）と、選んだ取引の突き合わせ（右）を並べる。突き合わせでは、記録ごとに、比べた項目をアプリの記録とAWSの記録の2列で並べ、
+    情報源と、対応づけに使った`jti`・`webIdentityTokenId`を全体で示す。不一致の項目は、2つの値で違いを示す。
+  - CloudTrailのイベントが届くまで数分〜15分ほどかかるので、直後の取引は「未着」になる。各chainのセッション名はIAMがリクエストIDに縛るので（§7）、
+    途中のホップは、自分のイベントをリクエストIDで引けなくすることはできない。
 - **繰り返し**：解除は口座の状態を変える。デモを繰り返すときは、READMEのコマンドで口座を凍結し直す。
 - **保証の範囲**：示せるのは「エージェントの取引からは解除できない」ことで、「人間が操作したことの証明」ではない。bffは目的を決める信頼の起点で、
   bffが侵害されれば、どの目的でも刻める。
@@ -544,8 +560,8 @@ Cognito User Poolのカスタム属性`custom:branch`は使わない。User Pool
 | FR-3 | chainの途中でSourceIdentityや目的を変えられない。定めていない目的を刻めない。新しいtagのキーを加えられない。宣言していないscopeを発行できない。目的の制限があるscopeを、許していない目的の取引では発行できない（案件を開く取引とエージェントの取引のcase-serviceのセッションから、account-service宛ての`account:unfreeze`）。許した目的の取引なら発行できる |
 | FR-4 | 途中のホップを飛ばした呼び出しが403 |
 | FR-5 | ブラウザに返す応答とcookieに、トークンも認証情報も含まれない |
-| FR-6 | 1回のリクエストを、各ホップのログとCloudTrailでリクエストIDとユーザーから追える。マイクロサービスとエージェントの経路が、それぞれ1つのトレースにつながり（各ホップの受信のスパンが直前のホップの送信のスパンの子になる）、受信のスパンに検証した呼び出し元・目的・scope・ユーザーが入る。DynamoDBの呼び出しが各ホップの受信のスパンの子になる。Claude Codeのスパンがfraud-agentの受信の子になり、`tools/call`の送信が`claude_code.tool.execution`の子になる。ブラウザから届いた`traceparent`は引き継がない |
-| FR-7 | エージェントが誘導されて解除を試みても、口座は解除されない（`unfreeze_account`はaccount-serviceが拒否する）。他の支店の口座は参照も拒否される。人間の解除の取引では、支店長は自分の支店の口座を解除でき、担当者は解除できない。モデルの判断は毎回変わりうるので、誘導されたかどうかではなく、誘導されても口座が凍結されたままで、他の支店のデータが応答に現れないことを確かめる。監査担当は、取引の一覧と、各ホップの記録（呼び出し元・ユーザー・目的・scope・`jti`）を引ける。各ホップの記録は呼び出しの順に並び、一覧では同じログインのセッションの操作が1つのまとまりとして時刻の順に並ぶ。CloudTrailが届くと、bffと各ホップの記録がすべてAWSの記録と一致し、応答に認証情報とARNが含まれない（`npm run test:scenario:cloudtrail`のときだけ）。支店長は監査できず、監査担当は案件を開けず解除もできない |
+| FR-6 | 1回のリクエストを、各ホップのログとCloudTrailでリクエストIDとユーザーから追える。リクエストIDは途中で変えられない（刻んだ値と違うセッション名では目的用のroleもchain用roleも引き受けられず、chainでtagを上書きできず、JWTに刻まれた値と違うリクエストIDで届いた呼び出しは401で、拒否のログに刻まれていた値が残る（共通部品の単体テスト））。マイクロサービスとエージェントの経路が、それぞれ1つのトレースにつながり（各ホップの受信のスパンが直前のホップの送信のスパンの子になる）、受信のスパンに検証した呼び出し元・目的・scope・ユーザーが入る。DynamoDBの呼び出しが各ホップの受信のスパンの子になる。Claude Codeのスパンがfraud-agentの受信の子になり、`tools/call`の送信が`claude_code.tool.execution`の子になる。ブラウザから届いた`traceparent`は引き継がない |
+| FR-7 | エージェントが誘導されて解除を試みても、口座は解除されない（`unfreeze_account`はaccount-serviceが拒否する）。他の支店の口座は参照も拒否される。人間の解除の取引では、支店長は自分の支店の口座を解除でき、担当者は解除できない。モデルの判断は毎回変わりうるので、誘導されたかどうかではなく、誘導されても口座が凍結されたままで、他の支店のデータが応答に現れないことを確かめる。監査担当は、取引の一覧と、各ホップの記録（呼び出し元・ユーザー・目的・scope・`jti`）を、比べる項目のアプリの記録の値と情報源（ロググループ）とあわせて引ける。各ホップの記録は呼び出しの順に並び、一覧では同じログインのセッションの操作が1つのまとまりとして時刻の順に並ぶ。CloudTrailが届くと、bffと各ホップの記録がすべてAWSの記録と一致し、項目ごとにAWSの記録の値とイベントIDが出て、`jti`と同じ`webIdentityTokenId`のイベントが対応づけられ、応答に認証情報とARNが含まれない（`npm run test:scenario:cloudtrail`のときだけ）。監査の操作も、監査した取引のリクエストIDとともに一覧に出て、その操作の各ホップの記録を引ける。支店長は監査できず、監査担当は案件を開けず解除もできない |
 | FR-8 | 人事データで所属を変えると、次のリクエストから結果が変わる |
 | NFR-3 | 各ホップの処理時間（chain、JWTの発行、検証）を集計して公開する |
 | SR-1 | 受け渡したchainのセッションで、どのホップも呼べない。内部のホップ以外を宛先に含むJWTを作れない |

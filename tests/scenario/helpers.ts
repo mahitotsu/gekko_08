@@ -1,4 +1,4 @@
-import { createHash, createHmac, randomBytes } from 'node:crypto';
+import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { Sha256 } from '@aws-crypto/sha256-js';
 import { CloudFormationClient, DescribeStacksCommand, paginateListStackResources } from '@aws-sdk/client-cloudformation';
 import { CloudWatchLogsClient, paginateFilterLogEvents } from '@aws-sdk/client-cloudwatch-logs';
@@ -180,23 +180,35 @@ export async function federatedSession(user: DemoUser, sessionName = `test-${Dat
   return { accessKeyId: c!.AccessKeyId!, secretAccessKey: c!.SecretAccessKey!, sessionToken: c!.SessionToken! };
 }
 
-/** bffと同じ手順で、取引の目的を刻んだセッションを得る。漏れた「受け渡すセッション」に相当する */
-export async function purposeSession(user: DemoUser, purpose: string, extraTags: Tag[] = []): Promise<AwsCredentialIdentity> {
+/** リクエストIDを刻んだセッション。chainのセッション名は、このリクエストIDでなければならない（FR-6） */
+export type RequestSession = AwsCredentialIdentity & { requestId: string };
+
+/**
+ * bffと同じ手順で、取引の目的とリクエストIDを刻んだセッションを得る。漏れた「受け渡すセッション」に相当する。
+ * sessionNameを渡すと、刻んだリクエストIDと違うセッション名で引き受けようとする
+ */
+export async function purposeSession(
+  user: DemoUser, purpose: string, extraTags: Tag[] = [], opts: { requestId?: string; sessionName?: string } = {},
+): Promise<RequestSession> {
+  const requestId = opts.requestId ?? randomUUID();
+  const sessionName = opts.sessionName ?? requestId;
   const o = await stackOutputs();
   const fed = await federatedSession(user);
   const { Credentials: c } = await new STSClient({ credentials: fed }).send(new AssumeRoleCommand({
-    RoleArn: o.PurposeRoleArn, RoleSessionName: `test-${Date.now()}`, DurationSeconds: 900,
-    Tags: [{ Key: 'purpose', Value: purpose }, ...extraTags], TransitiveTagKeys: ['purpose'],
+    RoleArn: o.PurposeRoleArn, RoleSessionName: sessionName, DurationSeconds: 900,
+    Tags: [{ Key: 'purpose', Value: purpose }, { Key: 'requestId', Value: requestId }, ...extraTags], TransitiveTagKeys: ['purpose', 'requestId'],
   }));
-  return { accessKeyId: c!.AccessKeyId!, secretAccessKey: c!.SecretAccessKey!, sessionToken: c!.SessionToken! };
+  return { accessKeyId: c!.AccessKeyId!, secretAccessKey: c!.SecretAccessKey!, sessionToken: c!.SessionToken!, requestId };
 }
 
-/** セッションからchain用roleへchainする */
-export async function chainTo(from: AwsCredentialIdentity, roleArn: string, extra: { SourceIdentity?: string; Tags?: Tag[] } = {}): Promise<AwsCredentialIdentity> {
+/** セッションからchain用roleへchainする。セッション名は、既定では刻まれたリクエストID */
+export async function chainTo(
+  from: RequestSession, roleArn: string, extra: { SourceIdentity?: string; Tags?: Tag[]; RoleSessionName?: string } = {},
+): Promise<RequestSession> {
   const { Credentials: c } = await new STSClient({ credentials: from }).send(new AssumeRoleCommand({
-    RoleArn: roleArn, RoleSessionName: `test-${Date.now()}`, DurationSeconds: 900, ...extra,
+    RoleArn: roleArn, RoleSessionName: from.requestId, DurationSeconds: 900, ...extra,
   }));
-  return { accessKeyId: c!.AccessKeyId!, secretAccessKey: c!.SecretAccessKey!, sessionToken: c!.SessionToken! };
+  return { accessKeyId: c!.AccessKeyId!, secretAccessKey: c!.SecretAccessKey!, sessionToken: c!.SessionToken!, requestId: from.requestId };
 }
 
 /** セッションでJWTを発行する。scopeを渡すと、JWTのrequest_tagsに付ける */

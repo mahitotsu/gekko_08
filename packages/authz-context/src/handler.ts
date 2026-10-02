@@ -88,9 +88,10 @@ function createHandle(business: HopHandler, config: HopConfig) {
     const actorArn = (event.requestContext as { authorizer?: { iam?: { userArn?: string } } }).authorizer?.iam?.userArn;
     const base = { hop: config.hop, requestId, actorArn };
     if (requestId) span.setAttribute(ATTR.requestId, requestId);
-    const reject = (status: number, reason: string) => {
+    // ヘッダーのリクエストIDは、検証するまで呼び出し元の自己申告。JWTに刻まれた値と食い違ったときは、刻まれた値も残す
+    const reject = (status: number, reason: string, stampedRequestId?: string) => {
       span.setAttributes({ [ATTR.inbound]: 'rejected', [ATTR.rejectReason]: reason });
-      log('warn', 'rejected', { ...base, status, reason });
+      log('warn', 'rejected', { ...base, status, reason, ...(stampedRequestId ? { stampedRequestId } : {}) });
     };
 
     if (!requestId || !REQUEST_ID.test(requestId)) {
@@ -101,10 +102,10 @@ function createHandle(business: HopHandler, config: HopConfig) {
     let verified;
     const tv = performance.now();
     try {
-      verified = await verifyInbound(headers[HEADER_CONTEXT], actorArn, config);
+      verified = await verifyInbound(headers[HEADER_CONTEXT], actorArn, config, requestId);
     } catch (e) {
       const status = e instanceof AuthzError ? e.status : 401;
-      reject(status, (e as Error).message);
+      reject(status, (e as Error).message, e instanceof AuthzError ? e.stampedRequestId : undefined);
       return respond(status, { error: status === 403 ? 'forbidden' : 'unauthorized' });
     }
     timings.verifyMs = Math.round(performance.now() - tv);

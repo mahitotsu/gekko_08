@@ -42,6 +42,27 @@ describe('FR-1, FR-2: 委任の範囲と業務的なアクセス権の両方で�
   });
 });
 
+describe('FR-6: リクエストIDは入口で確定し、途中のホップは変えられない', () => {
+  it('目的用のroleは、刻んだリクエストIDと違うセッション名では引き受けられない', async () => {
+    await expect(purposeSession('tokyoManager', 'case-summary', [], { sessionName: 'other-request' }))
+      .rejects.toThrow(/not authorized to perform: sts:AssumeRole/);
+  });
+
+  it('chainのセッション名を、刻まれたリクエストIDと違う値にできない', async () => {
+    const s = await purposeSession('tokyoManager', 'case-summary');
+    await expect(chainTo(s, o.CaseServiceChainRoleArn, { RoleSessionName: 'other-request' }))
+      .rejects.toThrow(/not authorized to perform: sts:AssumeRole/);
+    // 刻まれたリクエストIDなら引き受けられる
+    await expect(chainTo(s, o.CaseServiceChainRoleArn)).resolves.toMatchObject({ requestId: s.requestId });
+  });
+
+  it('chainでリクエストIDのtagを上書きできない', async () => {
+    const s = await purposeSession('tokyoManager', 'case-summary');
+    await expect(chainTo(s, o.CaseServiceChainRoleArn, { Tags: [{ Key: 'requestId', Value: 'other-request' }], RoleSessionName: 'other-request' }))
+      .rejects.toThrow(/conflicts with a transitive tag key|not authorized to perform: sts:AssumeRole/);
+  });
+});
+
 describe('FR-3: ユーザーと取引の目的は入口で確定し、途中で変更も拡大もできない', () => {
   it('chainでSourceIdentityを変えられない', async () => {
     const s = await purposeSession('tokyoManager', 'case-summary');

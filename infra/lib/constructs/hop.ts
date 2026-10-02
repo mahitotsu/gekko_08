@@ -7,6 +7,8 @@ import { enableTelemetry, NodeFunction, type NodeFunctionProps } from './node-fu
 
 /** 取引の目的を運ぶtransitive session tagのキー。chainで引き継ぎ、途中で変えられない */
 export const PURPOSE_TAG = 'purpose';
+/** リクエストIDを運ぶtransitive session tagのキー。bffが刻み、各chainの`RoleSessionName`をこの値に縛る（FR-6） */
+export const REQUEST_ID_TAG = 'requestId';
 
 /** 初期の信頼ポリシーに何も加えないprincipal */
 class TrustAddedLater extends iam.ArnPrincipal {
@@ -208,11 +210,16 @@ export class Hop extends Construct {
     if (this.chainRole) {
       const principal = new iam.ArnPrincipal(caller.chainRole.roleArn);
       this.chainRole.assumeRolePolicy!.addStatements(
-        new iam.PolicyStatement({ actions: ['sts:AssumeRole', 'sts:SetSourceIdentity'], principals: [principal] }),
+        // セッション名は、bffが刻んだリクエストIDに限る。途中のホップは、CloudTrailで引くリクエストIDを変えられない（FR-6）
+        new iam.PolicyStatement({
+          actions: ['sts:AssumeRole'], principals: [principal],
+          conditions: { StringEquals: { 'sts:RoleSessionName': `\${aws:PrincipalTag/${REQUEST_ID_TAG}}` } },
+        }),
+        new iam.PolicyStatement({ actions: ['sts:SetSourceIdentity'], principals: [principal] }),
         // 新しいtagのキーは加えられない（FR-3）
         new iam.PolicyStatement({
           actions: ['sts:TagSession'], principals: [principal],
-          conditions: { 'ForAllValues:StringEquals': { 'aws:TagKeys': [PURPOSE_TAG] } },
+          conditions: { 'ForAllValues:StringEquals': { 'aws:TagKeys': [PURPOSE_TAG, REQUEST_ID_TAG] } },
         }),
       );
       caller.chainRole.addToPrincipalPolicy(new iam.PolicyStatement({

@@ -6,7 +6,7 @@ import * as cr from 'aws-cdk-lib/custom-resources';
 import * as ssm from 'aws-cdk-lib/aws-ssm';
 import { Construct } from 'constructs';
 import type { AuthFoundation } from './auth-foundation';
-import { PURPOSE_TAG, type HopCaller, type HopTarget } from './hop';
+import { PURPOSE_TAG, REQUEST_ID_TAG, type HopCaller, type HopTarget } from './hop';
 import { enableTelemetry, NodeFunction } from './node-function';
 
 /**
@@ -57,20 +57,21 @@ export class Bff extends Construct {
 
   /**
    * 目的用のroleを作り、federated roleとつなぐ。bffは取引ごとにfederated roleのセッションからこのroleへchainし、
-   * 取引の目的をtransitive session tagとして刻む。刻める目的はpurposesに限る
+   * 取引の目的とリクエストIDをtransitive session tagとして刻む。刻める目的はpurposesに限る。
+   * セッション名はリクエストIDのtagと同じ値に限り、以降のchainもその値に縛る（FR-6）
    */
   connect(auth: AuthFoundation, purposes: string[]): void {
     const principal = new iam.ArnPrincipal(auth.federatedRole.roleArn);
     this.purposeRole = new iam.Role(this, 'PurposeRole', {
-      assumedBy: principal,
-      description: 'bff: stamps the transaction purpose as a transitive session tag',
+      assumedBy: principal.withConditions({ StringEquals: { 'sts:RoleSessionName': `\${aws:RequestTag/${REQUEST_ID_TAG}}` } }),
+      description: 'bff: stamps the transaction purpose and request ID as transitive session tags',
     });
     this.purposeRole.assumeRolePolicy!.addStatements(
       new iam.PolicyStatement({ actions: ['sts:SetSourceIdentity'], principals: [principal] }),
       new iam.PolicyStatement({
         actions: ['sts:TagSession'], principals: [principal],
         conditions: {
-          'ForAllValues:StringEquals': { 'aws:TagKeys': [PURPOSE_TAG] },
+          'ForAllValues:StringEquals': { 'aws:TagKeys': [PURPOSE_TAG, REQUEST_ID_TAG] },
           StringEquals: { [`aws:RequestTag/${PURPOSE_TAG}`]: purposes },
         },
       }),

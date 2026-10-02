@@ -8,6 +8,22 @@ import { Denial, PurposeChip } from './parts';
 
 type Check = { result: 'match' } | { result: 'mismatch'; fields: string[] } | { result: 'pending' } | { result: 'n/a' };
 
+/** 比べたAWSの記録（CloudTrailのイベント） */
+interface EventRef {
+  event: string;
+  eventId?: string;
+  time: string;
+}
+
+/** 1つの項目について、アプリの記録の値とAWSの記録の値を、監査サービスが比べた結果 */
+interface Field {
+  name: string;
+  app?: string;
+  aws?: string;
+  awsEvent?: EventRef;
+  result: 'match' | 'mismatch' | 'pending';
+}
+
 interface Transaction {
   time: string;
   requestId: string;
@@ -19,6 +35,8 @@ interface Transaction {
   /** ログインした時刻（UNIX秒） */
   loggedInAt?: number;
   caseId?: string;
+  /** 監査の操作なら、監査した取引のリクエストID */
+  auditTarget?: string;
 }
 
 interface HopRecord {
@@ -35,12 +53,17 @@ interface HopRecord {
   scope?: string;
   status?: number;
   reason?: string;
+  claimedRequestId?: string;
+  logGroup?: string;
+  tokenEvent?: EventRef & { tokenId?: string };
+  fields?: Field[];
   check: Check;
 }
 
 interface AwsRecord {
   time: string;
   event: string;
+  eventId?: string;
   caller: string;
   sourceIdentity?: string;
   role?: string;
@@ -53,7 +76,7 @@ interface AwsRecord {
 
 interface Reconciled {
   requestId: string;
-  transaction: (Omit<Transaction, 'requestId'> & { check: Check }) | null;
+  transaction: (Omit<Transaction, 'requestId'> & { logGroup?: string; fields: Field[]; check: Check }) | null;
   hops: HopRecord[];
   awsRecords: AwsRecord[];
 }
@@ -113,11 +136,26 @@ export function Audit({ requestId, onSelect }: { requestId?: string; onSelect: (
             <AuditDenied result={list} />
           </div>
         )}
-        {list?.status === 200 && (
-          <TransactionList items={list.body.transactions ?? []} selected={requestId} onSelect={onSelect} />
-        )}
       </section>
-      {requestId && !denied && <ReconcileView key={requestId} requestId={requestId} />}
+      {!denied && (
+        <div className="audit-split">
+          <section className="card audit-list" aria-label="取引の一覧">
+            <h3 className="pane-title">取引の一覧 <span className="muted small">直近24時間</span></h3>
+            {list?.status === 200 ? (
+              <TransactionList items={list.body.transactions ?? []} selected={requestId} onSelect={onSelect} />
+            ) : (
+              <p className="muted"><span className="spinner inline-spinner" aria-hidden /> 読み込み中…</p>
+            )}
+          </section>
+          <div className="audit-detail">
+            {requestId ? (
+              <ReconcileView key={requestId} requestId={requestId} />
+            ) : (
+              <section className="card"><p className="muted">左の一覧から取引を選ぶと、ここに突き合わせの結果が出る。</p></section>
+            )}
+          </div>
+        </div>
+      )}
     </>
   );
 }
@@ -158,12 +196,12 @@ function TransactionList({ items, selected, onSelect }: { items: Transaction[]; 
     <div className="table-wrap">
       <table className="grid">
         <thead>
-          <tr><th>時刻</th><th>操作</th><th>案件</th><th>目的</th><th className="num">結果</th><th>リクエストID</th></tr>
+          <tr><th>時刻</th><th>操作</th><th className="num">結果</th><th>リクエストID</th></tr>
         </thead>
         {bySession(items).map((g) => (
           <tbody key={g.key} className="session-group">
             <tr className="session-row">
-              <td colSpan={6}>
+              <td colSpan={4}>
                 <span className="session-user">{g.user}</span>
                 <span className="muted small">
                   {g.loggedInAt ? `${day(new Date(g.loggedInAt * 1000).toISOString())} ${clock(new Date(g.loggedInAt * 1000).toISOString())}にログイン` : 'ログインのセッションは不明'}
@@ -175,11 +213,14 @@ function TransactionList({ items, selected, onSelect }: { items: Transaction[]; 
             {g.items.map((t) => (
               <tr key={t.requestId} className={`clickable ${selected === t.requestId ? 'selected' : ''}`} onClick={() => onSelect(t.requestId)}>
                 <td className="nowrap">{clock(t.time)}</td>
-                <td>{ROUTE_LABELS[t.route] ?? t.route}</td>
-                <td>{t.caseId ?? '—'}</td>
-                <td><code>{t.purpose}</code></td>
+                <td>
+                  {ROUTE_LABELS[t.route] ?? t.route}
+                  <div className="muted tiny">
+                    {t.auditTarget ? <>対象 <code title={t.auditTarget}>{short(t.auditTarget)}</code></> : t.caseId ?? '案件なし'}・目的 <code>{t.purpose}</code>
+                  </div>
+                </td>
                 <td className="num"><StatusBadge status={t.status} /></td>
-                <td><code>{short(t.requestId)}</code></td>
+                <td><code title={t.requestId}>{short(t.requestId)}</code></td>
               </tr>
             ))}
           </tbody>
@@ -195,7 +236,7 @@ function StatusBadge({ status }: { status?: number }) {
 }
 
 const CHECK_LABELS: Record<Check['result'], { label: string; tone: string }> = {
-  match: { label: 'AWSの記録と一致', tone: 'ok' },
+  match: { label: '一致', tone: 'ok' },
   mismatch: { label: '不一致', tone: 'deny' },
   pending: { label: 'AWSの記録が未着', tone: 'warn' },
   'n/a': { label: '照合しない', tone: 'neutral' },
@@ -245,16 +286,30 @@ function ReconcileView({ requestId }: { requestId: string }) {
           </div>
           <div className="result-meta">
             {tx && <PurposeChip purpose={tx.purpose} />}
-            <span className="rid">{requestId}</span>
             {tx && <span className="muted small">{day(tx.time)} {clock(tx.time)}</span>}
           </div>
+          <div className="labeled">
+            <span className="label">リクエストID</span><code>{requestId}</code>
+          </div>
         </div>
-        <div className="tally">
+        <div className="tally" title="監査サービスが、ホップの記録ごとに2つの記録を比べた結果">
           <span className="check ok">一致 {count('match')}</span>
           <span className="check deny">不一致 {count('mismatch')}</span>
           <span className="check warn">未着 {pending}</span>
         </div>
       </header>
+
+      <div className="callout neutral legend">
+        <p>
+          記録ごとに、同じ項目を2つの情報源から並べる。「一致」「不一致」は、<strong>監査サービスが2つの値を比べた結果</strong>で、画面は比べていない。
+        </p>
+        <dl className="sources">
+          <dt><span className="src app">アプリの記録</span></dt>
+          <dd>CloudWatch Logs：各ホップが検証してログに書いた値（自己申告）</dd>
+          <dt><span className="src aws">AWSの記録</span></dt>
+          <dd>CloudTrail：STSが書いたイベント（ホップは書き換えられない）。イベントIDで、CloudTrailのイベント履歴から同じイベントを引ける</dd>
+        </dl>
+      </div>
 
       {!tx && <p className="muted">この取引のログが見つからない（ログが届くまで数秒〜数十秒かかる）。</p>}
       {pending > 0 && (
@@ -264,83 +319,154 @@ function ReconcileView({ requestId }: { requestId: string }) {
         </div>
       )}
 
-      <h3 className="section-title">ホップの記録 <span className="muted small">各ホップの共通部品が検証してログに書いた値（アプリの記録）。呼び出しの順に並べる</span></h3>
-      <div className="table-wrap">
-        <table className="grid">
-          <thead>
-            <tr><th title="各ホップが処理を始めた時刻（ログを書いた時刻から処理時間を引いたもの）">開始</th><th>ホップ</th><th>呼び出し元</th><th>誰の代理か</th><th>目的</th><th>scope</th><th className="num">結果</th><th>JWTの<code>jti</code></th><th>AWSの記録</th></tr>
-          </thead>
-          <tbody>
-            {tx && (
-              <tr className="entry-row">
-                <td className="nowrap">{clock(tx.time)}</td>
-                <td><code>bff</code><div className="muted tiny">入口。目的を刻む</div></td>
-                <td className="muted">ブラウザ（cookie）</td>
-                <td>{tx.user}</td>
-                <td><code>{tx.purpose}</code></td>
-                <td className="muted">—</td>
-                <td className="num"><StatusBadge status={tx.status} /></td>
-                <td className="muted">—</td>
-                <td><CheckBadge check={tx.check} /></td>
-              </tr>
-            )}
-            {hops.map((h, i) => (
-              <tr key={i} className={h.outcome === 'rejected' ? 'rejected-row' : ''}>
-                <td className="nowrap">{clock(h.startedAt ?? h.time)}</td>
-                <td>
-                  <span className="hop-cell" style={{ paddingLeft: `${(h.depth - 1) * 16}px` }}>
-                    <span className="muted" aria-hidden>└ </span><code>{h.hop}</code>
-                  </span>
-                  {h.outcome === 'rejected' && <div className="tiny deny-text">受信の検証で拒否</div>}
-                </td>
-                <td>{h.actor ? <code>{h.actor}</code> : '—'}{h.tokenIssuer && <div className="muted tiny">JWT：{h.tokenIssuer}</div>}</td>
-                <td>{h.subject ?? '—'}</td>
-                <td>{h.purpose ? <code>{h.purpose}</code> : '—'}</td>
-                <td>{h.scope ? <code className="scope">{h.scope}</code> : '—'}</td>
-                <td className="num"><StatusBadge status={h.status} />{h.reason && <div className="muted tiny">{h.reason}</div>}</td>
-                <td><code className="muted">{short(h.tokenId)}</code></td>
-                <td><CheckBadge check={h.check} /></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <h3 className="section-title">ホップの記録 <span className="muted small">呼び出しの順</span></h3>
+      <ol className="hop-records">
+        {tx && (
+          <li className="hop-record entry">
+            <RecordHead time={tx.time} depth={0} name="bff" note="入口。目的を刻む" actor="ブラウザ（cookie）" status={tx.status} check={tx.check} />
+            <Comparison logGroup={tx.logGroup} fields={tx.fields} />
+          </li>
+        )}
+        {hops.map((h, i) => (
+          <li key={i} className={`hop-record ${h.outcome === 'rejected' ? 'rejected' : ''}`}>
+            <RecordHead
+              time={h.startedAt ?? h.time} depth={h.depth} name={h.hop} actor={h.actor} status={h.status} reason={h.reason} check={h.check}
+              note={h.outcome === 'rejected'
+                ? h.claimedRequestId
+                  ? `受信の検証で拒否。ヘッダーのリクエストIDを ${h.claimedRequestId} と偽っていた（JWTに刻まれていたのはこの取引のリクエストID）`
+                  : '受信の検証で拒否。JWTを受け付けなかったので照合しない'
+                : undefined}
+            />
+            {h.outcome === 'handled' && <Comparison logGroup={h.logGroup} fields={h.fields ?? []} token={{ app: h.tokenId, aws: h.tokenEvent }} />}
+          </li>
+        ))}
+      </ol>
 
-      <h3 className="section-title">AWSの記録 <span className="muted small">CloudTrailのSTSのイベント（STSが書いた記録。ホップは書き換えられない）</span></h3>
-      {awsRecords.length === 0 ? (
-        <p className="muted">まだ届いていない。</p>
-      ) : (
-        <div className="table-wrap">
-          <table className="grid">
-            <thead>
-              <tr><th>時刻</th><th>イベント</th><th>呼んだ主体</th><th>ユーザー（<code>sourceIdentity</code>）</th><th>内容</th><th><code>webIdentityTokenId</code></th></tr>
-            </thead>
-            <tbody>
-              {awsRecords.map((a, i) => (
-                <tr key={i}>
-                  <td className="nowrap">{clock(a.time)}</td>
-                  <td><code>{a.event}</code>{a.error && <div className="tiny deny-text">{a.error}</div>}</td>
-                  <td>{a.caller}</td>
-                  <td>{a.sourceIdentity ?? '—'}</td>
-                  <td>
-                    {a.event === 'GetWebIdentityToken' ? (
-                      <>宛先 <code>{a.audience}</code>・scope <code className="scope">{a.scope ?? '—'}</code></>
-                    ) : (
-                      <>{a.role}{a.purpose && <>・目的 <code>{a.purpose}</code>（{PURPOSE_LABELS[a.purpose] ?? a.purpose}）</>}</>
-                    )}
-                  </td>
-                  <td><code className="muted">{short(a.tokenId)}</code></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+      <details className="raw aws-all">
+        <summary>CloudTrailから取り出したイベント（全{awsRecords.length}件）</summary>
+        {awsRecords.length === 0 ? (
+          <p className="muted">まだ届いていない。</p>
+        ) : (
+          <div className="table-wrap">
+            <table className="grid">
+              <thead>
+                <tr><th>時刻</th><th>イベント</th><th>呼んだ主体</th><th>ユーザー（<code>sourceIdentity</code>）</th><th>内容</th><th><code>webIdentityTokenId</code></th><th>イベントID</th></tr>
+              </thead>
+              <tbody>
+                {awsRecords.map((a, i) => (
+                  <tr key={i}>
+                    <td className="nowrap">{clock(a.time)}</td>
+                    <td><code>{a.event}</code>{a.error && <div className="tiny deny-text">{a.error}</div>}</td>
+                    <td>{a.caller}</td>
+                    <td>{a.sourceIdentity ?? '—'}</td>
+                    <td>
+                      {a.event === 'GetWebIdentityToken' ? (
+                        <>宛先 <code>{a.audience}</code>・scope <code className="scope">{a.scope ?? '—'}</code></>
+                      ) : (
+                        <>{a.role}{a.purpose && <>・目的 <code>{a.purpose}</code>（{PURPOSE_LABELS[a.purpose] ?? a.purpose}）</>}</>
+                      )}
+                    </td>
+                    <td><code className="muted">{a.tokenId ?? '—'}</code></td>
+                    <td><code className="muted">{a.eventId ?? '—'}</code></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </details>
 
       <p className="muted tiny footnote">
-        突き合わせられるのは、リクエストID（chainとJWTの発行のセッション名）で引けるAWSの記録の範囲である。リクエストIDはSTSもIAMも強制しないので、
-        侵害されたホップが別の値を使えば、そのホップの記録は「未着」と区別できない。
+        AWSの記録は、リクエストID（chainとJWTの発行のセッション名）で引く。リクエストIDはbffが取引の目的と同じく刻み、各chainのセッション名をIAMがその値に限るので、
+        途中のホップは自分の記録をリクエストIDで引けなくすることはできない。
       </p>
     </section>
+  );
+}
+
+function RecordHead(props: {
+  time: string; depth: number; name: string; note?: string; actor?: string; status?: number; reason?: string; check: Check;
+}) {
+  return (
+    <div className="record-head" style={{ paddingLeft: `${Math.max(props.depth - 1, 0) * 18}px` }}>
+      <span className="nowrap muted small">{clock(props.time)}</span>
+      <span className="record-name">
+        {props.depth > 0 && <span className="muted" aria-hidden>└ </span>}<code>{props.name}</code>
+        {props.actor && <span className="muted small">　呼び出し元 {props.depth > 0 ? <code>{props.actor}</code> : props.actor}</span>}
+      </span>
+      <span className="record-result">
+        <StatusBadge status={props.status} />
+        {props.reason && <span className="muted tiny">{props.reason}</span>}
+        <CheckBadge check={props.check} />
+      </span>
+      {props.note && <div className={`tiny record-note ${props.check.result === 'n/a' ? 'deny-text' : 'muted'}`}>{props.note}</div>}
+    </div>
+  );
+}
+
+const FIELD_RESULT: Record<Field['result'], { label: string; tone: string }> = {
+  match: { label: '一致', tone: 'ok' },
+  mismatch: { label: '不一致', tone: 'deny' },
+  pending: { label: '未着', tone: 'warn' },
+};
+
+const sameEvent = (a: EventRef, b: EventRef) => (a.eventId ?? `${a.event}@${a.time}`) === (b.eventId ?? `${b.event}@${b.time}`);
+
+function EventSource({ e }: { e: EventRef }) {
+  return (
+    <div className="event-src">
+      CloudTrail：<code>{e.event}</code>
+      <span className="muted">　{day(e.time)} {clock(e.time)}</span>
+      <div><span className="label">イベントID</span><code>{e.eventId ?? '—'}</code></div>
+    </div>
+  );
+}
+
+/** 1つの記録について、比べた項目を、アプリの記録とAWSの記録の2列で並べる */
+function Comparison({ logGroup, fields, token }: {
+  logGroup?: string; fields: Field[]; token?: { app?: string; aws?: EventRef & { tokenId?: string } };
+}) {
+  const events: EventRef[] = [];
+  for (const e of [token?.aws, ...fields.map((f) => f.awsEvent)]) if (e && !events.some((x) => sameEvent(x, e))) events.push(e);
+  return (
+    <div className="table-wrap">
+      <table className="grid compare">
+        <thead>
+          <tr><th>項目</th><th><span className="src app">アプリの記録</span></th><th><span className="src aws">AWSの記録</span></th><th>監査サービスの判定</th></tr>
+        </thead>
+        <tbody>
+          <tr className="source-row">
+            <th scope="row">情報源</th>
+            <td>CloudWatch Logs：<code>{logGroup ?? '—'}</code></td>
+            <td>{events.length ? events.map((e) => <EventSource key={e.eventId ?? e.time} e={e} />) : <span className="muted">未着</span>}</td>
+            <td />
+          </tr>
+          {token && (
+            <tr className="key-row">
+              <th scope="row">JWTの識別子<div className="muted tiny">対応づけの鍵</div></th>
+              <td><span className="label"><code>jti</code></span><code>{token.app ?? '—'}</code></td>
+              <td>
+                {token.aws ? <><span className="label"><code>webIdentityTokenId</code></span><code>{token.aws.tokenId}</code></> : <span className="muted">未着</span>}
+              </td>
+              <td className="muted tiny">{token.aws ? '同じ値のイベントを対応づけた' : '同じ値のイベントがまだない'}</td>
+            </tr>
+          )}
+          {fields.map((f) => {
+            const r = FIELD_RESULT[f.result];
+            return (
+              <tr key={f.name} className={f.result === 'mismatch' ? 'diff' : ''}>
+                <th scope="row">{f.name}</th>
+                <td><code>{f.app ?? '（なし）'}</code></td>
+                <td>
+                  {f.result === 'pending' ? <span className="muted">未着</span> : <code>{f.aws ?? '（なし）'}</code>}
+                  {f.awsEvent && events.length > 1 && <div className="muted tiny"><code>{f.awsEvent.event}</code>から</div>}
+                </td>
+                <td><span className={`check ${r.tone}`}>{r.label}</span></td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
   );
 }

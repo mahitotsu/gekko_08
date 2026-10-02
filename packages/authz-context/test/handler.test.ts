@@ -1,6 +1,6 @@
 import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT } from 'jose';
 import type { LambdaFunctionURLEvent, LambdaFunctionURLResult } from 'aws-lambda';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createHopHandler, type HopConfig, type HopContext } from '../src/handler';
 
 const ISSUER = 'https://example.tokens.sts.global.api.aws';
@@ -18,7 +18,7 @@ beforeAll(async () => {
     provides: { 'case:summary': {} },
     keys: createLocalJWKSet({ keys: [jwk] }),
   };
-  token = await new SignJWT({ 'https://sts.amazonaws.com/': { source_identity: 'yamada', principal_tags: { purpose: 'case-summary' }, request_tags: { scope: 'case:summary' } } })
+  token = await new SignJWT({ 'https://sts.amazonaws.com/': { source_identity: 'yamada', principal_tags: { purpose: 'case-summary', requestId: 'req-1' }, request_tags: { scope: 'case:summary' } } })
     .setProtectedHeader({ alg: 'ES384', kid: 'k1' }).setIssuer(ISSUER).setAudience('aud-case').setSubject(CHAIN)
     .setIssuedAt().setExpirationTime('5m').sign(privateKey);
 });
@@ -52,4 +52,17 @@ describe('createHopHandler', () => {
     expect(statusOf(await handler(event({ 'x-authz-context': token })))).toBe(400);
     expect(called).toBe(false);
   });
+
+  it('JWTに刻まれたリクエストIDと違うリクエストIDで届いたら401。拒否のログに、刻まれていた値も残す', async () => {
+    const lines: string[] = [];
+    vi.spyOn(process.stdout, 'write').mockImplementation((l) => { lines.push(String(l)); return true; });
+    let called = false;
+    const handler = createHopHandler(async () => { called = true; return { status: 200, body: {} }; }, config);
+    expect(statusOf(await handler(event({ 'x-authz-context': token, 'x-request-id': 'forged-1' })))).toBe(401);
+    expect(called).toBe(false);
+    const rejected = lines.map((l) => JSON.parse(l)).find((l) => l.message === 'rejected');
+    expect(rejected).toMatchObject({ requestId: 'forged-1', stampedRequestId: 'req-1', status: 401 });
+  });
 });
+
+afterEach(() => vi.restoreAllMocks());

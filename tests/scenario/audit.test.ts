@@ -3,10 +3,15 @@ import { browserGet, browserPost, eventually, loginSession, provisionTestData, T
 
 // FR-7(d)：監査の画面で、1回の取引について、各ホップの記録をAWSの記録と突き合わせて示す。監査は、監査の権限を持つユーザーだけが使える
 interface Check { result: 'match' | 'mismatch' | 'pending' | 'n/a'; fields?: string[] }
-interface HopRecord { hop: string; depth: number; outcome: string; actor?: string; subject?: string; purpose?: string; scope?: string; status?: number; tokenId?: string; check: Check }
+interface EventRef { event: string; eventId?: string; time: string }
+interface Field { name: string; app?: string; aws?: string; awsEvent?: EventRef; result: 'match' | 'mismatch' | 'pending' }
+interface HopRecord {
+  hop: string; depth: number; outcome: string; actor?: string; subject?: string; purpose?: string; scope?: string; status?: number; tokenId?: string;
+  logGroup?: string; tokenEvent?: EventRef & { tokenId?: string }; fields?: Field[]; check: Check;
+}
 interface Reconciled {
   requestId: string;
-  transaction: { user: string; route: string; purpose: string; status: number; check: Check } | null;
+  transaction: { user: string; route: string; purpose: string; status: number; logGroup?: string; fields: Field[]; check: Check } | null;
   hops: HopRecord[];
   awsRecords: Record<string, unknown>[];
 }
@@ -51,6 +56,18 @@ describe('FR-7(d): 監査担当は、取引ごとに各ホップの記録をAWS�
     expect(r.hops.map((h) => `${h.depth}:${h.hop}`)).toEqual(['1:case-service', '2:entitlement-service', '2:account-service', '3:entitlement-service']);
   }, 130_000);
 
+  it('ホップの記録ごとに、比べる項目のアプリの記録の値と、その情報源（ロググループ）が出る', async () => {
+    const r = await reconciled((x) => !!x.transaction && HOPS.every((h) => x.hops.some((y) => y.hop === h)), 120_000);
+    expect(r.transaction!.logGroup).toBeTypeOf('string');
+    expect(r.transaction!.fields.map((f) => f.name)).toEqual(['目的', 'ユーザー']);
+    const hop = r.hops.find((x) => x.hop === 'account-service')!;
+    expect(hop.logGroup).toBeTypeOf('string');
+    expect(hop.logGroup).not.toBe(r.transaction!.logGroup);
+    const app = Object.fromEntries(hop.fields!.map((f) => [f.name, f.app]));
+    expect(app).toMatchObject({ 宛先: 'account-service', scope: 'account:read', ユーザー: USERS.tokyoManager, 目的: 'case-summary' });
+    expect(Object.keys(app)).toContain('JWTを発行したrole');
+  }, 130_000);
+
   it('最近の取引の一覧に、その取引が出る', async () => {
     const list = await eventually(async () => {
       const r = await browserGet('/api/audit/requests', auditor);
@@ -59,6 +76,25 @@ describe('FR-7(d): 監査担当は、取引ごとに各ホップの記録をAWS�
     }, 120_000, 5000);
     expect(list.find((t: { requestId: string }) => t.requestId === requestId)).toMatchObject({ user: USERS.tokyoManager, purpose: 'case-summary', caseId: T.tokyoCase });
   }, 130_000);
+
+  it('監査の操作も取引として一覧に出る。監査した取引のリクエストIDと、監査サービスを通った記録を引ける', async () => {
+    expect((await browserGet(`/api/audit/requests/${requestId}`, auditor)).status).toBe(200);
+    const list = await eventually(async () => {
+      const r = await browserGet('/api/audit/requests', auditor);
+      const found = r.body.transactions?.find((t: { route: string; auditTarget?: string; user: string }) =>
+        t.route === 'audit-reconcile' && t.auditTarget === requestId && t.user === USERS.auditor);
+      return found;
+    }, 120_000, 5000);
+    expect(list).toMatchObject({ purpose: 'audit', status: 200 });
+    // 監査の操作も、他の取引と同じく、各ホップがbffの刻んだリクエストIDで記録している
+    const r = await eventually(async () => {
+      const x = await browserGet(`/api/audit/requests/${list.requestId}`, auditor);
+      return x.body.hops?.some((h: HopRecord) => h.hop === 'entitlement-service') ? (x.body as Reconciled) : undefined;
+    }, 120_000, 5000);
+    expect(r.transaction).toMatchObject({ route: 'audit-reconcile', purpose: 'audit', user: USERS.auditor });
+    expect(r.hops.map((h) => `${h.depth}:${h.hop}`)).toEqual(['1:audit-service', '2:entitlement-service']);
+    expect(r.hops[0]).toMatchObject({ outcome: 'handled', actor: 'bff', purpose: 'audit', scope: 'audit:read' });
+  }, 250_000);
 
   it('同じログインのセッションの操作は、1つのまとまりとして時刻の順に並ぶ', async () => {
     const list = await eventually(async () => {
@@ -83,6 +119,17 @@ describe('FR-7(d): 監査担当は、取引ごとに各ホップの記録をAWS�
     const r = await reconciled((x) => !!x.transaction && x.transaction.check.result !== 'pending' && x.hops.every((h) => h.check.result !== 'pending'), 20 * 60_000, 30_000);
     expect(r.transaction!.check).toEqual({ result: 'match' });
     for (const h of r.hops) expect(h.check, `${h.hop}`).toEqual({ result: 'match' });
+    // 比べた2つの値と、AWSの記録の情報源（イベントID）が出る。`jti`と同じ`webIdentityTokenId`のイベントを対応づけている
+    for (const h of [r.transaction!, ...r.hops.filter((x) => x.outcome === 'handled')]) {
+      for (const f of h.fields!) {
+        expect(f, `${h.logGroup} ${f.name}`).toMatchObject({ result: 'match', aws: f.app });
+        expect(f.awsEvent?.eventId).toBeTypeOf('string');
+      }
+    }
+    for (const h of r.hops.filter((x) => x.outcome === 'handled')) {
+      expect(h.tokenEvent).toMatchObject({ event: 'GetWebIdentityToken', tokenId: h.tokenId });
+      expect(h.tokenEvent!.eventId).toBeTypeOf('string');
+    }
     const events = new Set(r.awsRecords.map((a) => a.event));
     expect(events).toContain('AssumeRole');
     expect(events).toContain('GetWebIdentityToken');

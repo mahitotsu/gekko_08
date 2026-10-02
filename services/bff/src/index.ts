@@ -207,7 +207,7 @@ async function logout(event: LambdaFunctionURLEvent): Promise<LambdaFunctionURLR
 /**
  * ログイン中のユーザーの代理で、取引の目的を刻んだセッションを作り、最初のホップを呼ぶ。STSの認証情報はどこにも保存しない
  * 1. IDトークンでfederated roleのセッションを得る（SourceIdentity＝ユーザー識別子）
- * 2. 目的用のroleへchainし、目的をtransitive session tagとして刻む。以降のホップは目的を変えられない
+ * 2. 目的用のroleへchainし、目的とリクエストIDをtransitive session tagとして刻む。以降のホップは目的もリクエストIDも変えられない（FR-6）
  */
 /** 時間を測り、同じ区切りでスパンを作る（NFR-3） */
 function step<T>(timings: Timings, key: string, name: string, f: () => Promise<T>): Promise<T> {
@@ -239,8 +239,8 @@ async function withChain<T>(s: Session, requestId: string, purpose: string, timi
     RoleArn: config.purposeRoleArn,
     RoleSessionName: requestId,
     DurationSeconds: 900,
-    Tags: [{ Key: 'purpose', Value: purpose }],
-    TransitiveTagKeys: ['purpose'],
+    Tags: [{ Key: 'purpose', Value: purpose }, { Key: 'requestId', Value: requestId }],
+    TransitiveTagKeys: ['purpose', 'requestId'],
   })));
   const session = { accessKeyId: c!.AccessKeyId!, secretAccessKey: c!.SecretAccessKey!, sessionToken: c!.SessionToken! };
   return f(createCaller({ session, requestId, targets: config.targets, timings }));
@@ -327,8 +327,9 @@ async function handle(event: LambdaFunctionURLEvent, span: Span): Promise<Lambda
     const r = await withChain(s, requestId, route.purpose, timings, (call) => call(route.target, route.body, { scope: route.scope }));
     log('info', 'handled', {
       hop: 'bff', requestId, route: route.name, purpose: route.purpose, user: s.username, status: r.status,
-      // 監査で、ログインのセッションごとに操作をまとめる。案件IDは表示用（経路のパスから得たもの）
+      // 監査で、ログインのセッションごとに操作をまとめる。案件IDと監査した取引のリクエストIDは表示用（経路のパスから得たもの）
       sessionRef: s.ref, loggedInAt: s.loggedInAt, caseId: (route.body as { caseId?: string }).caseId,
+      ...(route.name === 'audit-reconcile' ? { auditTarget: (route.body as { requestId: string }).requestId } : {}),
       timings: { ...timings, totalMs: Math.round(performance.now() - t0) },
     });
     if (route.name === 'me') {

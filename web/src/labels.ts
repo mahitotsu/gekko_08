@@ -43,6 +43,8 @@ export const ROUTE_LABELS: Record<string, string> = {
   'case-summary': '案件を開く',
   'case-unfreeze': '凍結を解除',
   agent: 'エージェントに分析させる',
+  'audit-list': '監査の一覧を開く',
+  'audit-reconcile': '取引を監査',
 };
 
 export const TOOL_LABELS: Record<string, string> = {

@@ -3,7 +3,7 @@ import { Template } from 'aws-cdk-lib/assertions';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import { describe, expect, it } from 'vitest';
-import { Hop, PURPOSE_TAG, type HopCaller } from '../lib/constructs/hop';
+import { Hop, PURPOSE_TAG, REQUEST_ID_TAG, type HopCaller } from '../lib/constructs/hop';
 import { atoms, canonical, diffAtoms, roleStatements, type Atom, type Json } from './policy';
 
 /**
@@ -155,16 +155,21 @@ function checkChainRoleScope(f: Fixture, caller: HopCaller): string[] {
   return diffAtoms(`${caller.hopName} chain role`, actual, expected);
 }
 
-/** chain用roleの信頼：呼び出し元のchain用roleだけを信頼し、新しいtagのキーは加えさせない */
+/** chain用roleの信頼：呼び出し元のchain用roleだけを、刻まれたリクエストIDのセッション名でだけ信頼し、新しいtagのキーは加えさせない */
 function checkChainTrust(f: Fixture, hop: Hop): string[] {
   if (!hop.chainRole) return [];
   const doc = f.template.Resources[roleId(f, hop.chainRole)].Properties.AssumeRolePolicyDocument;
   const principals = callersOf(f, hop).map((c) => r(f, c.chainRole.roleArn));
   const expected = atoms([
-    { Effect: 'Allow', Principal: { AWS: principals }, Action: ['sts:AssumeRole', 'sts:SetSourceIdentity'] },
+    // セッション名は、bffが刻んだリクエストIDに限る（FR-6）
+    {
+      Effect: 'Allow', Principal: { AWS: principals }, Action: 'sts:AssumeRole',
+      Condition: { StringEquals: { 'sts:RoleSessionName': `\${aws:PrincipalTag/${REQUEST_ID_TAG}}` } },
+    },
+    { Effect: 'Allow', Principal: { AWS: principals }, Action: 'sts:SetSourceIdentity' },
     {
       Effect: 'Allow', Principal: { AWS: principals }, Action: 'sts:TagSession',
-      Condition: { 'ForAllValues:StringEquals': { 'aws:TagKeys': [PURPOSE_TAG] } },
+      Condition: { 'ForAllValues:StringEquals': { 'aws:TagKeys': [PURPOSE_TAG, REQUEST_ID_TAG] } },
     },
   ]);
   return diffAtoms(`${hop.hopName} trust`, atoms(doc.Statement), expected);
@@ -215,7 +220,7 @@ describe('Hopのテンプレート', () => {
     expect(checks.chainRoleScope(fixture)).toEqual([]);
   });
 
-  it('chain用roleの信頼：呼び出し元のchain用roleだけを信頼し、tagのキーはpurposeだけ', () => {
+  it('chain用roleの信頼：呼び出し元のchain用roleだけを、リクエストIDのセッション名でだけ信頼し、tagのキーはpurposeとrequestIdだけ', () => {
     expect(checks.chainTrust(fixture)).toEqual([]);
   });
 

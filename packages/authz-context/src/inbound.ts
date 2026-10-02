@@ -4,8 +4,15 @@ import type { Provides, Subject } from './types';
 const STS_NAMESPACE = 'https://sts.amazonaws.com/';
 
 export class AuthzError extends Error {
-  constructor(readonly status: 401 | 403, message: string) {
+  /**
+   * 署名を確かめたJWTに刻まれていたリクエストID。ヘッダーのリクエストIDと食い違って拒否したときだけ持つ。
+   * 拒否の記録を、ヘッダーの値ではなく、bffが刻んだ値の取引に結びつけるのに使う
+   */
+  stampedRequestId?: string;
+
+  constructor(readonly status: 401 | 403, message: string, stampedRequestId?: string) {
     super(message);
+    if (stampedRequestId) this.stampedRequestId = stampedRequestId;
   }
 }
 
@@ -77,8 +84,9 @@ function tagValue(v: unknown): string | undefined {
 /**
  * 受け取ったJWTを検証し、subjectを返す。
  * callerArnには、入口のIAMが確かめた呼び出し元を渡す。ヘッダーや本文の自己申告は使わない（FR-2）。
+ * requestIdには、ヘッダーで受け取ったリクエストIDを渡す。bffが刻んだJWTの`principal_tags.requestId`と違えば拒否する（FR-6）
  */
-export async function verifyInbound(token: string | undefined, callerArn: string | undefined, opts: VerifyOptions): Promise<Verified> {
+export async function verifyInbound(token: string | undefined, callerArn: string | undefined, opts: VerifyOptions, requestId: string | undefined): Promise<Verified> {
   const actorRole = roleNameFromAssumedRoleArn(callerArn);
   const caller = actorRole ? opts.callers[actorRole] : undefined;
   // 入口のresource policyで拒否されるはずの呼び出し元。多層防御としてここでも拒否する
@@ -109,6 +117,10 @@ export async function verifyInbound(token: string | undefined, callerArn: string
   const purpose = tagValue(ns?.principal_tags?.purpose);
   const scope = tagValue(ns?.request_tags?.scope);
   if (!purpose || !scope) throw new AuthzError(401, 'authorization context lacks delegation scope');
+  // リクエストIDは、途中のホップが変えられない値として、起点が刻んだものと照合する
+  const stamped = tagValue(ns?.principal_tags?.requestId);
+  if (!stamped) throw new AuthzError(401, 'authorization context lacks request id');
+  if (stamped !== requestId) throw new AuthzError(401, 'request id does not match authorization context', stamped);
   // IAMが発行させない組み合わせ。IAMの設定の誤りや手での変更を、提供側の定義で止める
   const rule = opts.provides[scope];
   if (!rule) throw new AuthzError(403, 'scope is not provided');

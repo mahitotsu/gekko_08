@@ -26,7 +26,7 @@ beforeAll(async () => {
     provides: { 'case:summary': {} },
     keys: createLocalJWKSet({ keys: [jwk] }),
   };
-  token = await new SignJWT({ 'https://sts.amazonaws.com/': { source_identity: 'yamada', principal_tags: { purpose: 'case-summary' }, request_tags: { scope: 'case:summary' } } })
+  token = await new SignJWT({ 'https://sts.amazonaws.com/': { source_identity: 'yamada', principal_tags: { purpose: 'case-summary', requestId: 'req-1' }, request_tags: { scope: 'case:summary' } } })
     .setProtectedHeader({ alg: 'ES384', kid: 'k1' }).setIssuer(ISSUER).setAudience('aud-case').setSubject(CHAIN)
     .setIssuedAt().setExpirationTime('5m').sign(privateKey);
 });

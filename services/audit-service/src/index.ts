@@ -61,17 +61,17 @@ async function insights(groups: string[], queryString: string, startMs: number):
 const num = (v: string | undefined) => (v === undefined || v === '' ? undefined : Number(v));
 
 /**
- * 最近の取引（bffが最初のホップを呼んだもの）。表示と監査の経路は除く。
+ * 最近の取引（bffが最初のホップを呼んだもの）。表示の経路は除く。監査の操作も取引として含め、誰がどの取引を監査したかを追えるようにする。
  * 1回の操作（リクエスト）を1件とし、ログインのセッションの新しい順、セッションの中は時刻の順に並べる
  */
 async function listTransactions() {
-  const rows = await insights([LOG_GROUPS.bff], `fields @timestamp, requestId, route, purpose, user, status, sessionRef, loggedInAt, caseId
-| filter message = "handled" and hop = "bff" and route != "me" and route != "audit-list" and route != "audit-reconcile"
+  const rows = await insights([LOG_GROUPS.bff], `fields @timestamp, requestId, route, purpose, user, status, sessionRef, loggedInAt, caseId, auditTarget
+| filter message = "handled" and hop = "bff" and route != "me"
 | sort @timestamp desc
 | limit 500`, Date.now() - LIST_HOURS * 3600_000);
   const items = rows.map((r) => ({
     time: r['@timestamp'], requestId: r.requestId, route: r.route, purpose: r.purpose, user: r.user, status: num(r.status),
-    sessionRef: r.sessionRef || undefined, loggedInAt: num(r.loggedInAt), caseId: r.caseId || undefined,
+    sessionRef: r.sessionRef || undefined, loggedInAt: num(r.loggedInAt), caseId: r.caseId || undefined, auditTarget: r.auditTarget || undefined,
   }));
   // セッションの識別子がない記録（識別子を記録する前のセッション）は、ユーザーごとに1つにまとめる
   const key = (t: (typeof items)[number]) => t.sessionRef ?? `user:${t.user}`;
@@ -98,7 +98,31 @@ interface HopRecord {
   scope?: string;
   status?: number;
   reason?: string;
+  /** 拒否した呼び出しが、ヘッダーで名乗ったリクエストID。この取引のリクエストIDと違うときだけ持つ（JWTに刻まれた値はこの取引のもの） */
+  claimedRequestId?: string;
+  /** アプリの記録の情報源（このホップのロググループ） */
+  logGroup?: string;
+  /** `jti`と`webIdentityTokenId`で対応づけたAWSの記録（`GetWebIdentityToken`） */
+  tokenEvent?: EventRef & { tokenId?: string };
+  /** 項目ごとに、アプリの記録の値とAWSの記録の値を並べて比べた結果 */
+  fields?: Field[];
   check: Check;
+}
+
+/** 比べたAWSの記録（CloudTrailのイベント） */
+interface EventRef {
+  event: string;
+  eventId?: string;
+  time: string;
+}
+
+interface Field {
+  name: string;
+  app?: string;
+  aws?: string;
+  /** AWSの値を取り出したイベント。未着ならない */
+  awsEvent?: EventRef;
+  result: 'match' | 'mismatch' | 'pending';
 }
 
 type Check =
@@ -112,6 +136,8 @@ type Check =
 interface AwsRecord {
   time: string;
   event: string;
+  /** CloudTrailのイベントID。CloudTrailのイベント履歴で同じイベントを引ける */
+  eventId?: string;
   /** 呼んだ主体の表示名 */
   caller: string;
   sourceIdentity?: string;
@@ -159,6 +185,7 @@ function toAwsRecord(e: Event): TrailRecord | undefined {
   const rec: AwsRecord = {
     time: d.eventTime,
     event: name,
+    eventId: d.eventID,
     caller: name === 'AssumeRoleWithWebIdentity' ? 'Cognitoのユーザー（IDトークン）' : principal(d.userIdentity?.arn),
     sourceIdentity: d.userIdentity?.sessionContext?.sourceIdentity ?? d.responseElements?.sourceIdentity,
     ...(d.errorCode ? { error: String(d.errorCode) } : {}),
@@ -231,10 +258,13 @@ function callOrder(hops: HopRecord[], rows: Row[]): HopRecord[] {
 
 async function reconcile(requestId: string) {
   const groups = Object.values(LOG_GROUPS);
-  const rows = await insights(groups, `fields @timestamp, message, hop, route, user, actor, tokenSub, tokenId, subject.id, purpose, scope, status, reason, timings.totalMs
-| filter requestId = "${requestId}" and (message = "handled" or message = "rejected")
+  // 拒否の記録は、ヘッダーのリクエストID（自己申告）ではなく、JWTに刻まれていた値でも引く。ヘッダーを偽った呼び出しは、刻まれた値の取引に出し、
+  // 名乗られた取引には出さない
+  const rows = (await insights(groups, `fields @timestamp, message, hop, requestId, route, user, actor, tokenSub, tokenId, subject.id, purpose, scope, status, reason, stampedRequestId, timings.totalMs
+| filter (requestId = "${requestId}" or stampedRequestId = "${requestId}") and (message = "handled" or message = "rejected")
 | sort @timestamp asc
-| limit 1000`, Date.now() - RECONCILE_DAYS * 86400_000);
+| limit 1000`, Date.now() - RECONCILE_DAYS * 86400_000))
+    .filter((r) => !r.stampedRequestId || r.stampedRequestId === requestId);
 
   const bffRow = rows.find((r) => r.hop === 'bff' && r.message === 'handled');
   const firstTime = rows[0]?.['@timestamp'];
@@ -244,42 +274,63 @@ async function reconcile(requestId: string) {
 
   const stamped = records.find((r) => r.event === 'AssumeRole' && r.purpose);
   const byToken = new Map(records.filter((r) => r.tokenId).map((r) => [r.tokenId!, r]));
+  const purposeField = (app: string | undefined): Field => compare('目的', app, stamped && { value: stamped.purpose, event: stamped });
 
   const hops: HopRecord[] = rows.filter((r) => r.hop !== 'bff').map((r) => {
     const base = {
-      time: r['@timestamp'], hop: r.hop, status: num(r.status), reason: r.reason || undefined, depth: 1,
+      time: r['@timestamp'], hop: r.hop, status: num(r.status), reason: r.reason || undefined, depth: 1, logGroup: LOG_GROUPS[r.hop],
     };
-    if (r.message === 'rejected') return { ...base, outcome: 'rejected', check: { result: 'n/a' } };
-    const rec: HopRecord = {
-      ...base, outcome: 'handled', actor: r.actor, tokenIssuer: principal(r.tokenSub), tokenId: r.tokenId || undefined,
-      subject: r['subject.id'], purpose: r.purpose, scope: r.scope, check: { result: 'pending' },
+    if (r.message === 'rejected') {
+      return { ...base, outcome: 'rejected', ...(r.stampedRequestId ? { claimedRequestId: r.requestId } : {}), check: { result: 'n/a' } };
+    }
+    const tokenId = r.tokenId || undefined;
+    const ev = tokenId ? byToken.get(tokenId) : undefined;
+    const fromToken = (value: string | undefined) => ev && { value, event: ev };
+    // JWTを発行したroleは、role名で比べ、表示名で示す
+    const issuer = compare('JWTを発行したrole', principal(r.tokenSub), ev && { value: ev.issuerRole ? PRINCIPALS[ev.issuerRole] ?? 'このスタックの外のrole' : '不明', event: ev });
+    if (ev && ev.issuerRole !== roleName(r.tokenSub)) issuer.result = 'mismatch';
+    const fields = [
+      issuer,
+      compare('宛先', r.hop, fromToken(ev?.audience)),
+      compare('scope', r.scope, fromToken(ev?.scope)),
+      compare('ユーザー', r['subject.id'], fromToken(ev?.sourceIdentity)),
+      purposeField(r.purpose),
+    ];
+    return {
+      ...base, outcome: 'handled', actor: r.actor, tokenIssuer: principal(r.tokenSub), tokenId,
+      subject: r['subject.id'], purpose: r.purpose, scope: r.scope,
+      ...(ev ? { tokenEvent: { ...eventRef(ev), tokenId: ev.tokenId } } : {}),
+      fields, check: summarize(fields),
     };
-    const ev = rec.tokenId ? byToken.get(rec.tokenId) : undefined;
-    if (!ev) return rec;
-    const fields: string[] = [];
-    if (ev.issuerRole !== roleName(r.tokenSub)) fields.push('JWTを発行した主体');
-    if (ev.audience !== r.hop) fields.push('宛先');
-    if (ev.scope !== r.scope) fields.push('scope');
-    if (ev.sourceIdentity !== r['subject.id']) fields.push('ユーザー');
-    if (stamped && stamped.purpose !== r.purpose) fields.push('目的');
-    rec.check = fields.length ? { result: 'mismatch', fields } : { result: 'match' };
-    return rec;
   });
 
-  let entry: Check = { result: 'pending' };
-  if (bffRow && stamped) {
-    const fields: string[] = [];
-    if (stamped.purpose !== bffRow.purpose) fields.push('目的');
-    if (stamped.sourceIdentity !== bffRow.user) fields.push('ユーザー');
-    entry = fields.length ? { result: 'mismatch', fields } : { result: 'match' };
-  }
+  const entryFields = bffRow ? [
+    purposeField(bffRow.purpose),
+    compare('ユーザー', bffRow.user, stamped && { value: stamped.sourceIdentity, event: stamped }),
+  ] : [];
 
   return {
     requestId,
     hops: callOrder(hops, rows),
     transaction: bffRow ? {
-      time: bffRow['@timestamp'], user: bffRow.user, route: bffRow.route, purpose: bffRow.purpose, status: num(bffRow.status), check: entry,
+      time: bffRow['@timestamp'], user: bffRow.user, route: bffRow.route, purpose: bffRow.purpose, status: num(bffRow.status),
+      logGroup: LOG_GROUPS.bff, fields: entryFields, check: summarize(entryFields),
     } : null,
     awsRecords: records.map(({ issuerRole: _, ...r }) => r),
   };
+}
+
+const eventRef = (r: AwsRecord): EventRef => ({ event: r.event, eventId: r.eventId, time: r.time });
+
+/** 1つの項目を、アプリの記録の値とAWSの記録の値で比べる。AWSの記録が未着なら`pending` */
+function compare(name: string, app: string | undefined, aws: { value: string | undefined; event: AwsRecord } | undefined): Field {
+  if (!aws) return { name, app, result: 'pending' };
+  return { name, app, aws: aws.value, awsEvent: eventRef(aws.event), result: aws.value === app ? 'match' : 'mismatch' };
+}
+
+/** 項目ごとの結果をまとめる。1つでも違えば不一致、未着の項目が残れば未着 */
+function summarize(fields: Field[]): Check {
+  const mismatched = fields.filter((f) => f.result === 'mismatch').map((f) => f.name);
+  if (mismatched.length) return { result: 'mismatch', fields: mismatched };
+  return fields.some((f) => f.result === 'pending') ? { result: 'pending' } : { result: 'match' };
 }

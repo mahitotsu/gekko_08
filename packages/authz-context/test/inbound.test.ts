@@ -5,6 +5,7 @@ import { AuthzError, roleNameFromAssumedRoleArn, verifyInbound, type VerifyOptio
 const ISSUER = 'https://example.tokens.sts.global.api.aws';
 const CHAIN = 'arn:aws:iam::123456789012:role/case-chain';
 const CALLER_ARN = 'arn:aws:sts::123456789012:assumed-role/case-exec/case-fn';
+const RID = 'req-0001';
 
 let opts: VerifyOptions;
 let sign: (payload: JWTPayload, over?: { alg?: string; aud?: string; exp?: string; iss?: string }) => Promise<string>;
@@ -29,7 +30,7 @@ beforeAll(async () => {
 
 const ns = (over: Record<string, unknown> = {}) => ({
   'https://sts.amazonaws.com/': {
-    source_identity: 'yamada', principal_tags: { purpose: 'case-summary', project: 'x' }, request_tags: { scope: 'account:read' }, ...over,
+    source_identity: 'yamada', principal_tags: { purpose: 'case-summary', requestId: RID, project: 'x' }, request_tags: { scope: 'account:read' }, ...over,
   },
 });
 const claims = ns();
@@ -42,61 +43,70 @@ async function rejected(p: Promise<unknown>, status: number) {
 
 describe('verifyInbound', () => {
   it('検証済みのsubjectとactorを返す', async () => {
-    const v = await verifyInbound(await sign(claims), CALLER_ARN, opts);
+    const v = await verifyInbound(await sign(claims), CALLER_ARN, opts, RID);
     expect(v).toEqual({ subject: { id: 'yamada' }, purpose: 'case-summary', scope: 'account:read', actor: 'case-service', actorRole: 'case-exec', tokenSub: CHAIN });
   });
 
   it('JWTの`jti`を、AWSの記録と突き合わせるための識別子として返す', async () => {
-    const v = await verifyInbound(await sign({ ...claims, jti: 'b6f0c2de-0000-4000-8000-000000000001' }), CALLER_ARN, opts);
+    const v = await verifyInbound(await sign({ ...claims, jti: 'b6f0c2de-0000-4000-8000-000000000001' }), CALLER_ARN, opts, RID);
     expect(v.tokenId).toBe('b6f0c2de-0000-4000-8000-000000000001');
   });
 
   it('tagの値が配列でも読める', async () => {
-    const t = await sign(ns({ principal_tags: { purpose: ['case-summary'] } }));
-    expect((await verifyInbound(t, CALLER_ARN, opts)).purpose).toBe('case-summary');
+    const t = await sign(ns({ principal_tags: { purpose: ['case-summary'], requestId: RID } }));
+    expect((await verifyInbound(t, CALLER_ARN, opts, RID)).purpose).toBe('case-summary');
   });
 
-  it('宛先の違うJWTを拒否する', async () => rejected(verifyInbound(await sign(claims, { aud: 'aud-case' }), CALLER_ARN, opts), 401));
-  it('発行者の違うJWTを拒否する', async () => rejected(verifyInbound(await sign(claims, { iss: 'https://evil' }), CALLER_ARN, opts), 401));
-  it('期限切れのJWTを拒否する', async () => rejected(verifyInbound(await sign(claims, { exp: '-1m' }), CALLER_ARN, opts), 401));
+  it('宛先の違うJWTを拒否する', async () => rejected(verifyInbound(await sign(claims, { aud: 'aud-case' }), CALLER_ARN, opts, RID), 401));
+  it('発行者の違うJWTを拒否する', async () => rejected(verifyInbound(await sign(claims, { iss: 'https://evil' }), CALLER_ARN, opts, RID), 401));
+  it('期限切れのJWTを拒否する', async () => rejected(verifyInbound(await sign(claims, { exp: '-1m' }), CALLER_ARN, opts, RID), 401));
   it('改ざんしたJWTを拒否する', async () => {
     const t = await sign(claims);
     const [h, p, s] = t.split('.');
     const forged = Buffer.from(JSON.stringify({ ...JSON.parse(Buffer.from(p, 'base64url').toString()), ...ns({ source_identity: 'tanaka' }) })).toString('base64url');
-    await rejected(verifyInbound(`${h}.${forged}.${s}`, CALLER_ARN, opts), 401);
+    await rejected(verifyInbound(`${h}.${forged}.${s}`, CALLER_ARN, opts, RID), 401);
   });
-  it('JWTなしを拒否する', async () => rejected(verifyInbound(undefined, CALLER_ARN, opts), 401));
+  it('JWTなしを拒否する', async () => rejected(verifyInbound(undefined, CALLER_ARN, opts, RID), 401));
 
   it('呼び出し元のchain用roleと`sub`が一致しなければ拒否する', async () => {
     const other = { ...opts, callers: { 'case-exec': { hop: 'case-service', sub: 'arn:aws:iam::123456789012:role/other-chain' } } };
-    await rejected(verifyInbound(await sign(claims), CALLER_ARN, other), 401);
+    await rejected(verifyInbound(await sign(claims), CALLER_ARN, other, RID), 401);
   });
 
   it('対応表にない呼び出し元を拒否する', async () => {
-    await rejected(verifyInbound(await sign(claims), 'arn:aws:sts::123456789012:assumed-role/admin/x', opts), 403);
-    await rejected(verifyInbound(await sign(claims), undefined, opts), 403);
+    await rejected(verifyInbound(await sign(claims), 'arn:aws:sts::123456789012:assumed-role/admin/x', opts, RID), 403);
+    await rejected(verifyInbound(await sign(claims), undefined, opts, RID), 403);
   });
 
   it('subjectが欠けたJWTを拒否する', async () => {
-    await rejected(verifyInbound(await sign(ns({ source_identity: undefined })), CALLER_ARN, opts), 401);
-    await rejected(verifyInbound(await sign({}), CALLER_ARN, opts), 401);
+    await rejected(verifyInbound(await sign(ns({ source_identity: undefined })), CALLER_ARN, opts, RID), 401);
+    await rejected(verifyInbound(await sign({}), CALLER_ARN, opts, RID), 401);
   });
 
   it('委任の範囲（目的かscope）が欠けたJWTを拒否する', async () => {
-    await rejected(verifyInbound(await sign(ns({ principal_tags: {} })), CALLER_ARN, opts), 401);
-    await rejected(verifyInbound(await sign(ns({ request_tags: undefined })), CALLER_ARN, opts), 401);
+    await rejected(verifyInbound(await sign(ns({ principal_tags: { requestId: RID } })), CALLER_ARN, opts, RID), 401);
+    await rejected(verifyInbound(await sign(ns({ request_tags: undefined })), CALLER_ARN, opts, RID), 401);
+  });
+
+  it('JWTに刻まれたリクエストIDと、届いたリクエストIDが違えば拒否する', async () => {
+    await rejected(verifyInbound(await sign(claims), CALLER_ARN, opts, 'req-0002'), 401);
+    await rejected(verifyInbound(await sign(claims), CALLER_ARN, opts, undefined), 401);
+  });
+
+  it('リクエストIDが刻まれていないJWTを拒否する', async () => {
+    await rejected(verifyInbound(await sign(ns({ principal_tags: { purpose: 'case-summary' } })), CALLER_ARN, opts, RID), 401);
   });
 
   it('提供側の定義にないscopeを拒否する', async () => {
-    await rejected(verifyInbound(await sign(ns({ request_tags: { scope: 'account:delete' } })), CALLER_ARN, opts), 403);
+    await rejected(verifyInbound(await sign(ns({ request_tags: { scope: 'account:delete' } })), CALLER_ARN, opts, RID), 403);
   });
 
   it('目的の制限があるscopeは、許された目的と呼び出し元のときだけ受け付ける', async () => {
-    const unfreeze = (purpose: string) => ns({ principal_tags: { purpose }, request_tags: { scope: 'account:unfreeze' } });
-    expect((await verifyInbound(await sign(unfreeze('account-unfreeze')), CALLER_ARN, opts)).scope).toBe('account:unfreeze');
-    await rejected(verifyInbound(await sign(unfreeze('case-summary')), CALLER_ARN, opts), 403);
+    const unfreeze = (purpose: string) => ns({ principal_tags: { purpose, requestId: RID }, request_tags: { scope: 'account:unfreeze' } });
+    expect((await verifyInbound(await sign(unfreeze('account-unfreeze')), CALLER_ARN, opts, RID)).scope).toBe('account:unfreeze');
+    await rejected(verifyInbound(await sign(unfreeze('case-summary')), CALLER_ARN, opts, RID), 403);
     const otherCaller = { ...opts, callers: { 'case-exec': { hop: 'fraud-mcp', sub: CHAIN } } };
-    await rejected(verifyInbound(await sign(unfreeze('account-unfreeze')), CALLER_ARN, otherCaller), 403);
+    await rejected(verifyInbound(await sign(unfreeze('account-unfreeze')), CALLER_ARN, otherCaller, RID), 403);
   });
 });
 

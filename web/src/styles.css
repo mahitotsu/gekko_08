@@ -294,3 +294,50 @@ h2 { font-size: 1.05rem; }
 .session-row td > * { margin-right: 10px; }
 .session-user { font-weight: 700; }
 .hop-cell { display: inline-block; white-space: nowrap; }
+
+/* 監査：一覧と詳細を左右に並べる */
+.content.wide { max-width: 1480px; }
+.audit-split { display: grid; grid-template-columns: minmax(320px, 400px) minmax(0, 1fr); gap: 20px; align-items: start; }
+.audit-list { position: sticky; top: 16px; max-height: calc(100vh - 32px); overflow: auto; padding: 14px; }
+.audit-list .grid th, .audit-list .grid td { padding: 6px 6px; }
+.audit-detail { min-width: 0; }
+.pane-title { font-size: 0.95rem; margin: 0 0 8px; display: flex; align-items: baseline; gap: 8px; }
+@media (max-width: 1000px) {
+  .audit-split { grid-template-columns: 1fr; }
+  .audit-list { position: static; max-height: none; }
+}
+
+.labeled { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.label {
+  display: inline-block; font-size: 0.72rem; font-weight: 600; color: var(--muted);
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 4px; padding: 0 6px; margin-right: 6px;
+}
+.labeled code { overflow-wrap: anywhere; }
+
+.legend { margin-top: 14px; }
+.legend p { margin: 0 0 6px; color: var(--text); }
+.sources { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 0; font-size: 0.85rem; }
+.sources dd { margin: 0; }
+.src { display: inline-block; font-size: 0.78rem; font-weight: 700; padding: 1px 8px; border-radius: 999px; border: 1px solid currentColor; white-space: nowrap; }
+.src.app { color: var(--entitlement); }
+.src.aws { color: var(--identity); }
+
+.hop-records { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px; }
+.hop-record { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+.hop-record.entry { background: color-mix(in srgb, var(--delegation) 5%, transparent); }
+.hop-record.rejected { background: var(--deny-bg); }
+.record-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
+.record-name { flex: 1; }
+.record-result { display: inline-flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+.record-note { flex-basis: 100%; }
+.compare { margin-top: 8px; table-layout: fixed; }
+.compare th:first-child { width: 150px; }
+.compare th:last-child { width: 130px; }
+.compare tbody th { color: var(--text); font-weight: 600; white-space: normal; }
+.compare code { white-space: normal; overflow-wrap: anywhere; }
+.compare tr.source-row td { font-size: 0.8rem; }
+.compare tr.key-row { background: var(--surface-2); }
+.compare tr.diff td { background: var(--deny-bg); }
+.compare tr.diff td:nth-child(2) code, .compare tr.diff td:nth-child(3) code { color: var(--deny); font-weight: 700; }
+.event-src + .event-src { margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--border); }
+.aws-all { margin-top: 18px; }

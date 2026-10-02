@@ -96,7 +96,8 @@ export function App() {
         </div>
         {me && <UserBox me={me} onLogout={logout} />}
       </header>
-      <main className="content">
+      {/* 監査は一覧と詳細を左右に並べるので、幅を広げる */}
+      <main className={`content ${me && view === 'audit' ? 'wide' : ''}`}>
         {me === undefined && <p className="muted">読み込み中…</p>}
         {me === null && <SignedOut />}
         {me && (
