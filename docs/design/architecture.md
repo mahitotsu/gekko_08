@@ -134,7 +134,7 @@ IDトークンには、Pre Token Generation V2トリガーが`https://aws.amazon
 `purpose`は画面に見せるためのもので、ブラウザから目的は受け取らない。fraud-agentの応答の`toolCalls`は、各要素に`name`、`input`、`status`と、
 拒否されたときは呼び出し先のホップが返した`reason`を持つ。
 
-画面（`web/`）は、ReactとViteで作る静的なSPAである（[画面のADR](../adr/{ts}-demo-ui-react-static.md)）。操作ごとに、取引の目的、リクエストID、結果、
+画面（`web/`）は、ReactとViteで作る静的なSPAである（[画面のADR](../adr/20261002065842-demo-ui-react-static.md)）。操作ごとに、取引の目的、リクエストID、結果、
 拒否したときはその層を表示する。理由から層への対応（`scope does not allow the action`は委任の範囲、`no entitlement`と`branch mismatch`は業務的なアクセス権）は
 表示にだけ使い、画面はユーザーに応じて操作を隠さない。
 
