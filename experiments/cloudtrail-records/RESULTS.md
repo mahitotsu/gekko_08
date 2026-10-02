@@ -1,6 +1,6 @@
 # 検証結果：STSの呼び出しがCloudTrailに残す値
 
-実施：2026-10-02（UTC）、ap-northeast-1。デプロイ済みのスタック`Gekko08App`の取引で記録されたイベントと、手元で発行したJWT（宛先`gekko08-jti-check`）のイベントを、
+実施：2026-10-02（UTC）、ap-northeast-1。デプロイ済みのスタック`Gekko08App`のリクエストで記録されたイベントと、手元で発行したJWT（宛先`gekko08-jti-check`）のイベントを、
 `aws cloudtrail lookup-events`で読んだ。検証のための構成は作っていない。
 
 目的：監査サービスが、各ホップのログ（アプリの記録）とAWSの記録を突き合わせるために、CloudTrailのイベントから何が得られるかを確かめる。

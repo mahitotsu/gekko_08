@@ -15,15 +15,15 @@ export interface SessionCredentials {
 export interface Target {
   url: string;
   audience: string;
-  /** JWTに付けられるscope（利用側の定義）。IAMがこれ以外を付けさせず、目的の制限があるscopeは許された目的の取引でだけ付けさせる */
+  /** JWTに付けられるscope（利用側の定義）。IAMがこれ以外を付けさせず、目的の制限があるscopeは許された目的のリクエストでだけ付けさせる */
   scopes: string[];
   /** 呼び出し先がchain用roleを持ち、chainのセッションを受け取るか */
   forwardSession: boolean;
 }
 
-/** 提供側の定義の、scopeごとの制限。制限のないscopeは、どの取引でも、許された呼び出し元なら使える */
+/** 提供側の定義の、scopeごとの制限。制限のないscopeは、どのリクエストでも、許された呼び出し元なら使える */
 export interface ScopeRule {
-  /** このscopeを使ってよい取引の目的 */
+  /** このscopeを使ってよいリクエストの目的 */
   purposes?: string[];
   /** このscopeを使ってよい呼び出し元のホップ */
   callers?: string[];

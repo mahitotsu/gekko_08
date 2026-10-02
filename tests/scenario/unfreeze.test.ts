@@ -23,7 +23,7 @@ beforeEach(async () => {
 
 const unfreeze = (caseId: string, cookie: string) => browserPost(`/api/cases/${caseId}/unfreeze`, '', cookie);
 
-describe('FR-7, FR-2: 凍結の解除は、人間の解除の取引で、権限のある人だけができる', () => {
+describe('FR-7, FR-2: 凍結の解除は、人間の解除のリクエストで、権限のある人だけができる', () => {
   it('支店長（tokyo）は自分の支店の口座の凍結を解除できる。誰がどのリクエストで解除したかが口座に残る', async () => {
     const r = await unfreeze(T.unfreezeCase, manager);
     expect(r.status).toBe(200);
@@ -47,7 +47,7 @@ describe('FR-7, FR-2: 凍結の解除は、人間の解除の取引で、権限�
     expect(await readAccount(T.osakaAccount)).toMatchObject({ status: 'frozen' });
   });
 
-  it('FR-6: 解除の取引のログに、目的と解除のscopeが残る', async () => {
+  it('FR-6: 解除のリクエストのログに、目的と解除のscopeが残る', async () => {
     const r = await unfreeze(T.unfreezeCase, manager);
     const l = (await handledLogs([r.body.requestId], ['bff', 'case-service', 'account-service'], startTime))[r.body.requestId];
     expect(l.bff).toMatchObject({ user: USERS.tokyoManager, route: 'case-unfreeze', purpose: 'account-unfreeze', status: 200 });
@@ -56,8 +56,8 @@ describe('FR-7, FR-2: 凍結の解除は、人間の解除の取引で、権限�
   });
 });
 
-describe('FR-3, FR-7: ホップが侵害されても、エージェントの取引から解除のscopeは発行できない', () => {
-  it('エージェントの取引で、共有のホップ（fraud-mcpから呼ばれたcase-service）のセッションは、account-service宛ての解除のJWTを発行できない', async () => {
+describe('FR-3, FR-7: ホップが侵害されても、エージェントのリクエストから解除のscopeは発行できない', () => {
+  it('エージェントのリクエストで、共有のホップ（fraud-mcpから呼ばれたcase-service）のセッションは、account-service宛ての解除のJWTを発行できない', async () => {
     // bff → fraud-agent → fraud-mcp → case-serviceと、実際のエージェントの経路のとおりにchainする
     const agent = await chainTo(await purposeSession('tokyoManager', 'agent-analysis'), o.FraudAgentChainRoleArn);
     const mcp = await chainTo(agent, o.FraudMcpChainRoleArn);
@@ -65,14 +65,14 @@ describe('FR-3, FR-7: ホップが侵害されても、エージェントの取�
     await expect(mintJwt(caseService, o.AccountServiceAudience, 'account:unfreeze')).rejects.toThrow(/not authorized to perform: sts:TagGetWebIdentityToken/);
   });
 
-  it('エージェントの取引のfraud-mcpのセッションは、account-service宛ての解除のJWTを発行できない', async () => {
+  it('エージェントのリクエストのfraud-mcpのセッションは、account-service宛ての解除のJWTを発行できない', async () => {
     const agent = await chainTo(await purposeSession('tokyoManager', 'agent-analysis'), o.FraudAgentChainRoleArn);
     const mcp = await chainTo(agent, o.FraudMcpChainRoleArn);
     await expect(mintJwt(mcp, o.AccountServiceAudience, 'account:unfreeze')).rejects.toThrow(/not authorized to perform: sts:TagGetWebIdentityToken/);
     await expect(mintJwt(mcp, o.AccountServiceAudience, 'account:read')).resolves.toBeTypeOf('string');
   });
 
-  it('エージェントの取引の途中で、目的を解除の取引に変えられない', async () => {
+  it('エージェントのリクエストの途中で、目的を解除のリクエストに変えられない', async () => {
     const agent = await chainTo(await purposeSession('tokyoManager', 'agent-analysis'), o.FraudAgentChainRoleArn);
     await expect(chainTo(agent, o.FraudMcpChainRoleArn, { Tags: [{ Key: 'purpose', Value: 'account-unfreeze' }] }))
       .rejects.toThrow(/conflicts with a transitive tag key/);

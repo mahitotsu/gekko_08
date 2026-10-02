@@ -2,7 +2,7 @@
 
 export const PURPOSE_LABELS: Record<string, string> = {
   profile: '本人の表示',
-  audit: '取引の監査',
+  audit: 'リクエストの監査',
   'case-summary': '案件を開く',
   'account-unfreeze': '凍結を解除する',
   'agent-analysis': 'エージェントによる分析',
@@ -20,7 +20,7 @@ export const LAYER_LABELS: Record<Layer, string> = {
 export const REASONS: Record<string, { layer: Layer; text: string }> = {
   'scope does not allow the action': {
     layer: 'delegation',
-    text: 'この取引で、この呼び出し元に許されたscopeに、この操作が含まれていない。scopeはIAMが強制し、取引の目的で上限が決まる',
+    text: 'このリクエストで、この呼び出し元に許されたscopeに、この操作が含まれていない。scopeはIAMが強制し、リクエストの目的で上限が決まる',
   },
   'no entitlement': {
     layer: 'entitlement',
@@ -48,7 +48,7 @@ export const ROUTE_LABELS: Record<string, string> = {
   'case-unfreeze': '凍結を解除',
   agent: 'エージェントに分析させる',
   'audit-list': '監査の一覧を開く',
-  'audit-reconcile': '取引を監査',
+  'audit-reconcile': 'リクエストを監査',
 };
 
 export const TOOL_LABELS: Record<string, string> = {

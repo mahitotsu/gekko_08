@@ -6,7 +6,7 @@ const STS_NAMESPACE = 'https://sts.amazonaws.com/';
 export class AuthzError extends Error {
   /**
    * 署名を確かめたJWTに刻まれていたリクエストID。ヘッダーのリクエストIDと食い違って拒否したときだけ持つ。
-   * 拒否の記録を、ヘッダーの値ではなく、bffが刻んだ値の取引に結びつけるのに使う
+   * 拒否の記録を、ヘッダーの値ではなく、bffが刻んだ値のリクエストに結びつけるのに使う
    */
   stampedRequestId?: string;
 
@@ -37,7 +37,7 @@ export interface VerifyOptions {
 
 export interface Verified {
   subject: Subject;
-  /** 取引の目的（入口で刻まれ、途中で変えられないtransitive session tag） */
+  /** リクエストの目的（入口で刻まれ、途中で変えられないtransitive session tag） */
   purpose: string;
   /** 呼び出し元がこの宛先に付けたscope（IAMが値を限る） */
   scope: string;

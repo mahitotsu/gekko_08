@@ -6,7 +6,7 @@ export const authz: DelegationDefinition = {
   provides: {
     'case:summary': {},
     'case:read': {},
-    // 凍結の解除の依頼は、凍結を解除する取引でだけ
+    // 凍結の解除の依頼は、凍結を解除するリクエストでだけ
     'case:unfreeze': { purposes: ['account-unfreeze'] },
   },
   consumes: {

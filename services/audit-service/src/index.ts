@@ -4,7 +4,7 @@ import { createHopHandler, traceAwsClient, type Call, type CallResult } from '@g
 import type { Reconciled, TransactionList } from './api';
 import { logTime, ownRows, reconcileRecords, toAwsRecord, transactionsFrom, type Directory, type Row, type TrailRecord } from './reconcile';
 
-// 監査サービス。1回の取引について、各ホップのログ（アプリの記録）と、CloudTrail（AWSの記録）を突き合わせる（監査サービスのADR）。
+// 監査サービス。1回のリクエストについて、各ホップのログ（アプリの記録）と、CloudTrail（AWSの記録）を突き合わせる（監査サービスのADR）。
 // 他のホップと同じ入口で守り、監査の権限（`audit:view`）を持つユーザーにだけ応じる。
 // このファイルはAWSから読む部分だけを持ち、突き合わせは`reconcile.ts`の純粋な関数が行う
 const trail = traceAwsClient(new CloudTrailClient({}));
@@ -57,7 +57,7 @@ async function insights(groups: string[], queryString: string, startMs: number):
   throw new Error('logs query timed out');
 }
 
-/** 最近の取引（bffが最初のホップを呼んだもの）。表示の経路は除く。監査の操作も取引として含め、誰がどの取引を監査したかを追えるようにする */
+/** 最近のリクエスト（bffが最初のホップを呼んだもの）。表示の経路は除く。監査の操作もリクエストとして含め、誰がどのリクエストを監査したかを追えるようにする */
 async function listTransactions(): Promise<TransactionList> {
   const rows = await insights([DIRECTORY.logGroups.bff], `fields @timestamp, requestId, route, purpose, user, status, sessionRef, loggedInAt, caseId, auditTarget
 | filter message = "handled" and hop = "bff" and route != "me"
@@ -89,7 +89,7 @@ async function reconcile(requestId: string): Promise<Reconciled> {
 | filter (requestId = "${requestId}" or stampedRequestId = "${requestId}") and (message = "handled" or message = "rejected")
 | sort @timestamp asc
 | limit 1000`, Date.now() - RECONCILE_DAYS * 86400_000));
-  // CloudTrailは取引の少し前から引く（時刻はUTC）
+  // CloudTrailはリクエストの少し前から引く（時刻はUTC）
   const since = rows.length ? new Date(logTime(rows[0]['@timestamp']) - 5 * 60_000) : undefined;
   const records = since ? await awsRecords(requestId, since) : [];
   return reconcileRecords(rows, records, DIRECTORY);

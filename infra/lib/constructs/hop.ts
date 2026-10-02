@@ -5,7 +5,7 @@ import type { Provides } from '@gekko08/authz-context';
 import { Construct } from 'constructs';
 import { enableTelemetry, NodeFunction, type NodeFunctionProps } from './node-function';
 
-/** 取引の目的を運ぶtransitive session tagのキー。chainで引き継ぎ、途中で変えられない */
+/** リクエストの目的を運ぶtransitive session tagのキー。chainで引き継ぎ、途中で変えられない */
 export const PURPOSE_TAG = 'purpose';
 /** リクエストIDを運ぶtransitive session tagのキー。bffが刻み、各chainの`RoleSessionName`をこの値に縛る（FR-6） */
 export const REQUEST_ID_TAG = 'requestId';
@@ -30,7 +30,7 @@ export interface HopTarget {
 /** 呼び出し元がこのホップ宛てのJWTに付けられるscope */
 export interface DelegatedScope {
   scope: string;
-  /** このscopeを付けられる取引の目的。省くと、どの取引でも付けられる */
+  /** このscopeを付けられるリクエストの目的。省くと、どのリクエストでも付けられる */
   purposes?: string[];
 }
 
@@ -192,7 +192,7 @@ export class Hop extends Construct {
         NumericLessThanEquals: { 'sts:DurationSeconds': 300 },
       },
     }));
-    // 付けられるのは、宣言したscopeだけ。目的の制限がないscopeは1つの文に、目的の制限があるscopeは、許した目的の取引でだけ付けられる文にする
+    // 付けられるのは、宣言したscopeだけ。目的の制限がないscopeは1つの文に、目的の制限があるscopeは、許した目的のリクエストでだけ付けられる文にする
     // （experiments/scope-tagsのE4）
     const open = scopes.filter((s) => !s.purposes).map((s) => s.scope);
     if (open.length > 0) {

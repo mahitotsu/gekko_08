@@ -14,8 +14,8 @@ IAM roleだけのスタックに対して実行した。
 - **E1（形A：ホップごとのscope）**：`GetWebIdentityToken`は宛先`ForAnyValue:StringEquals`（当時の参照実装の本体と同じ書き方）で許す。
   `sts:TagGetWebIdentityToken`は、宛先ごとに文を分け、宛先を`ForAllValues`で1つに限り、tagのキーを`scope`だけ、値を1つに限って許す
   （case-service宛ては`case:summary`、account-service宛ては`account:read`）。
-- **E2（形B：取引の目的）**：User（ログイン時のfederated roleのセッションに相当。SourceIdentity＝yamada、transitive tag `branch`＝tokyo）→
-  Purpose（取引の目的を刻む）→ Chain（下流のchain用role）。
+- **E2（形B：リクエストの目的）**：User（ログイン時のfederated roleのセッションに相当。SourceIdentity＝yamada、transitive tag `branch`＝tokyo）→
+  Purpose（リクエストの目的を刻む）→ Chain（下流のchain用role）。
   - Purposeの信頼ポリシーは、`sts:TagSession`をキー`branch`・`purpose`だけ、`aws:RequestTag/purpose`を`case-summary`・`agent-analysis`だけに限る。
   - Chainは、case-service宛てのJWTはいつでも、account-service宛てのJWTは`aws:PrincipalTag/purpose`＝`case-summary`のときだけ発行できる。
 - **E3（形Aと形Bの組み合わせ）**：Chainに、case-service宛てで`scope`＝`case:read`だけを付けられる`sts:TagGetWebIdentityToken`を許す。
@@ -26,7 +26,7 @@ IAM roleだけのスタックに対して実行した。
 
 - 形A：JWTに付ける`scope`（`request_tags`）の値を、宛先ごとにIAMで限れた。付けられるのは許した値だけで、宛先の違う値、余計なキー、
   複数の宛先へのtag付けは拒否された。
-- 形B：取引の目的をtransitive session tagとして刻め、下流のすべてのJWTの`principal_tags`に入り、途中で上書きできなかった。
+- 形B：リクエストの目的をtransitive session tagとして刻め、下流のすべてのJWTの`principal_tags`に入り、途中で上書きできなかった。
   目的によって、下流が発行できるJWTの宛先をIAMで変えられた。
 - **当時の参照実装の本体の宛先の条件に穴があった**（本体は`ForAllValues`＋`Null`に直した）。 `ForAnyValue:StringEquals`では、許した宛先に外部の宛先を混ぜたJWTを発行できた。
   `ForAllValues:StringEquals`と`Null`の組み合わせなら拒否できた。
@@ -54,10 +54,10 @@ IAM roleだけのスタックに対して実行した。
 | E1-6：tagなし | 発行できた。**`scope`のないJWTも作れるので、受信側は`scope`がないことを「何も許さない」と扱う必要がある** |
 | E1-7：宛先`[case-service, https://external.example]`（ForAnyValue） | **発行できた**。`aud`は2つの値の配列 |
 
-- `request_tags`は`principal_tags`とは別のクレームに入る。セッションタグ（ユーザーの属性や取引の目的）と混ざらない。
+- `request_tags`は`principal_tags`とは別のクレームに入る。セッションタグ（ユーザーの属性やリクエストの目的）と混ざらない。
 - `sts:TagGetWebIdentityToken`の判定でも、`sts:IdentityTokenAudience`の条件が効いた。宛先と値の組を1つの文で限れる。
 
-### E2：取引の目的（形B）
+### E2：リクエストの目的（形B）
 
 | 試験 | 結果 |
 |---|---|
@@ -79,7 +79,7 @@ IAM roleだけのスタックに対して実行した。
 | E3-1：`purpose=agent-analysis`のChainで、case-service宛てに`scope=case:read` | 発行できた。`principal_tags`の`purpose`と`request_tags`の`scope`が両方入る |
 | E3-2：同じChainで、case-service宛てに`scope=case:summary` | 拒否 |
 
-### E4：同じ宛先で、取引の目的ごとにscopeを変える（2026-10-01に追加）
+### E4：同じ宛先で、リクエストの目的ごとにscopeを変える（2026-10-01に追加）
 
 構成：Chain4（Purposeを信頼）に、account-service宛ての`GetWebIdentityToken`を目的`case-summary`・`account-unfreeze`で許す。
 `sts:TagGetWebIdentityToken`は目的ごとに文を分け、各文に`aws:PrincipalTag/purpose`の条件を加える（`case-summary`なら`scope=account:read`だけ、
@@ -96,16 +96,16 @@ IAM roleだけのスタックに対して実行した。
 | E4-8：`scope=case:read case:propose`（空白を含む値） | 発行できた。`request_tags`に値がそのまま入る |
 
 - `sts:TagGetWebIdentityToken`の判定でも、`aws:PrincipalTag/purpose`（transitive tagで引き継いだ目的）の条件が効いた。同じ呼び出し元と宛先の組で、
-  付けられるscopeを取引の目的ごとに変えられる。
+  付けられるscopeをリクエストの目的ごとに変えられる。
 - JWTのtagの値に空白を使える。scopeを空白区切りの一覧にできる。
 - 同じ実行で、E0〜E3は前回と同じ結果だった（E1-7は今回も発行できた）。目的を刻むchainは、ウォーム10回で中央値123ms、最大178ms。
 
 ## 設計への示唆
 
-- 取引の目的（Transaction Tokensの`purp`に相当）は形Bで、ホップごとの委任の範囲（Token Exchangeのdownscopingに相当）は形Aで、
+- リクエストの目的（Transaction Tokensの`purp`に相当）は形Bで、ホップごとの委任の範囲（Token Exchangeのdownscopingに相当）は形Aで、
   AWSに強制させられる。いずれも、値を決めるのはIAMのポリシー（CDKで生成）で、各ホップのコードではない。
 - 形Bは、目的に応じてIAM自体の判定（どの宛先のJWTを作れるか）を変えられる。目的に合わない下流への呼び出しを、アプリの判定より前に止められる。
 - 受信側は、`scope`がないJWTを「何も許さない」と扱う必要がある（E1-6）。
 - 参照実装の本体は、`GetWebIdentityToken`の宛先の条件を`ForAllValues`＋`Null`に直す必要がある（E1-7）。
-- 同じ呼び出し元と宛先の組で、取引の目的ごとにscopeを変えるには、`sts:TagGetWebIdentityToken`の文を目的ごとに分け、`aws:PrincipalTag/purpose`の条件を加える（E4）。
-  目的の条件がないと、組に許したscopeのどれでも、許した目的のどの取引でも付けられる。
+- 同じ呼び出し元と宛先の組で、リクエストの目的ごとにscopeを変えるには、`sts:TagGetWebIdentityToken`の文を目的ごとに分け、`aws:PrincipalTag/purpose`の条件を加える（E4）。
+  目的の条件がないと、組に許したscopeのどれでも、許した目的のどのリクエストでも付けられる。

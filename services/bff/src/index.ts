@@ -28,7 +28,7 @@ interface BffConfig {
   /** ログアウトのあとにCognitoが戻す先（アプリクライアントの`logoutUrls`） */
   logoutUri: string;
   federatedRoleArn: string;
-  /** 取引の目的を刻むrole */
+  /** リクエストの目的を刻むrole */
   purposeRoleArn: string;
   targets: Record<string, Target>;
 }
@@ -205,7 +205,7 @@ async function logout(event: LambdaFunctionURLEvent): Promise<LambdaFunctionURLR
 }
 
 /**
- * ログイン中のユーザーの代理で、取引の目的を刻んだセッションを作り、最初のホップを呼ぶ。STSの認証情報はどこにも保存しない
+ * ログイン中のユーザーの代理で、リクエストの目的を刻んだセッションを作り、最初のホップを呼ぶ。STSの認証情報はどこにも保存しない
  * 1. IDトークンでfederated roleのセッションを得る（SourceIdentity＝ユーザー識別子）
  * 2. 目的用のroleへchainし、目的とリクエストIDをtransitive session tagとして刻む。以降のホップは目的もリクエストIDも変えられない（FR-6）
  */
@@ -236,7 +236,7 @@ const AUDIT_REQUEST = /^\/api\/audit\/requests\/([0-9a-f-]{36})$/;
 
 interface HopRoute {
   name: string;
-  /** 取引の目的。bffが経路ごとに決める */
+  /** リクエストの目的。bffが経路ごとに決める */
   purpose: string;
   target: string;
   /** 最初のホップに付けるscope */
@@ -252,7 +252,7 @@ function hopRoute(event: LambdaFunctionURLEvent): HopRoute | undefined {
   }
   const m = method === 'GET' ? event.rawPath.match(CASE_SUMMARY) : null;
   if (m) return { name: 'case-summary', purpose: PURPOSES.caseSummary, target: 'case-service', scope: 'case:summary', body: { action: 'summary', caseId: m[1] } };
-  // 凍結の解除は、この経路でだけ目的`account-unfreeze`を刻む。エージェントの取引からは解除のscopeを発行できない
+  // 凍結の解除は、この経路でだけ目的`account-unfreeze`を刻む。エージェントのリクエストからは解除のscopeを発行できない
   const u = method === 'POST' ? event.rawPath.match(CASE_UNFREEZE) : null;
   if (u) return { name: 'case-unfreeze', purpose: PURPOSES.accountUnfreeze, target: 'case-service', scope: 'case:unfreeze', body: { action: 'unfreeze', caseId: u[1] } };
   // 監査。監査サービスが、監査の権限（属性サービス）を確かめる
@@ -311,7 +311,7 @@ async function handle(event: LambdaFunctionURLEvent, span: Span): Promise<Lambda
     const r = await withChain(s, requestId, route.purpose, timings, (call) => call(route.target, route.body, { scope: route.scope }));
     log('info', 'handled', {
       hop: 'bff', requestId, route: route.name, purpose: route.purpose, user: s.username, status: r.status,
-      // 監査で、ログインのセッションごとに操作をまとめる。案件IDと監査した取引のリクエストIDは表示用（経路のパスから得たもの）
+      // 監査で、ログインのセッションごとに操作をまとめる。案件IDと監査対象のリクエストIDは表示用（経路のパスから得たもの）
       sessionRef: s.ref, loggedInAt: s.loggedInAt, caseId: (route.body as { caseId?: string }).caseId,
       ...(route.name === 'audit-reconcile' ? { auditTarget: (route.body as { requestId: string }).requestId } : {}),
       timings: { ...timings, totalMs: Math.round(performance.now() - t0) },
@@ -321,7 +321,7 @@ async function handle(event: LambdaFunctionURLEvent, span: Span): Promise<Lambda
       const e = r.body as { branch?: string; title?: string };
       return r.status === 200 ? json(200, { username: s.username, branch: e.branch, title: e.title }) : json(r.status, { username: s.username });
     }
-    // 画面に、bffが刻んだ取引の目的とリクエストIDを見せる（表示用。ブラウザから目的は受け取らない）。
+    // 画面に、bffが刻んだリクエストの目的とリクエストIDを見せる（表示用。ブラウザから目的は受け取らない）。
     // ホップの本文に同じ名前の項目があっても、bffの値で上書きする。ホップに画面の目的やリクエストIDを偽らせない
     return json(r.status, { ...(typeof r.body === 'object' ? r.body : { detail: r.body }), requestId, purpose: route.purpose });
   } catch (e) {

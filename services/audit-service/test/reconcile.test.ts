@@ -143,13 +143,13 @@ describe('ownRows（リクエストIDを偽った呼び出しの拒否の記録�
     status: '401', reason: 'request id does not match authorization context',
   };
 
-  it('本当の取引（刻まれた値）の下に、偽ったリクエストIDとともに出る', () => {
+  it('本当のリクエスト（刻まれた値）の下に、偽ったリクエストIDとともに出る', () => {
     const own = ownRows(RID, [...rows(), forgedCall]);
     const rejected = reconcileRecords(own, records(), dir).hops.find((h) => h.outcome === 'rejected');
     expect(rejected).toMatchObject({ hop: 'account-service', claimedRequestId: OTHER, status: 401, check: { result: 'n/a' } });
   });
 
-  it('名乗られた取引の下には出ない', () => {
+  it('名乗られたリクエストの下には出ない', () => {
     expect(ownRows(OTHER, [forgedCall])).toEqual([]);
   });
 

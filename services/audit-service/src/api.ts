@@ -39,7 +39,7 @@ export interface Transaction {
   /** ログインした時刻（UNIX秒） */
   loggedInAt?: number;
   caseId?: string;
-  /** 監査の操作なら、監査した取引のリクエストID */
+  /** 監査の操作なら、監査対象のリクエストID */
   auditTarget?: string;
 }
 
@@ -60,7 +60,7 @@ export interface HopRecord {
   scope?: string;
   status?: number;
   reason?: string;
-  /** 拒否した呼び出しが、ヘッダーで名乗ったリクエストID。この取引のリクエストIDと違うときだけ持つ（JWTに刻まれた値はこの取引のもの） */
+  /** 拒否した呼び出しが、ヘッダーで名乗ったリクエストID。このリクエストのIDと違うときだけ持つ（JWTに刻まれた値はこのリクエストのもの） */
   claimedRequestId?: string;
   /** アプリの記録の情報源（このホップのロググループ） */
   logGroup?: string;
@@ -107,7 +107,7 @@ export interface TransactionList {
   transactions: Transaction[];
 }
 
-/** 1回の取引の突き合わせの応答 */
+/** 1回のリクエストの突き合わせの応答 */
 export interface Reconciled {
   transaction: EntryRecord | null;
   hops: HopRecord[];

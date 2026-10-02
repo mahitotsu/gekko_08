@@ -4,10 +4,10 @@ import type { Check, EventRef, Field, Reconciled as AuditResponse, Transaction, 
 import { PURPOSE_LABELS, ROUTE_LABELS } from './labels';
 import { Denial, PurposeChip } from './parts';
 
-// 監査の画面。1回の取引について、各ホップのログ（アプリが書いた記録）と、CloudTrail（STSが書いた記録）を突き合わせる。
+// 監査の画面。1回のリクエストについて、各ホップのログ（アプリが書いた記録）と、CloudTrail（STSが書いた記録）を突き合わせる。
 // 判定は監査サービスが行い、画面は表示だけを行う
 
-/** bffは、監査サービスの応答に、この監査の操作のリクエストIDと目的を加える（監査した取引のものではない） */
+/** bffは、監査サービスの応答に、この監査の操作のリクエストIDと目的を加える（監査したリクエストのものではない） */
 type Reconciled = AuditResponse & { requestId: string; purpose: string };
 
 interface Denied {
@@ -52,7 +52,7 @@ export function Audit({ requestId, onSelect }: { requestId?: string; onSelect: (
       <section className="card">
         <div className="audit-intro">
           <div>
-            <h2>取引の監査</h2>
+            <h2>リクエストの監査</h2>
             <p className="muted small">
               各ホップのログ（アプリが書いた記録）を、CloudTrail（STSが書いた記録）とJWTの<code>jti</code>で突き合わせる。
               監査サービスも他のホップと同じ仕組みで守られ、監査の権限（<code>audit:view</code>）を持つユーザーだけが使える。
@@ -68,8 +68,8 @@ export function Audit({ requestId, onSelect }: { requestId?: string; onSelect: (
       </section>
       {!denied && (
         <div className="audit-split">
-          <section className="card audit-list" aria-label="取引の一覧">
-            <h3 className="pane-title">取引の一覧 <span className="muted small">直近24時間</span></h3>
+          <section className="card audit-list" aria-label="リクエストの一覧">
+            <h3 className="pane-title">リクエストの一覧 <span className="muted small">直近24時間</span></h3>
             {list?.status === 200 ? (
               <TransactionList items={list.body.transactions ?? []} selected={requestId} onSelect={onSelect} />
             ) : (
@@ -80,7 +80,7 @@ export function Audit({ requestId, onSelect }: { requestId?: string; onSelect: (
             {requestId ? (
               <ReconcileView key={requestId} requestId={requestId} />
             ) : (
-              <section className="card"><p className="muted">左の一覧から取引を選ぶと、ここに突き合わせの結果が出る。</p></section>
+              <section className="card"><p className="muted">左の一覧からリクエストを選ぶと、ここに突き合わせの結果が出る。</p></section>
             )}
           </div>
         </div>
@@ -120,7 +120,7 @@ function bySession(items: Transaction[]): SessionGroup[] {
 }
 
 function TransactionList({ items, selected, onSelect }: { items: Transaction[]; selected?: string; onSelect: (id: string) => void }) {
-  if (items.length === 0) return <p className="muted">直近24時間の取引はない（ログが届くまで数秒〜数十秒かかる）。</p>;
+  if (items.length === 0) return <p className="muted">直近24時間のリクエストはない（ログが届くまで数秒〜数十秒かかる）。</p>;
   return (
     <div className="table-wrap">
       <table className="grid">
@@ -211,7 +211,7 @@ function ReconcileView({ requestId }: { requestId: string }) {
       <header className="result-head">
         <div>
           <div className="result-title">
-            {tx ? (ROUTE_LABELS[tx.route] ?? tx.route) : '取引'}<span className="muted">　{tx?.user}</span>
+            {tx ? (ROUTE_LABELS[tx.route] ?? tx.route) : 'リクエスト'}<span className="muted">　{tx?.user}</span>
           </div>
           <div className="result-meta">
             {tx && <PurposeChip purpose={tx.purpose} />}
@@ -240,7 +240,7 @@ function ReconcileView({ requestId }: { requestId: string }) {
         </dl>
       </div>
 
-      {!tx && <p className="muted">この取引のログが見つからない（ログが届くまで数秒〜数十秒かかる）。</p>}
+      {!tx && <p className="muted">このリクエストのログが見つからない（ログが届くまで数秒〜数十秒かかる）。</p>}
       {pending > 0 && (
         <div className="callout neutral pending-note">
           CloudTrailのイベントは、届くまでに数分〜15分ほどかかる。未着のものは、あとで再確認する。
@@ -262,7 +262,7 @@ function ReconcileView({ requestId }: { requestId: string }) {
               time={h.startedAt ?? h.time} depth={h.depth} name={h.hop} actor={h.actor} status={h.status} reason={h.reason} check={h.check}
               note={h.outcome === 'rejected'
                 ? h.claimedRequestId
-                  ? `受信の検証で拒否。ヘッダーのリクエストIDを ${h.claimedRequestId} と偽っていた（JWTに刻まれていたのはこの取引のリクエストID）`
+                  ? `受信の検証で拒否。ヘッダーのリクエストIDを ${h.claimedRequestId} と偽っていた（JWTに刻まれていたのはこのリクエストのID）`
                   : '受信の検証で拒否。JWTを受け付けなかったので照合しない'
                 : undefined}
             />
@@ -306,7 +306,7 @@ function ReconcileView({ requestId }: { requestId: string }) {
       </details>
 
       <p className="muted tiny footnote">
-        AWSの記録は、リクエストID（chainとJWTの発行のセッション名）で引く。リクエストIDはbffが取引の目的と同じく刻み、各chainのセッション名をIAMがその値に限るので、
+        AWSの記録は、リクエストID（chainとJWTの発行のセッション名）で引く。リクエストIDはbffがリクエストの目的と同じく刻み、各chainのセッション名をIAMがその値に限るので、
         途中のホップは自分の記録をリクエストIDで引けなくすることはできない。
       </p>
     </section>

@@ -45,7 +45,7 @@ export const STAFF = [
 export const TITLE_PERMISSIONS = [
   { title: '担当者', permissions: ['case:view', 'account:view'] },
   { title: '支店長', permissions: ['case:view', 'account:view', 'account:unfreeze'] },
-  // 監査担当は取引の監査だけ。案件の参照も解除もできず、支店長と担当者は監査できない（監査サービスのADR）
+  // 監査担当はリクエストの監査だけ。案件の参照も解除もできず、支店長と担当者は監査できない（監査サービスのADR）
   { title: '監査担当', permissions: ['audit:view'] },
 ];
 

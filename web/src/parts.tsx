@@ -2,7 +2,7 @@ import { LAYER_LABELS, PURPOSE_LABELS, REASONS } from './labels';
 
 export function PurposeChip({ purpose }: { purpose: string }) {
   return (
-    <span className="purpose" title="取引の目的。bffが入口で刻み、途中のホップは変えられない">
+    <span className="purpose" title="リクエストの目的。bffが入口で刻み、途中のホップは変えられない">
       <span className="purpose-k">目的</span>
       <span className="purpose-v">{PURPOSE_LABELS[purpose] ?? purpose}</span>
       <code>{purpose}</code>

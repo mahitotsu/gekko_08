@@ -2,7 +2,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import type { HopRecord, Reconciled as AuditResponse } from '../../services/audit-service/src/api';
 import { browserGet, browserPost, eventually, loginSession, provisionTestData, TEST_DATA as T, USERS } from './helpers';
 
-// FR-7(d)：監査の画面で、1回の取引について、各ホップの記録をAWSの記録と突き合わせて示す。監査は、監査の権限を持つユーザーだけが使える
+// FR-7(d)：監査の画面で、1回のリクエストについて、各ホップの記録をAWSの記録と突き合わせて示す。監査は、監査の権限を持つユーザーだけが使える
 /** bffは、監査サービスの応答に、この監査の操作のリクエストIDと目的を加える */
 type Reconciled = AuditResponse & { requestId: string; purpose: string };
 
@@ -34,7 +34,7 @@ async function reconciled(ready: (r: Reconciled) => boolean, timeoutMs: number, 
 
 const HOPS = ['case-service', 'account-service', 'entitlement-service'];
 
-describe('FR-7(d): 監査担当は、取引ごとに各ホップの記録をAWSの記録と突き合わせられる', () => {
+describe('FR-7(d): 監査担当は、リクエストごとに各ホップの記録をAWSの記録と突き合わせられる', () => {
   it('ホップの記録に、各ホップが検証した呼び出し元・ユーザー・目的・scopeと、JWTの`jti`が出る', async () => {
     const r = await reconciled((x) => !!x.transaction && HOPS.every((h) => x.hops.some((y) => y.hop === h)), 120_000);
     expect(r.transaction).toMatchObject({ user: USERS.tokyoManager, route: 'case-summary', purpose: 'case-summary', status: 200 });
@@ -58,7 +58,7 @@ describe('FR-7(d): 監査担当は、取引ごとに各ホップの記録をAWS�
     expect(Object.keys(app)).toContain('JWTを発行したrole');
   }, 130_000);
 
-  it('最近の取引の一覧に、その取引が出る', async () => {
+  it('最近のリクエストの一覧に、そのリクエストが出る', async () => {
     const list = await eventually(async () => {
       const r = await browserGet('/api/audit/requests', auditor);
       expect(r.status).toBe(200);
@@ -67,7 +67,7 @@ describe('FR-7(d): 監査担当は、取引ごとに各ホップの記録をAWS�
     expect(list.find((t: { requestId: string }) => t.requestId === requestId)).toMatchObject({ user: USERS.tokyoManager, purpose: 'case-summary', caseId: T.tokyoCase });
   }, 130_000);
 
-  it('監査の操作も取引として一覧に出る。監査した取引のリクエストIDと、監査サービスを通った記録を引ける', async () => {
+  it('監査の操作もリクエストとして一覧に出る。監査対象のリクエストIDと、監査サービスを通った記録を引ける', async () => {
     const own = await browserGet(`/api/audit/requests/${requestId}`, auditor);
     expect(own.status).toBe(200);
     // 応答のリクエストIDと目的は、bffがこの監査の操作に刻んだもの。監査サービスの本文の値では上書きされない
@@ -79,7 +79,7 @@ describe('FR-7(d): 監査担当は、取引ごとに各ホップの記録をAWS�
       return r.body.transactions?.find((t: { requestId: string }) => t.requestId === auditId);
     }, 120_000, 5000);
     expect(list).toMatchObject({ route: 'audit-reconcile', auditTarget: requestId, user: USERS.auditor, purpose: 'audit', status: 200 });
-    // 監査の操作も、他の取引と同じく、各ホップがbffの刻んだリクエストIDで記録している
+    // 監査の操作も、他のリクエストと同じく、各ホップがbffの刻んだリクエストIDで記録している
     const r = await eventually(async () => {
       const x = await browserGet(`/api/audit/requests/${list.requestId}`, auditor);
       return x.body.hops?.some((h: HopRecord) => h.hop === 'entitlement-service') ? (x.body as Reconciled) : undefined;

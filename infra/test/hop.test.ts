@@ -118,7 +118,7 @@ function checkCallerGuard(f: Fixture, hop: Hop): string[] {
 
 /**
  * JWTの発行：宛先はForAllValues＋Nullで呼び出し先だけ、ES384、300秒以下。付けられるtagはキーscopeだけで、値は宣言したscopeだけ。
- * 目的の制限があるscopeは、許した目的の取引でだけ付けられ、目的の制限がない文には混ざらない
+ * 目的の制限があるscopeは、許した目的のリクエストでだけ付けられ、目的の制限がない文には混ざらない
  */
 function checkIssuance(f: Fixture, caller: HopCaller): string[] {
   const issuing = (a: Atom) => ISSUE.includes(a.action) || a.action === '*' || a.action === 'sts:*';

@@ -56,8 +56,8 @@ export class Bff extends Construct {
   }
 
   /**
-   * 目的用のroleを作り、federated roleとつなぐ。bffは取引ごとにfederated roleのセッションからこのroleへchainし、
-   * 取引の目的とリクエストIDをtransitive session tagとして刻む。刻める目的はpurposesに限る。
+   * 目的用のroleを作り、federated roleとつなぐ。bffはリクエストごとにfederated roleのセッションからこのroleへchainし、
+   * リクエストの目的とリクエストIDをtransitive session tagとして刻む。刻める目的はpurposesに限る。
    * セッション名はリクエストIDのtagと同じ値に限り、以降のchainもその値に縛る（FR-6）
    */
   connect(auth: AuthFoundation, purposes: string[]): void {

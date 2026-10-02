@@ -184,7 +184,7 @@ export async function federatedSession(user: DemoUser, sessionName = `test-${Dat
 export type RequestSession = AwsCredentialIdentity & { requestId: string };
 
 /**
- * bffと同じ手順で、取引の目的とリクエストIDを刻んだセッションを得る。漏れた「受け渡すセッション」に相当する。
+ * bffと同じ手順で、リクエストの目的とリクエストIDを刻んだセッションを得る。漏れた「受け渡すセッション」に相当する。
  * sessionNameを渡すと、刻んだリクエストIDと違うセッション名で引き受けようとする
  */
 export async function purposeSession(

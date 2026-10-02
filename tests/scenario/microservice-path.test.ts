@@ -3,7 +3,7 @@ import {
   browserGet, browserPost, chainTo, federatedSession, loginSession, mintJwt, type Outputs, provisionTestData, purposeSession, signedPost, stackOutputs, TEST_DATA as T, USERS,
 } from './helpers';
 
-// マイクロサービスの経路（bff → case-service → account-service）のうち、案件を開く取引のシナリオテスト。凍結の解除はunfreeze.test.ts。
+// マイクロサービスの経路（bff → case-service → account-service）のうち、案件を開くリクエストのシナリオテスト。凍結の解除はunfreeze.test.ts。
 // デプロイしたスタックに対して実行し、各テストは要件のIDにひも付ける（設計書§10）
 let o: Outputs;
 let manager: string;
@@ -63,7 +63,7 @@ describe('FR-6: リクエストIDは入口で確定し、途中のホップは�
   });
 });
 
-describe('FR-3: ユーザーと取引の目的は入口で確定し、途中で変更も拡大もできない', () => {
+describe('FR-3: ユーザーとリクエストの目的は入口で確定し、途中で変更も拡大もできない', () => {
   it('chainでSourceIdentityを変えられない', async () => {
     const s = await purposeSession('tokyoManager', 'case-summary');
     await expect(chainTo(s, o.CaseServiceChainRoleArn, { SourceIdentity: USERS.osakaOfficer })).rejects.toThrow(/source identity is already set/);
@@ -85,19 +85,19 @@ describe('FR-3: ユーザーと取引の目的は入口で確定し、途中で�
       .rejects.toThrow(/not authorized to perform: sts:TagSession/);
   });
 
-  it('目的の制限があるscope（解除）は、案件を開く取引のcase-serviceのセッションでは発行できない', async () => {
+  it('目的の制限があるscope（解除）は、案件を開くリクエストのcase-serviceのセッションでは発行できない', async () => {
     const s = await chainTo(await purposeSession('tokyoManager', 'case-summary'), o.CaseServiceChainRoleArn);
     await expect(mintJwt(s, o.AccountServiceAudience, 'account:unfreeze')).rejects.toThrow(/not authorized to perform: sts:TagGetWebIdentityToken/);
     // 同じセッションで、目的の制限がないscope（参照）は発行できる
     await expect(mintJwt(s, o.AccountServiceAudience, 'account:read')).resolves.toBeTypeOf('string');
   });
 
-  it('凍結を解除する取引のcase-serviceのセッションなら、解除のscopeを発行できる', async () => {
+  it('凍結を解除するリクエストのcase-serviceのセッションなら、解除のscopeを発行できる', async () => {
     const s = await chainTo(await purposeSession('tokyoManager', 'account-unfreeze'), o.CaseServiceChainRoleArn);
     await expect(mintJwt(s, o.AccountServiceAudience, 'account:unfreeze')).resolves.toBeTypeOf('string');
   });
 
-  it('bffの目的用のroleでも、解除の依頼のscopeは凍結を解除する取引でだけ発行できる', async () => {
+  it('bffの目的用のroleでも、解除の依頼のscopeは凍結を解除するリクエストでだけ発行できる', async () => {
     await expect(mintJwt(await purposeSession('tokyoManager', 'case-summary'), o.CaseServiceAudience, 'case:unfreeze'))
       .rejects.toThrow(/not authorized to perform: sts:TagGetWebIdentityToken/);
     await expect(mintJwt(await purposeSession('tokyoManager', 'account-unfreeze'), o.CaseServiceAudience, 'case:unfreeze')).resolves.toBeTypeOf('string');

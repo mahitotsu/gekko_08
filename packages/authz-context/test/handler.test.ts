@@ -32,7 +32,7 @@ const event = (headers: Record<string, string>, userArn = 'arn:aws:sts::12345678
 const statusOf = (r: LambdaFunctionURLResult) => (r as { statusCode: number }).statusCode;
 
 describe('createHopHandler', () => {
-  it('業務のコードに、検証済みのsubject・呼び出し元のホップ名・scopeだけを渡す。取引の目的は渡さない', async () => {
+  it('業務のコードに、検証済みのsubject・呼び出し元のホップ名・scopeだけを渡す。リクエストの目的は渡さない', async () => {
     let got: Record<string, unknown> | undefined;
     const handler = createHopHandler(async (body, ctx: HopContext) => {
       const { call: _call, ...rest } = ctx;

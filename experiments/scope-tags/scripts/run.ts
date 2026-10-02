@@ -51,7 +51,7 @@ await check('E1-6 tagなし（scopeのないJWT）', 'ok', () => mint(ra, [AUD_A
 // 対照：本体と同じForAnyValueでは、許していない宛先を混ぜられるか
 await check('E1-7 ForAnyValue：許した宛先と外部の宛先を混ぜる（穴の確認）', 'denied', () => mint(ra, [AUD_A, 'https://external.example']));
 
-// E2（形B）: 取引の目的をtransitive session tagで運ぶ
+// E2（形B）: リクエストの目的をtransitive session tagで運ぶ
 const u = await assume(undefined, out.UserRoleArn, { SourceIdentity: 'yamada', Tags: [{ Key: 'branch', Value: 'tokyo' }], TransitiveTagKeys: ['branch'] });
 const purpose = (value: string, extraTags: Tag[] = []) =>
   assume(u, out.PurposeRoleArn, { Tags: [{ Key: 'purpose', Value: value }, ...extraTags], TransitiveTagKeys: ['purpose'] });

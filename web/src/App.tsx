@@ -8,7 +8,7 @@ type ActionKey = 'summary' | 'unfreeze' | 'agent';
 
 interface ActionDef {
   label: string;
-  /** bffがこの操作で刻む取引の目的（表示用。ブラウザからは送らない） */
+  /** bffがこの操作で刻むリクエストの目的（表示用。ブラウザからは送らない） */
   purpose: string;
   path: string[];
   note: string;
@@ -29,14 +29,14 @@ const ACTIONS: Record<ActionKey, ActionDef> = {
     label: '凍結を解除',
     purpose: 'account-unfreeze',
     path: ['bff', 'case-service', 'account-service'],
-    note: '行員が画面から操作する取引でだけ、bffがこの目的を刻む。解除のscopeは、この目的の取引でだけ発行される。',
+    note: '行員が画面から操作するリクエストでだけ、bffがこの目的を刻む。解除のscopeは、この目的のリクエストでだけ発行される。',
     run: (id) => post<HopBody>(`/api/cases/${enc(id)}/unfreeze`),
   },
   agent: {
     label: 'エージェントに分析させる',
     purpose: 'agent-analysis',
     path: ['bff', 'fraud-agent', 'fraud-mcp', 'case-service・account-service'],
-    note: '解除してよいかの提案までを行う。この目的の取引からは、エージェントが乗っ取られても解除できない。',
+    note: '解除してよいかの提案までを行う。この目的のリクエストからは、エージェントが乗っ取られても解除できない。',
     run: (id) => post<HopBody>('/api/agent', JSON.stringify({ caseId: id })),
   },
 };
@@ -91,7 +91,7 @@ export function App() {
           <span className="brand-mark" aria-hidden>◆</span>
           <div>
             <div className="brand-title">口座の凍結解除デモ</div>
-            <div className="brand-sub">「誰の権限で、何のための取引か」を、最後のホップまでIAMに強制させる</div>
+            <div className="brand-sub">「誰の権限で、何のためのリクエストか」を、最後のホップまでIAMに強制させる</div>
           </div>
         </div>
         {me && <UserBox me={me} onLogout={logout} />}
@@ -136,7 +136,7 @@ function SignedOut() {
     <section className="card hero">
       <h1>ログインしてください</h1>
       <p>
-        yamada（東京支店・支店長）か tanaka（大阪支店・担当者）で操作し、suzuki（本部・監査担当）で取引を監査する。ブラウザには、Cognitoのトークンも、AWSの認証情報も渡さない。
+        yamada（東京支店・支店長）か tanaka（大阪支店・担当者）で操作し、suzuki（本部・監査担当）でリクエストを監査する。ブラウザには、Cognitoのトークンも、AWSの認証情報も渡さない。
         サーバー側の入口（bff）とは、HttpOnlyのセッションcookieだけで結ぶ。
       </p>
       <a className="btn primary" href="/api/login">ログイン</a>
@@ -206,8 +206,8 @@ function Layers() {
       </div>
       <div className="layer l-delegation">
         <div className="layer-name">委任の範囲</div>
-        <div className="layer-q">この取引で、この呼び出し元に何を許すか</div>
-        <div className="layer-by">取引の目的とscope。IAMが強制する</div>
+        <div className="layer-q">このリクエストで、この呼び出し元に何を許すか</div>
+        <div className="layer-by">リクエストの目的とscope。IAMが強制する</div>
       </div>
       <div className="layer l-entitlement">
         <div className="layer-name">業務的なアクセス権</div>
@@ -359,7 +359,7 @@ function AgentView({ analysis, toolCalls }: { analysis?: string; toolCalls: Tool
       {attempts.length > 0 ? (
         <div className="callout deny">
           エージェントは誘導されて凍結の解除を{attempts.length}回試みた。{blocked.length === attempts.length ? 'すべて拒否された。' : `${blocked.length}回が拒否された。`}
-          エージェントの取引（<code>agent-analysis</code>）からは、解除のscopeをSTSが発行しない。
+          エージェントのリクエスト（<code>agent-analysis</code>）からは、解除のscopeをSTSが発行しない。
         </div>
       ) : (
         <div className="callout neutral">今回は、エージェントは凍結の解除を試みなかった（モデルの判断は毎回変わる）。</div>

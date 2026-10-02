@@ -5,7 +5,7 @@ export const authz: DelegationDefinition = {
   hop: 'account-service',
   provides: {
     'account:read': {},
-    // 凍結の解除は、凍結を解除する取引で、case-serviceからだけ。案件を開く取引やエージェントの取引では、case-serviceが侵害されても発行されない
+    // 凍結の解除は、凍結を解除するリクエストで、case-serviceからだけ。案件を開くリクエストやエージェントのリクエストでは、case-serviceが侵害されても発行されない
     'account:unfreeze': { purposes: ['account-unfreeze'], callers: ['case-service'] },
   },
   consumes: {

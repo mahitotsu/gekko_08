@@ -71,7 +71,7 @@ export function toAwsRecord(cloudTrailEvent: string | undefined, dir: Directory)
 }
 
 /**
- * bffの記録から、最近の取引の一覧を作る。1回の操作（リクエスト）を1件とし、ログインのセッションの新しい順、セッションの中は時刻の順に並べる
+ * bffの記録から、最近のリクエストの一覧を作る。1回の操作（リクエスト）を1件とし、ログインのセッションの新しい順、セッションの中は時刻の順に並べる
  */
 export function transactionsFrom(rows: Row[]): Transaction[] {
   const items: Transaction[] = rows.map((r) => ({
@@ -87,8 +87,8 @@ export function transactionsFrom(rows: Row[]): Transaction[] {
 }
 
 /**
- * この取引の記録だけを残す。拒否の記録は、ヘッダーのリクエストID（自己申告）ではなく、JWTに刻まれていた値（`stampedRequestId`）でも引くので、
- * 刻まれた値が別の取引のものなら除く。ヘッダーを偽った呼び出しは、刻まれた値の取引にだけ出る
+ * このリクエストの記録だけを残す。拒否の記録は、ヘッダーのリクエストID（自己申告）ではなく、JWTに刻まれていた値（`stampedRequestId`）でも引くので、
+ * 刻まれた値が別のリクエストのものなら除く。ヘッダーを偽った呼び出しは、刻まれた値のリクエストにだけ出る
  */
 export function ownRows(requestId: string, rows: Row[]): Row[] {
   return rows.filter((r) => (r.requestId === requestId || r.stampedRequestId === requestId) && (!r.stampedRequestId || r.stampedRequestId === requestId));
@@ -143,7 +143,7 @@ export function summarize(fields: Field[]): Check {
 }
 
 /**
- * 1回の取引の、ホップの記録（`ownRows`で絞ったもの）とAWSの記録を突き合わせる。
+ * 1回のリクエストの、ホップの記録（`ownRows`で絞ったもの）とAWSの記録を突き合わせる。
  * ホップの記録の`jti`と`webIdentityTokenId`が一致する`GetWebIdentityToken`について、JWTを発行したrole、宛先、scope、ユーザーを比べ、
  * bffの`AssumeRole`の目的のtagと各ホップの記録の目的を比べる。bffの記録は、目的とユーザーを`AssumeRole`のイベントと比べる
  */

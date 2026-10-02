@@ -1,7 +1,7 @@
 import type { DelegationDefinition } from '@gekko08/authz-context';
 
 /**
- * 取引の目的の一覧（設計書§4）。bffが経路ごとに決めて刻む。取引の種類として少数に保ち、画面を増やしても既存の目的で足りるなら増やさない。
+ * リクエストの目的の一覧（設計書§4）。bffが経路ごとに決めて刻む。リクエストの種類として少数に保ち、画面を増やしても既存の目的で足りるなら増やさない。
  * 目的は、提供側が影響の大きいscopeの発行を限るためだけに使い、業務のコードは使わない
  */
 export const PURPOSES = {
@@ -13,7 +13,7 @@ export const PURPOSES = {
   accountUnfreeze: 'account-unfreeze',
   /** エージェントによる分析 */
   agentAnalysis: 'agent-analysis',
-  /** 取引の監査 */
+  /** リクエストの監査 */
   audit: 'audit',
 } as const;
 

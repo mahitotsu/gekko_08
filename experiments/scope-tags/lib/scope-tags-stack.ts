@@ -9,9 +9,9 @@ export const PURPOSES = ['case-summary', 'agent-analysis', 'account-unfreeze'];
 // scope相当の値をAWSに強制させる2つの形を検証する。
 // E0: JWTの発行条件（sts:SigningAlgorithm、sts:DurationSeconds、宛先のForAllValues）
 // E1（形A）: GetWebIdentityTokenのrequest_tagsを、宛先ごとにIAMで絞れるか
-// E2（形B）: 取引の目的をtransitive session tagとして刻み、下流で変えられないか。目的でIAMの判定を変えられるか
+// E2（形B）: リクエストの目的をtransitive session tagとして刻み、下流で変えられないか。目的でIAMの判定を変えられるか
 // E3: 形Aと形Bの組み合わせ
-// E4: 同じ宛先で、取引の目的ごとに付けられるscopeを変える（tagの許可に目的の条件を加える）
+// E4: 同じ宛先で、リクエストの目的ごとに付けられるscopeを変える（tagの許可に目的の条件を加える）
 export class ScopeTagsStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: cdk.StackProps) {
     super(scope, id, props);
@@ -53,7 +53,7 @@ export class ScopeTagsStack extends cdk.Stack {
     ra.addToPolicy(tagFor(AUD_A, 'case:summary'));
     ra.addToPolicy(tagFor(AUD_B, 'account:read'));
 
-    // E2: U（ログイン時のfederated roleのセッションに相当）→ P（取引の目的を刻む）→ C（下流のchain用role）
+    // E2: U（ログイン時のfederated roleのセッションに相当）→ P（リクエストの目的を刻む）→ C（下流のchain用role）
     const u = new iam.Role(this, 'User', { assumedBy: tester });
     u.assumeRolePolicy!.addStatements(
       new iam.PolicyStatement({ actions: ['sts:SetSourceIdentity'], principals: [tester] }),

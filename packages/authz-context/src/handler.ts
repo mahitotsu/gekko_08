@@ -38,7 +38,7 @@ export interface HopContext {
   actor: string;
   /**
    * 呼び出し元がこのホップに付けたscope。目的との組み合わせはIAMと共通部品が守るので、業務のコードはscopeだけで判断する。
-   * 取引の目的は渡さない（業務のコードは目的を使わない。設計書§4）
+   * リクエストの目的は渡さない（業務のコードは目的を使わない。設計書§4）
    */
   scope: string;
   requestId: string;
@@ -57,7 +57,7 @@ function respond(status: number, body: unknown): LambdaFunctionURLResult {
 
 /**
  * ホップのLambdaハンドラーを作る。受信時の検証、次のホップの呼び出し、ログ、トレースを共通部品が行い、
- * 業務のコードには、検証済みのsubject、呼び出し元、scopeだけを渡す（取引の目的は渡さない）。
+ * 業務のコードには、検証済みのsubject、呼び出し元、scopeだけを渡す（リクエストの目的は渡さない）。
  */
 export function createHopHandler(business: HopHandler, config: HopConfig = hopConfigFromEnv()) {
   initTelemetry(config.hop);
