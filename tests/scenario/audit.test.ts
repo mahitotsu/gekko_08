@@ -3,7 +3,7 @@ import { browserGet, browserPost, eventually, loginSession, provisionTestData, T
 
 // FR-7(d)：監査の画面で、1回の取引について、各ホップの記録をAWSの記録と突き合わせて示す。監査は、監査の権限を持つユーザーだけが使える
 interface Check { result: 'match' | 'mismatch' | 'pending' | 'n/a'; fields?: string[] }
-interface HopRecord { hop: string; outcome: string; actor?: string; subject?: string; purpose?: string; scope?: string; status?: number; tokenId?: string; check: Check }
+interface HopRecord { hop: string; depth: number; outcome: string; actor?: string; subject?: string; purpose?: string; scope?: string; status?: number; tokenId?: string; check: Check }
 interface Reconciled {
   requestId: string;
   transaction: { user: string; route: string; purpose: string; status: number; check: Check } | null;
@@ -14,6 +14,7 @@ interface Reconciled {
 let manager: string;
 let auditor: string;
 let requestId: string;
+let unfreezeId: string;
 
 beforeAll(async () => {
   await provisionTestData();
@@ -21,6 +22,10 @@ beforeAll(async () => {
   const r = await browserGet(`/api/cases/${T.tokyoCase}/summary`, manager);
   expect(r.status).toBe(200);
   requestId = r.body.requestId;
+  // 同じログインのセッションで、続けて他の支店の案件の凍結の解除を試みる（一連の操作）。拒否されるので、口座の状態は変わらない
+  const u = await browserPost(`/api/cases/${T.osakaCase}/unfreeze`, '', manager);
+  expect(u.status).toBe(403);
+  unfreezeId = u.body.requestId;
 }, 60_000);
 
 /** ログが届くまで待って、突き合わせの結果を得る */
@@ -42,6 +47,8 @@ describe('FR-7(d): 監査担当は、取引ごとに各ホップの記録をAWS�
     expect(hop('case-service')).toMatchObject({ outcome: 'handled', actor: 'bff', subject: USERS.tokyoManager, purpose: 'case-summary', scope: 'case:summary' });
     expect(hop('account-service')).toMatchObject({ actor: 'case-service', subject: USERS.tokyoManager, purpose: 'case-summary', scope: 'account:read' });
     for (const h of r.hops.filter((x) => x.outcome === 'handled')) expect(h.tokenId).toMatch(/^[0-9a-f-]{36}$/);
+    // 呼び出しの順：case-service → （属性サービス、account-service → 属性サービス）
+    expect(r.hops.map((h) => `${h.depth}:${h.hop}`)).toEqual(['1:case-service', '2:entitlement-service', '2:account-service', '3:entitlement-service']);
   }, 130_000);
 
   it('最近の取引の一覧に、その取引が出る', async () => {
@@ -50,7 +57,25 @@ describe('FR-7(d): 監査担当は、取引ごとに各ホップの記録をAWS�
       expect(r.status).toBe(200);
       return r.body.transactions.some((t: { requestId: string }) => t.requestId === requestId) ? r.body.transactions : undefined;
     }, 120_000, 5000);
-    expect(list.find((t: { requestId: string }) => t.requestId === requestId)).toMatchObject({ user: USERS.tokyoManager, purpose: 'case-summary' });
+    expect(list.find((t: { requestId: string }) => t.requestId === requestId)).toMatchObject({ user: USERS.tokyoManager, purpose: 'case-summary', caseId: T.tokyoCase });
+  }, 130_000);
+
+  it('同じログインのセッションの操作は、1つのまとまりとして時刻の順に並ぶ', async () => {
+    const list = await eventually(async () => {
+      const r = await browserGet('/api/audit/requests', auditor);
+      return r.body.transactions?.some((t: { requestId: string }) => t.requestId === unfreezeId) ? r.body.transactions : undefined;
+    }, 120_000, 5000);
+    const ids = list.map((t: { requestId: string }) => t.requestId);
+    const a = list[ids.indexOf(requestId)];
+    const b = list[ids.indexOf(unfreezeId)];
+    expect(a.sessionRef).toBeTypeOf('string');
+    expect(b.sessionRef).toBe(a.sessionRef);
+    expect(b).toMatchObject({ purpose: 'account-unfreeze', caseId: T.osakaCase, status: 403 });
+    // 案件を開く → 凍結を解除の順で、間に別のセッションの操作が挟まらない
+    const i = ids.indexOf(requestId);
+    const j = ids.indexOf(unfreezeId);
+    expect(j).toBeGreaterThan(i);
+    expect(list.slice(i, j + 1).every((t: { sessionRef?: string }) => t.sessionRef === a.sessionRef)).toBe(true);
   }, 130_000);
 
   // CloudTrailは届くまでに最大15分ほどかかるため、CHECK_CLOUDTRAIL=1のときだけ実行する

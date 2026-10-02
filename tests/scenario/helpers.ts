@@ -89,6 +89,7 @@ export async function loginSession(user: DemoUser): Promise<string> {
       pk: `sid#${createHash('sha256').update(sid).digest('base64url')}`,
       username: USERS[user], idToken, idTokenExp: claims.exp, refreshToken,
       ttl: Math.floor(Date.now() / 1000) + 3600,
+      ref: randomBytes(12).toString('base64url'), loggedInAt: Math.floor(Date.now() / 1000),
     },
   }));
   return `__Host-sid=${sid}`;

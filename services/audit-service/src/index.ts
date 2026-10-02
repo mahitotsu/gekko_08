@@ -60,17 +60,33 @@ async function insights(groups: string[], queryString: string, startMs: number):
 
 const num = (v: string | undefined) => (v === undefined || v === '' ? undefined : Number(v));
 
-/** 最近の取引（bffが最初のホップを呼んだもの）。表示と監査の経路は除く */
+/**
+ * 最近の取引（bffが最初のホップを呼んだもの）。表示と監査の経路は除く。
+ * 1回の操作（リクエスト）を1件とし、ログインのセッションの新しい順、セッションの中は時刻の順に並べる
+ */
 async function listTransactions() {
-  const rows = await insights([LOG_GROUPS.bff], `fields @timestamp, requestId, route, purpose, user, status
+  const rows = await insights([LOG_GROUPS.bff], `fields @timestamp, requestId, route, purpose, user, status, sessionRef, loggedInAt, caseId
 | filter message = "handled" and hop = "bff" and route != "me" and route != "audit-list" and route != "audit-reconcile"
 | sort @timestamp desc
-| limit 50`, Date.now() - LIST_HOURS * 3600_000);
-  return rows.map((r) => ({ time: r['@timestamp'], requestId: r.requestId, route: r.route, purpose: r.purpose, user: r.user, status: num(r.status) }));
+| limit 500`, Date.now() - LIST_HOURS * 3600_000);
+  const items = rows.map((r) => ({
+    time: r['@timestamp'], requestId: r.requestId, route: r.route, purpose: r.purpose, user: r.user, status: num(r.status),
+    sessionRef: r.sessionRef || undefined, loggedInAt: num(r.loggedInAt), caseId: r.caseId || undefined,
+  }));
+  // セッションの識別子がない記録（識別子を記録する前のセッション）は、ユーザーごとに1つにまとめる
+  const key = (t: (typeof items)[number]) => t.sessionRef ?? `user:${t.user}`;
+  const latest = new Map<string, string>();
+  for (const t of items) if ((latest.get(key(t)) ?? '') < t.time) latest.set(key(t), t.time);
+  const started = (t: (typeof items)[number]) => (t.loggedInAt ? new Date(t.loggedInAt * 1000).toISOString() : latest.get(key(t))!);
+  return items.sort((a, b) => started(b).localeCompare(started(a)) || key(a).localeCompare(key(b)) || a.time.localeCompare(b.time));
 }
 
 interface HopRecord {
   time: string;
+  /** 処理を始めた時刻（ログを書いた時刻から処理時間を引いたもの） */
+  startedAt?: string;
+  /** 呼び出しの深さ（bffの呼び出し先が1） */
+  depth: number;
   hop: string;
   outcome: 'handled' | 'rejected';
   actor?: string;
@@ -174,11 +190,48 @@ async function awsRecords(requestId: string, since: Date): Promise<TrailRecord[]
   return out.sort((a, b) => a.time.localeCompare(b.time));
 }
 
+// --- 呼び出しの順 ---
+
+const logTime = (t: string) => new Date(`${t.replace(' ', 'T')}Z`).getTime();
+
+/**
+ * ログは各ホップが処理を終えたときに書くので、そのままでは下流のホップが先に並ぶ。処理時間から各ホップの処理の区間を求め、
+ * 呼び出し元（actor）のホップの区間のうち、その区間を含む最も短いものを親とみなして、呼び出しの順（深さ優先）に並べる
+ */
+function callOrder(hops: HopRecord[], rows: Row[]): HopRecord[] {
+  const span = (r: Row) => {
+    const end = logTime(r['@timestamp']);
+    const ms = num(r['timings.totalMs']);
+    return { start: ms === undefined ? end : end - ms, end };
+  };
+  const hopRows = rows.filter((r) => r.hop !== 'bff');
+  const nodes = hops.map((h, i) => ({ h, ...span(hopRows[i]), children: [] as number[] }));
+  for (const n of nodes) if (n.start !== n.end) n.h.startedAt = new Date(n.start).toISOString();
+  const roots: number[] = [];
+  const TOLERANCE_MS = 5;
+  nodes.forEach((n, i) => {
+    let parent = -1;
+    nodes.forEach((p, j) => {
+      if (j === i || p.h.hop !== n.h.actor) return;
+      if (p.start - TOLERANCE_MS <= n.start && n.end <= p.end + TOLERANCE_MS && (parent < 0 || p.end - p.start < nodes[parent].end - nodes[parent].start)) parent = j;
+    });
+    (parent < 0 ? roots : nodes[parent].children).push(i);
+  });
+  const out: HopRecord[] = [];
+  const visit = (i: number, depth: number) => {
+    nodes[i].h.depth = depth;
+    out.push(nodes[i].h);
+    for (const c of nodes[i].children.sort((a, b) => nodes[a].start - nodes[b].start)) visit(c, depth + 1);
+  };
+  for (const r of roots.sort((a, b) => nodes[a].start - nodes[b].start)) visit(r, 1);
+  return out;
+}
+
 // --- 突き合わせ ---
 
 async function reconcile(requestId: string) {
   const groups = Object.values(LOG_GROUPS);
-  const rows = await insights(groups, `fields @timestamp, message, hop, route, user, actor, tokenSub, tokenId, subject.id, purpose, scope, status, reason
+  const rows = await insights(groups, `fields @timestamp, message, hop, route, user, actor, tokenSub, tokenId, subject.id, purpose, scope, status, reason, timings.totalMs
 | filter requestId = "${requestId}" and (message = "handled" or message = "rejected")
 | sort @timestamp asc
 | limit 1000`, Date.now() - RECONCILE_DAYS * 86400_000);
@@ -194,7 +247,7 @@ async function reconcile(requestId: string) {
 
   const hops: HopRecord[] = rows.filter((r) => r.hop !== 'bff').map((r) => {
     const base = {
-      time: r['@timestamp'], hop: r.hop, status: num(r.status), reason: r.reason || undefined,
+      time: r['@timestamp'], hop: r.hop, status: num(r.status), reason: r.reason || undefined, depth: 1,
     };
     if (r.message === 'rejected') return { ...base, outcome: 'rejected', check: { result: 'n/a' } };
     const rec: HopRecord = {
@@ -223,10 +276,10 @@ async function reconcile(requestId: string) {
 
   return {
     requestId,
+    hops: callOrder(hops, rows),
     transaction: bffRow ? {
       time: bffRow['@timestamp'], user: bffRow.user, route: bffRow.route, purpose: bffRow.purpose, status: num(bffRow.status), check: entry,
     } : null,
-    hops,
     awsRecords: records.map(({ issuerRole: _, ...r }) => r),
   };
 }

@@ -15,10 +15,16 @@ interface Transaction {
   purpose: string;
   user: string;
   status?: number;
+  sessionRef?: string;
+  /** ログインした時刻（UNIX秒） */
+  loggedInAt?: number;
+  caseId?: string;
 }
 
 interface HopRecord {
   time: string;
+  startedAt?: string;
+  depth: number;
   hop: string;
   outcome: 'handled' | 'rejected';
   actor?: string;
@@ -126,26 +132,58 @@ function AuditDenied({ result }: { result: ApiResult<Denied> }) {
   );
 }
 
+interface SessionGroup {
+  key: string;
+  user: string;
+  sessionRef?: string;
+  loggedInAt?: number;
+  items: Transaction[];
+}
+
+/** 監査サービスが並べた順（セッションの新しい順、セッションの中は時刻の順）のまま、セッションごとにまとめる */
+function bySession(items: Transaction[]): SessionGroup[] {
+  const groups: SessionGroup[] = [];
+  for (const t of items) {
+    const key = t.sessionRef ?? `user:${t.user}`;
+    const last = groups[groups.length - 1];
+    if (last?.key === key) last.items.push(t);
+    else groups.push({ key, user: t.user, sessionRef: t.sessionRef, loggedInAt: t.loggedInAt, items: [t] });
+  }
+  return groups;
+}
+
 function TransactionList({ items, selected, onSelect }: { items: Transaction[]; selected?: string; onSelect: (id: string) => void }) {
   if (items.length === 0) return <p className="muted">直近24時間の取引はない（ログが届くまで数秒〜数十秒かかる）。</p>;
   return (
     <div className="table-wrap">
       <table className="grid">
         <thead>
-          <tr><th>時刻</th><th>ユーザー</th><th>操作</th><th>目的</th><th className="num">結果</th><th>リクエストID</th></tr>
+          <tr><th>時刻</th><th>操作</th><th>案件</th><th>目的</th><th className="num">結果</th><th>リクエストID</th></tr>
         </thead>
-        <tbody>
-          {items.map((t) => (
-            <tr key={t.requestId} className={`clickable ${selected === t.requestId ? 'selected' : ''}`} onClick={() => onSelect(t.requestId)}>
-              <td className="nowrap">{day(t.time)} {clock(t.time)}</td>
-              <td>{t.user}</td>
-              <td>{ROUTE_LABELS[t.route] ?? t.route}</td>
-              <td><code>{t.purpose}</code></td>
-              <td className="num"><StatusBadge status={t.status} /></td>
-              <td><code>{short(t.requestId)}</code></td>
+        {bySession(items).map((g) => (
+          <tbody key={g.key} className="session-group">
+            <tr className="session-row">
+              <td colSpan={6}>
+                <span className="session-user">{g.user}</span>
+                <span className="muted small">
+                  {g.loggedInAt ? `${day(new Date(g.loggedInAt * 1000).toISOString())} ${clock(new Date(g.loggedInAt * 1000).toISOString())}にログイン` : 'ログインのセッションは不明'}
+                  ・操作{g.items.length}件
+                </span>
+                {g.sessionRef && <code className="muted tiny" title="ログインのセッションの識別子（bffが作る。cookieとしては使えない）">{g.sessionRef.slice(0, 8)}</code>}
+              </td>
             </tr>
-          ))}
-        </tbody>
+            {g.items.map((t) => (
+              <tr key={t.requestId} className={`clickable ${selected === t.requestId ? 'selected' : ''}`} onClick={() => onSelect(t.requestId)}>
+                <td className="nowrap">{clock(t.time)}</td>
+                <td>{ROUTE_LABELS[t.route] ?? t.route}</td>
+                <td>{t.caseId ?? '—'}</td>
+                <td><code>{t.purpose}</code></td>
+                <td className="num"><StatusBadge status={t.status} /></td>
+                <td><code>{short(t.requestId)}</code></td>
+              </tr>
+            ))}
+          </tbody>
+        ))}
       </table>
     </div>
   );
@@ -226,11 +264,11 @@ function ReconcileView({ requestId }: { requestId: string }) {
         </div>
       )}
 
-      <h3 className="section-title">ホップの記録 <span className="muted small">各ホップの共通部品が検証してログに書いた値（アプリの記録）</span></h3>
+      <h3 className="section-title">ホップの記録 <span className="muted small">各ホップの共通部品が検証してログに書いた値（アプリの記録）。呼び出しの順に並べる</span></h3>
       <div className="table-wrap">
         <table className="grid">
           <thead>
-            <tr><th title="各ホップが処理を終えてログを書いた時刻。下流のホップが先に並ぶ">記録した時刻</th><th>ホップ</th><th>呼び出し元</th><th>誰の代理か</th><th>目的</th><th>scope</th><th className="num">結果</th><th>JWTの<code>jti</code></th><th>AWSの記録</th></tr>
+            <tr><th title="各ホップが処理を始めた時刻（ログを書いた時刻から処理時間を引いたもの）">開始</th><th>ホップ</th><th>呼び出し元</th><th>誰の代理か</th><th>目的</th><th>scope</th><th className="num">結果</th><th>JWTの<code>jti</code></th><th>AWSの記録</th></tr>
           </thead>
           <tbody>
             {tx && (
@@ -248,8 +286,13 @@ function ReconcileView({ requestId }: { requestId: string }) {
             )}
             {hops.map((h, i) => (
               <tr key={i} className={h.outcome === 'rejected' ? 'rejected-row' : ''}>
-                <td className="nowrap">{clock(h.time)}</td>
-                <td><code>{h.hop}</code>{h.outcome === 'rejected' && <div className="tiny deny-text">受信の検証で拒否</div>}</td>
+                <td className="nowrap">{clock(h.startedAt ?? h.time)}</td>
+                <td>
+                  <span className="hop-cell" style={{ paddingLeft: `${(h.depth - 1) * 16}px` }}>
+                    <span className="muted" aria-hidden>└ </span><code>{h.hop}</code>
+                  </span>
+                  {h.outcome === 'rejected' && <div className="tiny deny-text">受信の検証で拒否</div>}
+                </td>
                 <td>{h.actor ? <code>{h.actor}</code> : '—'}{h.tokenIssuer && <div className="muted tiny">JWT：{h.tokenIssuer}</div>}</td>
                 <td>{h.subject ?? '—'}</td>
                 <td>{h.purpose ? <code>{h.purpose}</code> : '—'}</td>

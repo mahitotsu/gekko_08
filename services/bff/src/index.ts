@@ -53,6 +53,13 @@ interface Session {
   idTokenExp: number;
   refreshToken: string;
   ttl: number;
+  /**
+   * ログインのセッションを監査で1つにまとめるための識別子。セッションIDとは別の乱数で、cookieとしては使えない。
+   * ログイン（`/api/callback`）のときに作り、ログに出す
+   */
+  ref?: string;
+  /** ログインした時刻（UNIX秒） */
+  loggedInAt?: number;
 }
 
 const now = () => Math.floor(Date.now() / 1000);
@@ -143,6 +150,8 @@ async function putSession(sid: string, idToken: string, refreshToken: string) {
     idTokenExp: c.exp,
     refreshToken,
     ttl: now() + SESSION_TTL_SECONDS,
+    ref: randomBytes(12).toString('base64url'),
+    loggedInAt: now(),
   };
   await db.send(new PutCommand({ TableName: SESSIONS, Item: item }));
 }
@@ -318,6 +327,8 @@ async function handle(event: LambdaFunctionURLEvent, span: Span): Promise<Lambda
     const r = await withChain(s, requestId, route.purpose, timings, (call) => call(route.target, route.body, { scope: route.scope }));
     log('info', 'handled', {
       hop: 'bff', requestId, route: route.name, purpose: route.purpose, user: s.username, status: r.status,
+      // 監査で、ログインのセッションごとに操作をまとめる。案件IDは表示用（経路のパスから得たもの）
+      sessionRef: s.ref, loggedInAt: s.loggedInAt, caseId: (route.body as { caseId?: string }).caseId,
       timings: { ...timings, totalMs: Math.round(performance.now() - t0) },
     });
     if (route.name === 'me') {
