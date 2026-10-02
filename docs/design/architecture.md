@@ -66,8 +66,8 @@
 - **マイクロサービスの経路**：bff → case-service → account-service。案件を開く取引と、凍結を解除する取引が同じホップを通る
 - **エージェントの経路**：bff → fraud-agent → fraud-mcp → case-service または account-service
 
-データはDynamoDBに置き、各サービスが自分の実行roleで読み書きする（案件はcase-service、口座はaccount-service、人事データと権限マスタは
-entitlement-serviceで、属性サービスは読むだけ）。
+データはDynamoDBに置き、各サービスが自分の実行roleで扱う（案件はcase-service、口座はaccount-service、人事データと権限マスタは
+entitlement-service）。デモのデータに書き込むのは、account-serviceによる口座の凍結の解除だけで、ほかは読むだけである。
 
 ## 3. ログインとセッション（bff）
 
@@ -404,8 +404,8 @@ OpenTelemetryで出し、CloudWatchのTransaction Searchに集める（[収集�
 - **案件を開く**（目的`case-summary`）：yamadaが自分の支店の案件を開くと、case-serviceが口座の凍結の状態と理由をaccount-serviceから取得して返す。
   他の支店の案件は、case-serviceが業務的なアクセス権で拒否する。
 - **凍結を解除する**（目的`account-unfreeze`）：yamadaが案件の「凍結を解除」を押すと、case-serviceがaccount-serviceに案件の口座の解除を依頼する。
-  account-serviceは解除し、解除したユーザー（subject）、日時、リクエストIDを口座に記録する。case-serviceは解除の結果を案件に記録する
-  （口座の解除のあとに書くので、案件への記録に失敗しても口座は解除されたままになる）。tanakaは担当者なので、解除の取引でもaccount-serviceが拒否する。
+  account-serviceは、状態と、解除したユーザー（subject）、日時、リクエストIDを、1回の条件付きの更新（凍結中のときだけ）で口座に記録する。
+  解除の記録はこの口座の記録だけで、case-serviceは案件に書き込まない。tanakaは担当者なので、解除の取引でもaccount-serviceが拒否する。
   解除済みの口座は409を返す。
 - **エージェントの経路**（目的`agent-analysis`）：yamadaが案件の分析をfraud-agentに依頼する。エージェントは案件と口座を読み、解除してよいかの判断と理由を応答で返す（提案）。
   提案は記録しない。

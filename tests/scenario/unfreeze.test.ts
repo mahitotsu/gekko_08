@@ -24,11 +24,10 @@ beforeEach(async () => {
 const unfreeze = (caseId: string, cookie: string) => browserPost(`/api/cases/${caseId}/unfreeze`, '', cookie);
 
 describe('FR-7, FR-2: 凍結の解除は、人間の解除の取引で、権限のある人だけができる', () => {
-  it('支店長（tokyo）は自分の支店の口座の凍結を解除できる。誰がどのリクエストで解除したかが口座と案件に残る', async () => {
+  it('支店長（tokyo）は自分の支店の口座の凍結を解除できる。誰がどのリクエストで解除したかが口座に残る', async () => {
     const r = await unfreeze(T.unfreezeCase, manager);
     expect(r.status).toBe(200);
     expect(r.body.account).toMatchObject({ accountId: T.unfreezeAccount, status: 'active', unfrozenBy: USERS.tokyoManager, unfreezeRequestId: r.body.requestId });
-    expect(r.body.case.resolution).toMatchObject({ result: 'unfrozen', by: USERS.tokyoManager, requestId: r.body.requestId });
     expect(await readAccount(T.unfreezeAccount)).toMatchObject({ status: 'active' });
   });
 

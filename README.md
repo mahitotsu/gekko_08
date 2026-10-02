@@ -150,7 +150,7 @@ bffが侵害されれば、どの目的でも刻める（[設計ガイド](docs/
 
 ### 凍結し直す
 
-解除は口座の状態を変え、案件に解除の結果を残す。デモを繰り返すときは、口座を凍結し直し、案件の記録を消す（例はA-101とC-1001）。
+解除は口座の状態を変え、解除したユーザーとリクエストIDを口座に残す。デモを繰り返すときは、口座を凍結し直す（例はA-101）。
 
 ```sh
 export AWS_REGION=ap-northeast-1
@@ -158,8 +158,6 @@ ACCOUNTS=$(aws cloudformation describe-stacks --stack-name Gekko08App --query "S
 aws dynamodb update-item --table-name "$ACCOUNTS" --key '{"accountId":{"S":"A-101"}}' \
   --update-expression 'SET #s = :f REMOVE unfrozenBy, unfrozenAt, unfreezeRequestId' \
   --expression-attribute-names '{"#s":"status"}' --expression-attribute-values '{":f":{"S":"frozen"}}'
-CASES=$(aws cloudformation describe-stacks --stack-name Gekko08App --query "Stacks[0].Outputs[?OutputKey=='CasesTable'].OutputValue" --output text)
-aws dynamodb update-item --table-name "$CASES" --key '{"caseId":{"S":"C-1001"}}' --update-expression 'REMOVE resolution'
 ```
 
 ### 異動を試す

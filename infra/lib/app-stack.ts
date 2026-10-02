@@ -85,7 +85,7 @@ export class Gekko08AppStack extends cdk.Stack {
       hopName: 'case-service', entry: 'services/case-service/src/index.ts', issuer, callsOthers: true,
       environment: { CASES_TABLE: data.cases.tableName },
     });
-    data.cases.grantReadWriteData(caseService.fn);
+    data.cases.grantReadData(caseService.fn);
     const fraudMcp = new Hop(this, 'FraudMcp', {
       hopName: 'fraud-mcp', entry: 'services/fraud-mcp/src/index.ts', issuer, callsOthers: true,
     });

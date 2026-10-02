@@ -1,5 +1,5 @@
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocumentClient, GetCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import { DynamoDBDocumentClient, GetCommand } from '@aws-sdk/lib-dynamodb';
 import { createHopHandler, traceAwsClient, type Call } from '@gekko08/authz-context';
 
 const db = DynamoDBDocumentClient.from(traceAwsClient(new DynamoDBClient({})));
@@ -21,7 +21,7 @@ async function entitlementsOf(call: Call): Promise<Entitlements | undefined> {
 }
 
 // 凍結の見直しの案件。委任の範囲が操作を許し、かつ業務的なアクセス権が案件を許すときだけ行う
-export const handler = createHopHandler(async (body, { subject, scope, requestId, call }) => {
+export const handler = createHopHandler(async (body, { scope, call }) => {
   const action = typeof body.action === 'string' && Object.hasOwn(REQUIRED_SCOPE, body.action) ? body.action : undefined;
   if (!action || REQUIRED_SCOPE[action] !== scope) {
     return { status: 403, body: { error: 'forbidden', reason: 'scope does not allow the action' } };
@@ -44,16 +44,8 @@ export const handler = createHopHandler(async (body, { subject, scope, requestId
     return { status: 200, body: { case: Item, account: (account.body as { account: unknown }).account } };
   }
 
-  // 凍結の解除はaccount-serviceが判定する（解除の権限、支店、凍結中か）。解除できたら、結果を案件に記録する。
-  // 口座の解除のあとに書くので、案件への記録に失敗しても口座は解除されたままになる
+  // 凍結の解除はaccount-serviceが判定する（解除の権限、支店、凍結中か）。解除の記録は口座にだけ残し、案件には書かない
   const account = await call('account-service', { action: 'unfreeze', accountId: Item.accountId }, { scope: 'account:unfreeze' });
   if (account.status !== 200) return { status: account.status, body: { error: 'unfreeze failed', account: account.body } };
-  const { Attributes } = await db.send(new UpdateCommand({
-    TableName: TABLE,
-    Key: { caseId },
-    UpdateExpression: 'SET resolution = :r',
-    ExpressionAttributeValues: { ':r': { result: 'unfrozen', by: subject.id, at: new Date().toISOString(), requestId } },
-    ReturnValues: 'ALL_NEW',
-  }));
-  return { status: 200, body: { case: Attributes, account: (account.body as { account: unknown }).account } };
+  return { status: 200, body: { case: Item, account: (account.body as { account: unknown }).account } };
 });
