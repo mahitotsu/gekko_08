@@ -154,6 +154,14 @@ Token Exchangeでは、認可サーバーがトークンを交換するたびに
   サービスメッシュの代わりとしての使い方には向かない（[§6の規模の上限](#規模の上限)、[PRFAQ](prfaq/aws-authorization-context-propagation.md#q10-どんなシステムに向くか)）。
 - 応答時間に、呼び出し先を持つホップごとに約150msの余裕があること（[§6のレイテンシの実測](#レイテンシの実測)）。
 
+共通部品と合成の部品は、npmのパッケージとしては公開していない。自分のリポジトリには、次のどちらかの形で取り込む。
+
+- **このリポジトリをフォークして、`services/`を自分のサービスに置き換える。** 試すにはこれがいちばん早い。
+- **部品をコピーする。** 実行時の共通部品[packages/authz-context](../packages/authz-context/)と、合成の部品
+  （[infra/lib/constructs/hop.ts](../infra/lib/constructs/hop.ts)の`Hop`、[infra/lib/delegation.ts](../infra/lib/delegation.ts)の`connectHops`、
+  [infra/lib/constructs/node-function.ts](../infra/lib/constructs/node-function.ts)）を自分のリポジトリに置き、npmのworkspacesで
+  `@gekko08/authz-context`として参照する。下の手順の`import`は、この名前を前提にしている。単体テスト（`packages/authz-context/test`、`infra/test`）も一緒に持っていく。
+
 ### 手順
 
 1. **リクエストの目的を決める。** 入口の経路ごとに、何のためのリクエストかを決める（[services/bff/authz.ts](../services/bff/authz.ts)の`PURPOSES`）。少数に保つ。
