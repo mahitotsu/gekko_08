@@ -1,6 +1,6 @@
 # 検証結果：多段伝播の方式比較
 
-実施：2026-09-30、ap-northeast-1、Lambda Python 3.13。
+実施：2026-09-30（UTC）、ap-northeast-1、Lambda Python 3.13。
 目的：2ホップ目以降へAuthorization Context（SourceIdentity＋transitive session tags）を
 届ける方式(a)(b)(c)を比べ、ADRの根拠にする（[PRFAQ 内部FAQ Q4](../../docs/prfaq/aws-authorization-context-propagation.md#q4-技術的に未解決なことは何か)）。
 

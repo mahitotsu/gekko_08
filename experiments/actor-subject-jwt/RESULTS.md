@@ -1,6 +1,6 @@
 # 検証結果：Token Exchange相当の構成（actor＝実行role、subject＝STS発行のJWT）
 
-実施：2026-09-30、ap-northeast-1、Lambda Python 3.13（PyJWT 2.15.1、cryptography 50.0.1を同梱）。
+実施：2026-09-30（UTC）、ap-northeast-1、Lambda Python 3.13（PyJWT 2.15.1、cryptography 50.0.1を同梱）。
 
 目的：Token Exchangeと同等に、各ホップが「誰の代理か（subject）」「どのサービスから来たか（actor）」「自分宛てか（aud）」を
 確実に知れるかを確かめる。あわせて、受け渡すセッションが漏れても害がないことを確かめる。VPCやIPv6の縛りは使わない。

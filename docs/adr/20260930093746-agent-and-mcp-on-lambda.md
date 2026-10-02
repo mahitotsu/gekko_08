@@ -1,12 +1,12 @@
 # ADR: デモのエージェントとMCPサーバーもLambdaのホップとして動かす
 
-## Status
+## 状態
 
 **今有効な決定**：エージェントとMCPサーバーもLambdaのホップにし、MCPはOAuthではなく他のホップと同じ入口で守る。エージェントの実装は[Claude Agent SDKのADR](20261001040729-fraud-agent-on-claude-agent-sdk.md)による。
 
-Accepted (2026-09-30)。決定1（Converse APIのループ）は、[Claude Agent SDKのADR](20261001040729-fraud-agent-on-claude-agent-sdk.md)で置き換えた。
+採用（2026-09-30）。決定1（Converse APIのループ）は、[Claude Agent SDKのADR](20261001040729-fraud-agent-on-claude-agent-sdk.md)で置き換えた。
 
-## Context
+## 背景
 
 デモとして、AIエージェント→MCPサーバー→内部サービスのシナリオを含め、プロンプトインジェクションで誘導されたエージェントの要求が
 拒否されることを示す（[要件定義](../requirements.md)）。エージェントとMCPサーバーをどこで動かすか、どのモデルを使うかを決める。
@@ -16,7 +16,7 @@ Accepted (2026-09-30)。決定1（Converse APIのループ）は、[Claude Agent
 
 MCPの仕様（2026-07-28版）では、認可は任意（OPTIONAL）である。認可を実装する場合、HTTPではOAuthに従うことが推奨（SHOULD）される。
 
-## Decision
+## 決定
 
 1. **エージェントはLambdaのホップとする。** LambdaでAmazon BedrockのConverse API（ツール呼び出し）を回し、MCPクライアントとしてMCPサーバーを呼ぶ。
    モデルはClaude Haiku 4.5（Bedrock）とする。
@@ -29,7 +29,7 @@ MCPの仕様（2026-07-28版）では、認可は任意（OPTIONAL）である�
 - **より上位のモデル**：プロンプトインジェクションに強い可能性があるが、費用が高い。デモの目的は「判断が揺らいでも権限境界は揺らがない」ことを示すことで、
   誘導されうるモデルの方が示しやすい。
 
-## Consequences
+## 結果として引き受けること
 
 ### よくなること
 

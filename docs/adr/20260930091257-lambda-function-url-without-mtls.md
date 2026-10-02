@@ -1,10 +1,10 @@
 # ADR: ホップはLambdaで動かし、ホップ間はFunction URLの`AWS_IAM`認証で守る。mTLSは使わない
 
-## Status
+## 状態
 
-Accepted (2026-09-30)
+採用（2026-09-30）
 
-## Context
+## 背景
 
 各ホップは「どのサービスから来たか」を確かめられる必要があり、そのための仕組みはサーバーレスとマネージドサービスで実現したい
 （[要件定義](../requirements.md)）。
@@ -17,7 +17,7 @@ Accepted (2026-09-30)
 AWSでは、この参加資格をネットワークではなくIAMで守れる。Lambda Function URLを`AWS_IAM`認証にすると、呼び出しにはSigV4署名が必要になり、
 Lambdaが関数を起動する前にIAMで判定する。受信側はresource policyで、許可する呼び出し元のroleを明示できる。
 
-## Decision
+## 決定
 
 **ホップはAWS Lambdaで動かし、ホップ間の呼び出しはFunction URL（`AWS_IAM`認証）で行う。mTLSは要件から外し、サーバー認証のTLSとIAMで代替する。**
 
@@ -40,7 +40,7 @@ Lambdaが関数を起動する前にIAMで判定する。受信側はresource po
 - **API Gateway（IAM認可）**：Function URLと同じくマネージドなTLSとIAM認可を持ち、プライベート統合でネットワークの到達範囲も絞れる。
   ただし構成要素とリクエスト課金が増える。ネットワークの制限を追加の防御として重ねたい場合の選択肢として残す。
 
-## Consequences
+## 結果として引き受けること
 
 ### よくなること
 

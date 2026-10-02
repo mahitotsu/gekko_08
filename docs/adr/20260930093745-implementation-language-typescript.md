@@ -1,10 +1,10 @@
 # ADR: LambdaはTypeScriptで実装し、AWS SDKを関数に同梱する
 
-## Status
+## 状態
 
-Accepted (2026-09-30)
+採用（2026-09-30）
 
-## Context
+## 背景
 
 各ホップとBFFのLambdaを実装する言語を決める。検証はすべてPythonで行い、ランタイム同梱のboto3で`GetWebIdentityToken`が動くことを確かめた。
 一方、インフラはCDK（TypeScript）で書く。
@@ -12,7 +12,7 @@ Accepted (2026-09-30)
 Node.jsのランタイムに同梱されるAWS SDKの版は、ランタイム側の更新に依存する。`GetWebIdentityToken`は2025年11月に追加されたAPIである。
 AWS SDK for JavaScript v3の`@aws-sdk/client-sts` 3.1143.0に`GetWebIdentityTokenCommand`があることは確認した。
 
-## Decision
+## 決定
 
 **LambdaはTypeScriptで実装し、CDKの`NodejsFunction`でAWS SDK v3を関数に同梱する。** JWTの検証には`jose`を使う。
 
@@ -20,7 +20,7 @@ AWS SDK for JavaScript v3の`@aws-sdk/client-sts` 3.1143.0に`GetWebIdentityToke
 
 - **Python**：検証済みの経路をそのまま使えるが、CDKと言語が分かれる。
 
-## Consequences
+## 結果として引き受けること
 
 ### よくなること
 

@@ -1,15 +1,15 @@
 # ADR: 多段呼び出しでは、actorを呼び出し元の実行roleで、subjectをSTSが署名したJWTで伝える
 
-## Status
+## 状態
 
 **今有効な決定**：actorは呼び出し元の実行role（入口のresource policyで確かめ、呼び出し元の関数は実行roleのidentity policyのDenyで限る）で、subjectはSTSが署名したJWTで伝える。受け取ったセッションはchainして次のホップへ渡す。
 
-Accepted (2026-09-30)。業務属性をtransitive session tagで運ぶ部分は、[委任の範囲と業務上のアクセス権のADR](20260930150529-delegation-scope-and-entitlements.md)で
+採用（2026-09-30）。業務属性をtransitive session tagで運ぶ部分は、[委任の範囲と業務上のアクセス権のADR](20260930150529-delegation-scope-and-entitlements.md)で
 リクエストの目的を運ぶことに置き換えた（業務上のアクセス権は属性サービスから得る）。actorとsubjectを分ける決定は変わらない。
 決定1のうち、`lambda:SourceFunctionArn`を受信側のresource policyで使う部分は、[置き場所のADR](20261001094443-source-function-arn-in-caller-identity-policy.md)で、
 呼び出し元の実行roleのidentity policyのDenyに置き換える。
 
-## Context
+## 背景
 
 ユーザーの権限を多段呼び出しの最後のホップまで届けたい。要件は、OAuth Token Exchangeと同等のことをAWSのマネージドサービスで実現することである
 （[PRFAQ](../prfaq/aws-authorization-context-propagation.md)）。つまり各ホップが次の3つを確実に知れればよい。
@@ -34,7 +34,7 @@ IAMが同一パーティションのSTS発行者の登録を拒否した（[多�
 そこで、呼び出しの許可（actor）とユーザーの証明（subject）を分ける構成を検証し、成立した
 （[Token Exchange相当の構成](../../experiments/actor-subject-jwt/RESULTS.md)）。
 
-## Decision
+## 決定
 
 **actorは受信側の入口で呼び出し元の実行roleをIAMが確かめ、subjectとaudはSTSが署名したJWTをアプリが検証する。受け渡すセッションには、
 次のホップ宛てのJWTを作る以上の価値を持たせない。**
@@ -65,7 +65,7 @@ IAMが同一パーティションのSTS発行者の登録を拒否した（[多�
 - **ホップ宛てトークンを発行するOIDC発行者を自作する**：AWSの秘密鍵を渡さずに済むが、実質的にToken Exchangeの自作で、ホップごとに発行者への往復と
   署名鍵の管理を負う。
 
-## Consequences
+## 結果として引き受けること
 
 ### よくなること
 

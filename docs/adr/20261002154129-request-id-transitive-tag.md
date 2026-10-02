@@ -1,10 +1,10 @@
 # ADR: リクエストIDをtransitive session tagとして刻み、途中のホップに変えさせない
 
-## Status
+## 状態
 
-Accepted (2026-10-03)。[監査サービスのADR](20261002074437-audit-service.md)の「引き受けること」のうち、「リクエストIDはSTSもIAMも強制しない」を改訂する。
+採用（2026-10-02）。[監査サービスのADR](20261002074437-audit-service.md)の「引き受けること」のうち、「リクエストIDはSTSもIAMも強制しない」を改訂する。
 
-## Context
+## 背景
 
 bffはリクエストごとにIDを発行し、ヘッダー（`x-request-id`）と、各chainで作るセッションの名前（`RoleSessionName`）で下流へ引き継ぐ。
 そのセッションによる`AssumeRole`と`GetWebIdentityToken`のイベントは`Username`にこの名前が残るので、監査サービスは、
@@ -14,7 +14,7 @@ CloudTrailのイベントをリクエストIDで引き、ホップの記録と�
 そうすると、そのホップから先のイベントはリクエストIDで引けず、監査の画面では「未着」と区別できない（FR-6の追跡と、FR-7(d)の突き合わせが、
 侵害されたホップの協力に依存する）。設計ガイドの「将来の拡張」に、リクエストの目的と同じ仕組みで刻む案を挙げていた。
 
-## Decision
+## 決定
 
 **bffは、リクエストIDをリクエストの目的と同じくtransitive session tag（キー`requestId`）として刻む。IAMは、各chainの`RoleSessionName`を、
 刻まれたリクエストIDと同じ値に限る。受信側は、JWTの`principal_tags.requestId`とヘッダーのリクエストIDを照合する。**
@@ -39,7 +39,7 @@ CloudTrailのイベントをリクエストIDで引き、ホップの記録と�
   下流を呼ばずにJWTを発行できる。CloudTrailのイベントをリクエストIDで引けなくなることは防げない。
 - **セッション名ではなく`sts:SourceIdentity`に含める**：SourceIdentityはユーザー識別子として使っており、監査や属性サービスの照合が値の形に依存する。
 
-## Consequences
+## 結果として引き受けること
 
 ### よくなること
 

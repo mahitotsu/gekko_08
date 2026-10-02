@@ -1,6 +1,6 @@
 # 検証結果：案A（IPv6の送信元で一時クレデンシャルを縛る）
 
-実施：2026-09-30、ap-northeast-1、Lambda Python 3.13。
+実施：2026-09-30（UTC）、ap-northeast-1、Lambda Python 3.13。
 目的：方式(a)（一時クレデンシャルを下流へ渡す）の漏洩リスクを、`aws:SourceIp`とIPv6で抑えられるかを確かめる
 （[多段伝播の方式比較](../multi-hop-propagation/RESULTS.md)の続き）。
 

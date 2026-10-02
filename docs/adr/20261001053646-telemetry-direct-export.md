@@ -1,11 +1,11 @@
 # ADR: LambdaからのOTelは、関数の中のSDKが署名して直接送る
 
-## Status
+## 状態
 
-Accepted (2026-10-01)。同日に改訂：メトリクスは出さないことにした（[収集先のADR](20261001020115-telemetry-destination-cloudwatch.md)）。
+採用（2026-10-01）。同日に改訂：メトリクスは出さないことにした（[収集先のADR](20261001020115-telemetry-destination-cloudwatch.md)）。
 メトリクスについての検証の結果は、記録として残す。
 
-## Context
+## 背景
 
 トレースはOTLPで出し、CloudWatchに集める（[収集先のADR](20261001020115-telemetry-destination-cloudwatch.md)）。
 Lambdaからの送り方を決める必要がある。Lambdaは応答を返すと実行環境が止まるので、止まる前に送り切るか、拡張機能（Extension）に任せる必要がある。
@@ -24,7 +24,7 @@ fraud-agentのClaude Code（子プロセス）もOTLPで送るが、SigV4の署�
 
 あわせて、トレースの受け口は`xray:PutTraceSegments`で、メトリクスの受け口は`cloudwatch:PutMetricData`で認可されることを確かめた。
 
-## Decision
+## 決定
 
 **関数の中のOTel SDKが、SigV4で署名して、CloudWatchのOTLPの受け口に直接送る。ホップの呼び出しの終わりに送り切る。**
 
@@ -44,7 +44,7 @@ fraud-agentのClaude Code（子プロセス）もOTLPで送るが、SigV4の署�
   ただし、計測では直接送信より遅く（コールドでコレクターの起動を待つ。ウォームでも関数からコレクターへの送信が残る）、メモリも多く、
   応答のあとの拡張機能の時間も課金された。AWSが出しているコレクターのレイヤーは「非推奨」の扱いで、上流のものを使うことになる。
 
-## Consequences
+## 結果として引き受けること
 
 ### よくなること
 

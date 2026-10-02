@@ -1,11 +1,11 @@
 # ADR: 呼び出し元の関数の限定は、呼び出し元の実行roleのidentity policyのDenyで行う
 
-## Status
+## 状態
 
-Accepted (2026-10-01)。[多段伝播のADR](20260930064314-multi-hop-authorization-context-propagation.md)の決定1のうち、
+採用（2026-10-01）。[多段伝播のADR](20260930064314-multi-hop-authorization-context-propagation.md)の決定1のうち、
 `lambda:SourceFunctionArn`を受信側のresource policyで使う部分を置き換える。
 
-## Context
+## 背景
 
 各ホップの入口では、呼び出し元ホップの実行roleだけを許し、さらに`lambda:SourceFunctionArn`で呼び出し元の関数に限っている（多段伝播のADRの決定1）。
 同じ実行roleを持つ別の関数から呼べないようにするためで（SR-2）、受信側のresource policyに「`lambda:SourceFunctionArn`が呼び出し元の関数でなければDeny」
@@ -22,7 +22,7 @@ SR-2の境界をそこに置き続けると、AWSの変更で黙って効かな�
 - 同じアカウントでは、受信側のresource policyの許可だけで呼べる。identity policyに許可の条件を書いても絞れないので、Denyにする必要がある。
 - 実行環境の外に持ち出した認証情報で呼ぶと、どちらの形でも通った。関数のARNは、認証情報そのものに刻まれているとみられる。
 
-## Decision
+## 決定
 
 **`lambda:SourceFunctionArn`は、受信側のresource policyでは使わず、呼び出し元の実行roleのidentity policyのDenyで使う。**
 
@@ -39,7 +39,7 @@ SR-2の境界をそこに置き続けると、AWSの変更で黙って効かな�
   共有した関数どうしを区別できなくなる。費用の小さい防御なので残す。
 - **SCPで限る**：文書どおりの使い方だが、Organizationsが要り、`cdk deploy`だけで再現できなくなる（NFR-4）。
 
-## Consequences
+## 結果として引き受けること
 
 ### よくなること
 

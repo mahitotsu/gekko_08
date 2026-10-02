@@ -1,14 +1,14 @@
 # ADR: IdPにはCognito User Poolを使い、Identity Poolsは使わない
 
-## Status
+## 状態
 
 **今有効な決定**：IdPはCognito User Poolで、Pre Token Generation V2がIDトークンにSourceIdentityだけを入れる。BFFがIDトークンで`AssumeRoleWithWebIdentity`を呼ぶ。Identity Poolsは使わない。
 
-Accepted (2026-09-30)。業務属性をIDトークンの`tags`に入れてsession tagsにする部分（決定2・3の業務属性、結果の業務属性とsession tagsの上限）は、
+採用（2026-09-30）。業務属性をIDトークンの`tags`に入れてsession tagsにする部分（決定2・3の業務属性、結果の業務属性とsession tagsの上限）は、
 [委任の範囲と業務上のアクセス権のADR](20260930150529-delegation-scope-and-entitlements.md)で置き換えた。今のPre Token GenerationはSourceIdentityだけを入れ、
 federated roleは`sts:TagSession`を許さない。
 
-## Context
+## 背景
 
 ユーザーの識別子と業務属性をログイン時に一度だけ確定し、途中のホップが変更できないようにする必要がある（[要件定義](../requirements.md)）。
 [多段伝播のADR](20260930064314-multi-hop-authorization-context-propagation.md)では、これをSTSセッションのSourceIdentityと
@@ -18,7 +18,7 @@ transitive session tagsとして刻み、role chainingで運ぶ。そのため�
 `AssumeRoleWithWebIdentity`は、渡されたIDトークンの`https://aws.amazon.com/source_identity`と`https://aws.amazon.com/tags`
 （`principal_tags`と`transitive_tag_keys`）の両方のクレームを読み、1回の呼び出しでSourceIdentityとtransitiveなsession tagsを設定できる。
 
-## Decision
+## 決定
 
 **Amazon Cognito User PoolをIdPとし、Identity Poolsは使わない。**
 
@@ -39,7 +39,7 @@ role chainingで引き継がれることを実機で確かめた。
 - **自前で運用するIdP（Keycloakなど）**：OIDCのクレームを自由に作れるが、IdPの運用が必要になり、サーバーレスとマネージドサービスを
   最大限に使うという要件に反する。
 
-## Consequences
+## 結果として引き受けること
 
 ### よくなること
 

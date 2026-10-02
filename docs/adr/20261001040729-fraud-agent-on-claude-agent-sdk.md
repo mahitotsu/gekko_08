@@ -1,10 +1,10 @@
 # ADR: デモのエージェントをClaude Agent SDKで作り、MCPは関数の中の中継から共通部品で呼ぶ
 
-## Status
+## 状態
 
-Accepted (2026-10-01)。[エージェントとMCPのADR](20260930093746-agent-and-mcp-on-lambda.md)の決定1を置き換える。
+採用（2026-10-01）。[エージェントとMCPのADR](20260930093746-agent-and-mcp-on-lambda.md)の決定1を置き換える。
 
-## Context
+## 背景
 
 [エージェントとMCPのADR](20260930093746-agent-and-mcp-on-lambda.md)では、fraud-agentを、BedrockのConverse APIで書いた
 最小限のツール呼び出しのループにした。デモの目的（判断が揺らいでも権限の境界は揺らがない）にはこれで足りる。
@@ -22,7 +22,7 @@ Claude Agent SDK（TypeScript）を比べ、次のことを確かめた。
 - Strandsは同じプロセスで動き、軽く、OTelの標準の形式で出す。ただし、プロジェクトオーナーの判断では、利用の広がりと知名度が低く、
   読者に「実際に使われているフレームワークで動く」と示す題材として弱い。
 
-## Decision
+## 決定
 
 **fraud-agentを、Claude Agent SDK（TypeScript）で作り直す。MCPは、関数の中の中継から共通部品で呼ぶ。**
 
@@ -57,7 +57,7 @@ Claude Agent SDK（TypeScript）を比べ、次のことを確かめた。
 - **子プロセスに実行roleの認証情報をそのまま渡す**：検証ではこの形で動かした。実行roleは、呼び出し先のホップの入口で呼び出し元として
   許されている。JWTがなければ呼び出し先は拒否するが、モデルの判断で動くプロセスには、Bedrockの呼び出しに要る以上の権限を持たせない。
 
-## Consequences
+## 結果として引き受けること
 
 ### よくなること
 

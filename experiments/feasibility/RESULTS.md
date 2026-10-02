@@ -1,6 +1,6 @@
 # 検証結果：実現性検証（STSのSourceIdentity・GetWebIdentityToken・Function URLの認可・Cognito連携）
 
-実施：2026-09-30、ap-northeast-1、Lambda Python 3.13（ランタイム同梱のboto3 1.42.97）。
+実施：2026-09-30（UTC）、ap-northeast-1、Lambda Python 3.13（ランタイム同梱のboto3 1.42.97）。
 スタック`Gekko08Spike`・`Gekko08SpikeCognito`は検証後に削除した。
 
 目的：AWSのマネージドサービスだけで、ユーザーの識別子と業務属性をログイン時にSTSセッションへ刻み、
