@@ -30,6 +30,10 @@ export const REASONS: Record<string, { layer: Layer; text: string }> = {
     layer: 'entitlement',
     text: '所属の支店と、データの支店が違う（属性サービスの人事データ）',
   },
+  'unknown user': {
+    layer: 'entitlement',
+    text: '人事データに、このユーザーがいない（属性サービスの人事データ）',
+  },
   'account is not frozen': {
     layer: 'state',
     text: '口座はすでに凍結されていない',

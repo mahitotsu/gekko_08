@@ -58,7 +58,7 @@ export interface CallOptions {
 export type Call = (target: string, body: unknown, options?: CallOptions) => Promise<CallResult>;
 
 /** 時間を測る（NFR-3）。spanNameがあれば、同じ区切りでスパンも作る */
-async function timed<T>(timings: Timings, key: string, f: () => Promise<T>, spanName?: string): Promise<T> {
+export async function timed<T>(timings: Timings, key: string, f: () => Promise<T>, spanName?: string): Promise<T> {
   if (!spanName) {
     const t0 = performance.now();
     try {

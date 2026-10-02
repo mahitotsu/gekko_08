@@ -3,7 +3,7 @@ import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DeleteCommand, DynamoDBDocumentClient, GetCommand, PutCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { GetParameterCommand, SSMClient } from '@aws-sdk/client-ssm';
 import { AssumeRoleCommand, AssumeRoleWithWebIdentityCommand, STSClient } from '@aws-sdk/client-sts';
-import { ATTR, createCaller, flushTelemetry, initTelemetry, log, traceAwsClient, tracer, type Call, type Target, type Timings } from '@gekko08/authz-context';
+import { ATTR, createCaller, flushTelemetry, initTelemetry, log, timed, traceAwsClient, tracer, type Call, type Target, type Timings } from '@gekko08/authz-context';
 import { ROOT_CONTEXT, SpanKind, SpanStatusCode, type Span } from '@opentelemetry/api';
 import type { LambdaFunctionURLEvent, LambdaFunctionURLResult } from 'aws-lambda';
 import { PURPOSES } from '../authz';
@@ -209,31 +209,15 @@ async function logout(event: LambdaFunctionURLEvent): Promise<LambdaFunctionURLR
  * 1. IDトークンでfederated roleのセッションを得る（SourceIdentity＝ユーザー識別子）
  * 2. 目的用のroleへchainし、目的とリクエストIDをtransitive session tagとして刻む。以降のホップは目的もリクエストIDも変えられない（FR-6）
  */
-/** 時間を測り、同じ区切りでスパンを作る（NFR-3） */
-function step<T>(timings: Timings, key: string, name: string, f: () => Promise<T>): Promise<T> {
-  return tracer().startActiveSpan(name, async (span) => {
-    const t0 = performance.now();
-    try {
-      return await f();
-    } catch (e) {
-      span.setStatus({ code: SpanStatusCode.ERROR });
-      throw e;
-    } finally {
-      timings[key] = Math.round(performance.now() - t0);
-      span.end();
-    }
-  });
-}
-
 async function withChain<T>(s: Session, requestId: string, purpose: string, timings: Timings, f: (call: Call) => Promise<T>): Promise<T> {
   const { config } = await settings();
-  const { Credentials: fed } = await step(timings, 'assumeMs', 'assume (sts:AssumeRoleWithWebIdentity)', () => sts.send(new AssumeRoleWithWebIdentityCommand({
+  const { Credentials: fed } = await timed(timings, 'assumeMs', () => sts.send(new AssumeRoleWithWebIdentityCommand({
     RoleArn: config.federatedRoleArn,
     RoleSessionName: requestId,
     WebIdentityToken: s.idToken,
     DurationSeconds: 900,
-  })));
-  const { Credentials: c } = await step(timings, 'purposeMs', 'stamp purpose (sts:AssumeRole)', () => traceAwsClient(new STSClient({
+  })), 'assume (sts:AssumeRoleWithWebIdentity)');
+  const { Credentials: c } = await timed(timings, 'purposeMs', () => traceAwsClient(new STSClient({
     credentials: { accessKeyId: fed!.AccessKeyId!, secretAccessKey: fed!.SecretAccessKey!, sessionToken: fed!.SessionToken! },
   })).send(new AssumeRoleCommand({
     RoleArn: config.purposeRoleArn,
@@ -241,7 +225,7 @@ async function withChain<T>(s: Session, requestId: string, purpose: string, timi
     DurationSeconds: 900,
     Tags: [{ Key: 'purpose', Value: purpose }, { Key: 'requestId', Value: requestId }],
     TransitiveTagKeys: ['purpose', 'requestId'],
-  })));
+  })), 'stamp purpose (sts:AssumeRole)');
   const session = { accessKeyId: c!.AccessKeyId!, secretAccessKey: c!.SecretAccessKey!, sessionToken: c!.SessionToken! };
   return f(createCaller({ session, requestId, targets: config.targets, timings }));
 }
