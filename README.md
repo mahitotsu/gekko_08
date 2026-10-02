@@ -5,6 +5,8 @@ AWS上のマイクロサービスで、Authorization Context（誰の権限で�
 同等の4つの検証（各ホップが「誰の代理か」「どのサービスから来たか」「自分宛てか」「代理として何を許されているか」を確かめる）を行う。
 委任の範囲は、実行時の交換ではなくデプロイ時の宣言で絞る（違いは[PRFAQ Q1](docs/prfaq/aws-authorization-context-propagation.md#q1-oauth-token-exchangeと何が違うのか)）。
 
+仕組みを確かめ、自分のシステムに当てはめるための参照実装である。本番での利用は想定しておらず、サポートやSLAもない。
+
 認可の根拠は3つの層に分ける。
 
 | 層 | 問い | 担い手 |
@@ -74,6 +76,20 @@ AWS上のマイクロサービスで、Authorization Context（誰の権限で�
 - デプロイのときにnpmのレジストリにつながること。エージェント（fraud-agent）は[Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk/overview)で動き、
   Lambda用のClaude Code（linux-arm64の実行ファイル、約241MB）を合成のときにレジストリから取得して関数に同梱する。
   Claude Agent SDKとClaude Codeは、Anthropicの利用条件に従う。
+
+## 費用と公開されるもの
+
+常時動くサーバーはないので、固定費はほぼかからない。動かした量に応じて、次の費用がかかる。
+
+- **Amazon Bedrock**：エージェントの分析1回ごとに、Claude Haiku 4.5の呼び出しが数回かかる。
+- **CloudWatch Logs**：各ホップのログと、Transaction Searchが取り込むトレースのスパン。量に比例する。
+- **Lambda、DynamoDB、CloudFront、Cognito**：通常のサーバーレス構成と同じ。デモの規模なら、多くは無料枠に収まる。
+
+STSの呼び出しとLambdaのFunction URLには、追加の料金はかからない。
+
+デプロイすると、デモの画面（CloudFrontのURL）と各ホップのFunction URLが、インターネットから到達できる状態になる。ホップは署名（SigV4）がなければ
+呼べず、画面はログインしなければ使えない。ただし、ログインしたユーザーは、エージェントの分析でBedrockの呼び出し（課金）を起こせる。
+Cognitoのセルフサインアップは無効なので、利用者を作れるのはアカウントの管理者だけである。使い終わったら[片付け](#片付け)る。
 
 ## 始め方
 
@@ -241,6 +257,14 @@ npm run destroy
 IAMのアウトバウンドIDフェデレーションはアカウント全体の設定なので、スタックを消しても無効にならない。不要なら
 `aws iam disable-outbound-web-identity-federation`で無効にする。
 
+Transaction Searchもアカウント全体の設定で、スタックを消しても残る。同じアカウントでX-Rayを使うほかのワークロードにも影響するので、確かめてから戻す。
+
+```sh
+aws xray update-trace-segment-destination --destination XRay   # スパンの送り先をX-Rayに戻す
+aws logs delete-resource-policy --policy-name <有効にしたときに付けた名前>   # X-RayがCloudWatch Logsに書くための許可を消す
+aws logs delete-log-group --log-group-name aws/spans            # 取り込んだスパンを消す（不要なら）
+```
+
 ## ライセンス
 
 このリポジトリは[Apache License 2.0](LICENSE)で公開する（[NOTICE](NOTICE)）。
@@ -250,8 +274,7 @@ IAMのアウトバウンドIDフェデレーションはアカウント全体の
 - **Claude Agent SDKとClaude Code**：Anthropic PBCのプロプライエタリなソフトウェアで、利用は[Anthropicの条件](https://code.claude.com/docs/en/legal-and-compliance)に従う
   （Bedrock経由で使う場合は、利用者の既存の商用契約が適用される）。参照実装はClaude Codeの実行ファイルを同梱せず、合成のときに
   レジストリから取得して、改変せずに関数に入れる。
-  - 自分の組織の利用者のために、自分のBedrockの認証情報で動かすことは、条件の範囲内である。
-  - デモのエージェントの形を、**社外の利用者向けのサービスに転用する場合**は注意が要る。Anthropicとの個別の合意がない限り、
-    利用者の代わりにClaudeの利用料を払う・転売する・仲介することは認められていない。
-  - 製品名や機能名に「Claude Code」や「Anthropic」を使ってはならない。
+  - 使える範囲は、利用の形（自分の組織の中で使うか、社外の利用者向けのサービスに組み込むかなど）によって変わる。
+    動かす前や、デモのエージェントの形を転用する前に、[Anthropicの条件](https://code.claude.com/docs/en/legal-and-compliance)を確認すること。
+    製品名や機能名の扱いも、条件に定めがある。
 - **その他の依存**：MIT、Apache-2.0、ISC、BSDなどの寛容なライセンス。
