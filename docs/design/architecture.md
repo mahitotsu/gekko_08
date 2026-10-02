@@ -130,6 +130,7 @@ IDトークンには、Pre Token Generation V2トリガーが`https://aws.amazon
 フロントエンドは、POSTの本文のSHA-256を`x-amz-content-sha256`ヘッダーに付ける（CloudFrontのOACの要件）。
 
 最初のホップを呼ぶ経路（`/api/me`を除く）の応答は、ホップの応答の本文に、bffが付けた`requestId`と`purpose`（刻んだ取引の目的）を加えたものである。
+ホップの本文に同じ名前の項目があっても、bffの値で上書きする（ホップに、画面に出る目的やリクエストIDを偽らせない）。
 `purpose`は画面に見せるためのもので、ブラウザから目的は受け取らない。fraud-agentの応答の`toolCalls`は、各要素に`name`、`input`、`status`と、
 拒否されたときは呼び出し先のホップが返した`reason`を持つ。
 

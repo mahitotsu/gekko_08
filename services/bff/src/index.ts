@@ -321,8 +321,9 @@ async function handle(event: LambdaFunctionURLEvent, span: Span): Promise<Lambda
       const e = r.body as { branch?: string; title?: string };
       return r.status === 200 ? json(200, { username: s.username, branch: e.branch, title: e.title }) : json(r.status, { username: s.username });
     }
-    // 画面に、bffが刻んだ取引の目的を見せる（表示用。ブラウザから目的は受け取らない）
-    return json(r.status, { requestId, purpose: route.purpose, ...(typeof r.body === 'object' ? r.body : { detail: r.body }) });
+    // 画面に、bffが刻んだ取引の目的とリクエストIDを見せる（表示用。ブラウザから目的は受け取らない）。
+    // ホップの本文に同じ名前の項目があっても、bffの値で上書きする。ホップに画面の目的やリクエストIDを偽らせない
+    return json(r.status, { ...(typeof r.body === 'object' ? r.body : { detail: r.body }), requestId, purpose: route.purpose });
   } catch (e) {
     log('error', 'handler failed', { path, error: (e as Error).name, detail: (e as Error).message });
     return json(500, { error: 'internal error' });

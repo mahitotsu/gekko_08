@@ -310,7 +310,6 @@ async function reconcile(requestId: string) {
   ] : [];
 
   return {
-    requestId,
     hops: callOrder(hops, rows),
     transaction: bffRow ? {
       time: bffRow['@timestamp'], user: bffRow.user, route: bffRow.route, purpose: bffRow.purpose, status: num(bffRow.status),

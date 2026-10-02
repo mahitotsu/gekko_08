@@ -75,6 +75,7 @@ interface AwsRecord {
 }
 
 interface Reconciled {
+  /** bffが付けた、この監査の操作のリクエストID（監査した取引のものではない） */
   requestId: string;
   transaction: (Omit<Transaction, 'requestId'> & { logGroup?: string; fields: Field[]; check: Check }) | null;
   hops: HopRecord[];

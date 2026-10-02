@@ -10,7 +10,9 @@ interface HopRecord {
   logGroup?: string; tokenEvent?: EventRef & { tokenId?: string }; fields?: Field[]; check: Check;
 }
 interface Reconciled {
+  /** bffが付けた、この監査の操作のリクエストID */
   requestId: string;
+  purpose: string;
   transaction: { user: string; route: string; purpose: string; status: number; logGroup?: string; fields: Field[]; check: Check } | null;
   hops: HopRecord[];
   awsRecords: Record<string, unknown>[];
@@ -78,14 +80,17 @@ describe('FR-7(d): 監査担当は、取引ごとに各ホップの記録をAWS�
   }, 130_000);
 
   it('監査の操作も取引として一覧に出る。監査した取引のリクエストIDと、監査サービスを通った記録を引ける', async () => {
-    expect((await browserGet(`/api/audit/requests/${requestId}`, auditor)).status).toBe(200);
+    const own = await browserGet(`/api/audit/requests/${requestId}`, auditor);
+    expect(own.status).toBe(200);
+    // 応答のリクエストIDと目的は、bffがこの監査の操作に刻んだもの。監査サービスの本文の値では上書きされない
+    const auditId: string = own.body.requestId;
+    expect(auditId).not.toBe(requestId);
+    expect(own.body.purpose).toBe('audit');
     const list = await eventually(async () => {
       const r = await browserGet('/api/audit/requests', auditor);
-      const found = r.body.transactions?.find((t: { route: string; auditTarget?: string; user: string }) =>
-        t.route === 'audit-reconcile' && t.auditTarget === requestId && t.user === USERS.auditor);
-      return found;
+      return r.body.transactions?.find((t: { requestId: string }) => t.requestId === auditId);
     }, 120_000, 5000);
-    expect(list).toMatchObject({ purpose: 'audit', status: 200 });
+    expect(list).toMatchObject({ route: 'audit-reconcile', auditTarget: requestId, user: USERS.auditor, purpose: 'audit', status: 200 });
     // 監査の操作も、他の取引と同じく、各ホップがbffの刻んだリクエストIDで記録している
     const r = await eventually(async () => {
       const x = await browserGet(`/api/audit/requests/${list.requestId}`, auditor);
