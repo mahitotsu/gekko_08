@@ -68,12 +68,12 @@ AWS上のマイクロサービスで、Authorization Context（誰の権限で�
 
 - Amazon BedrockでClaude Haiku 4.5を使えること。アカウントによっては、Anthropicのモデルを初めて使う前に利用目的の申請が必要になる
   （Bedrockのコンソールのモデルカタログから行う）。参照実装は日本国内の推論プロファイル（東京・大阪）で呼ぶので、
-  スタックのリージョンはap-northeast-1に固定している（[infra/lib/app-stack.ts](infra/lib/app-stack.ts)の`REGION`）。
+  スタックのリージョンはap-northeast-1に固定している（[infra/lib/region.ts](infra/lib/region.ts)の`REGION`）。
   シナリオテストも同じリージョンを使う。README中のAWS CLIのコマンド用に、`AWS_REGION`も設定しておく。
-  ほかのリージョンで動かすときは、[infra/lib/app-stack.ts](infra/lib/app-stack.ts)の次の3か所を変え、`AWS_REGION`もそのリージョンにする。
-  - `REGION`：デプロイ先のリージョン。
-  - `BEDROCK_PROFILE`の接頭辞（`jp.`）：そのリージョンで使える推論プロファイル（`us.`、`eu.`、`apac.`など）。
-  - fraud-agentの`bedrockResources`のリージョンの一覧（`ap-northeast-1`、`ap-northeast-3`）：その推論プロファイルが呼び出しを送るリージョン。
+  ほかのリージョンで動かすときは、次の3か所を変え、`AWS_REGION`もそのリージョンにする（シナリオテストは`REGION`の値を使う）。
+  - [infra/lib/region.ts](infra/lib/region.ts)の`REGION`：デプロイ先のリージョン。
+  - [infra/lib/app-stack.ts](infra/lib/app-stack.ts)の`BEDROCK_PROFILE`の接頭辞（`jp.`）：そのリージョンで使える推論プロファイル（`us.`、`eu.`、`apac.`など）。
+  - 同じファイルの、fraud-agentの`bedrockResources`のリージョンの一覧（`ap-northeast-1`、`ap-northeast-3`）：その推論プロファイルが呼び出しを送るリージョン。
     送り先は、`aws bedrock get-inference-profile --inference-profile-identifier <推論プロファイルのID>`の`models`で確かめる
     （[Supported Regions and models for inference profiles](https://docs.aws.amazon.com/bedrock/latest/userguide/inference-profiles-support.html)）。
 - CloudWatchのTransaction Searchが有効であること。トレースの受け口を使うのに要る、アカウント全体の設定で、参照実装は自動では有効にしない。
@@ -229,7 +229,7 @@ bffが侵害されれば、どの目的でも刻める（[設計ガイド](docs/
 
 - 操作したユーザーと監査するユーザーは別なので、yamadaで操作したあと、ログアウトしてsuzukiでログインする。
 - 突き合わせで一致するのは、ログに書かれた目的とscopeが、STSが実際に発行したJWT（`GetWebIdentityToken`の宛先とscopeのtag、`sourceIdentity`）と
-  同じだったことである。ログはアプリが書き、CloudTrailはSTSが書く。
+  同じだったことである。ログはアプリが書いたもので、CloudTrailは、AWSがSTSの呼び出しを記録したものである。
 
 ### 凍結し直す
 

@@ -4,7 +4,7 @@ import type { Check, EventRef, Field, Reconciled as AuditResponse, Transaction, 
 import { PURPOSE_LABELS, ROUTE_LABELS } from './labels';
 import { Denial, PurposeChip } from './parts';
 
-// 監査の画面。1回のリクエストについて、各ホップのログ（アプリが書いた記録）と、CloudTrail（STSが書いた記録）を突き合わせる。
+// 監査の画面。1回のリクエストについて、各ホップのログ（アプリが書いた記録）と、CloudTrail（AWSが記録したSTSの呼び出し）を突き合わせる。
 // 判定は監査サービスが行い、画面は表示だけを行う
 
 /** bffは、監査サービスの応答に、この監査の操作のリクエストIDと目的を加える（監査したリクエストのものではない） */
@@ -54,7 +54,7 @@ export function Audit({ requestId, onSelect }: { requestId?: string; onSelect: (
           <div>
             <h2>リクエストの監査</h2>
             <p className="muted small">
-              各ホップのログ（アプリが書いた記録）を、CloudTrail（STSが書いた記録）とJWTの<code>jti</code>で突き合わせる。
+              各ホップのログ（アプリが書いた記録）を、CloudTrail（AWSが記録したSTSの呼び出し）とJWTの<code>jti</code>で突き合わせる。
               監査サービスも他のホップと同じ仕組みで守られ、監査の権限（<code>audit:view</code>）を持つユーザーだけが使える。
             </p>
           </div>
@@ -236,7 +236,7 @@ function ReconcileView({ requestId }: { requestId: string }) {
           <dt><span className="src app">アプリの記録</span></dt>
           <dd>CloudWatch Logs：各ホップが検証してログに書いた値（自己申告）</dd>
           <dt><span className="src aws">AWSの記録</span></dt>
-          <dd>CloudTrail：STSが書いたイベント（ホップは書き換えられない）。イベントIDで、CloudTrailのイベント履歴から同じイベントを引ける</dd>
+          <dd>CloudTrail：AWSが記録したSTSの呼び出しのイベント（ホップは書き換えられない）。イベントIDで、CloudTrailのイベント履歴から同じイベントを引ける</dd>
         </dl>
       </div>
 

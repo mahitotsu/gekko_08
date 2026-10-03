@@ -20,8 +20,7 @@ import { authz as entitlementServiceAuthz } from '../../services/entitlement-ser
 import { authz as fraudAgentAuthz } from '../../services/fraud-agent/authz';
 import { authz as fraudMcpAuthz } from '../../services/fraud-mcp/authz';
 
-/** デプロイ先のリージョン（要件定義の前提）。エージェントが、日本国内の推論プロファイルでモデルを呼ぶため */
-export const REGION = 'ap-northeast-1';
+export { REGION } from './region';
 
 const BEDROCK_MODEL = 'anthropic.claude-haiku-4-5-20251001-v1:0';
 
