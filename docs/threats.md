@@ -43,12 +43,12 @@
 | A-5 | 別の発行者（自分の鍵）で署名したJWTを渡す | 外部 | 受信側の検証：`iss`を自アカウントのSTSに限り、その発行者の鍵だけで検証する | `inbound`「発行者の違うJWTを拒否する」 | 防ぐ（テストあり） | RFC 8725 |
 | A-6 | 鍵の種類の取り違え（公開鍵をHMACの鍵として使うなど）で署名を偽る | 外部 | 受信側の検証：アルゴリズムをES384に固定する | `inbound`「ES384以外のアルゴリズムで署名したJWTを拒否する（公開鍵をHMACの鍵として使う、鍵の種類の取り違えを含む）」「発行者がRS256の鍵も公開していても、RS256で署名したJWTは受け付けない（ES384に固定する）」 | 防ぐ（テストあり） | RFC 8725 |
 | A-7 | chainの途中でSourceIdentityを別のユーザーに変える | 途中のホップ | STS：SourceIdentityは一度刻むと変えられない | `scenario/microservice-path`「chainでSourceIdentityを変えられない」 | 防ぐ（テストあり） | ASI03 |
-| A-8 | 別のIdP（別のUser Pool、外部のOIDC、同じUser Poolの別のアプリクライアント）のトークンで、同じSourceIdentityを持つfederated roleのセッションを作る | 別のIdPを持つ | STS：federated roleの信頼ポリシーが、このUser PoolのOIDC providerと`aud`だけを許す。目的を刻むroleが、このUser Poolで認証されたセッション（`aws:FederatedProvider`）だけを受け付ける | `auth-foundation`「信頼：このUser PoolのOIDC providerだけを、`aud`の条件付きで信頼し、SourceIdentityを刻めるのも同じ相手だけ」ほか、`purpose-role`「IdPの条件を外す（別のIdPで認証されたセッションも受け付ける）」ほか。条件の値の形は[検証](../experiments/federated-provider/RESULTS.md)で確かめた | 防ぐ（テストあり） | RFC 9700（mix-up） |
+| A-8 | 別のIdP（別のUser Pool、外部のOIDC、同じUser Poolの別のアプリクライアント）のトークンで、同じSourceIdentityを持つfederated roleのセッションを作る | 別のIdPを持つ | STS：federated roleの信頼ポリシーが、このUser PoolのOIDC providerと`aud`だけを許す。目的を刻むroleも、このUser Poolで認証されたセッション（`aws:FederatedProvider`）だけを受け付ける（別のIdPは2か所で止まる。同じUser Poolの別のアプリクライアントを止めるのは、federated roleの`aud`の条件だけ） | `auth-foundation`「信頼：このUser PoolのOIDC providerだけを、`aud`の条件付きで信頼し、SourceIdentityを刻めるのも同じ相手だけ」ほか、`purpose-role`「IdPの条件を外す（別のIdPで認証されたセッションも受け付ける）」ほか。条件の値の形は[検証](../experiments/federated-provider/RESULTS.md)で確かめた | 防ぐ（テストあり） | RFC 9700（mix-up） |
 | A-9 | 別のIdPを信頼する自分のroleでSourceIdentityを刻み、そのセッションでJWTを作って渡す | アカウント内でroleを作れる | 受信側の検証：JWTの`sub`が、入口を通った呼び出し元のchain用roleと一致すること。STS：目的を刻むroleとchain用roleは、決まったroleだけを信頼する | `scenario/token-verification`「JWTを作ったroleが、入口を通った呼び出し元のchain用roleと違えば401」 | 防ぐ（テストあり） | ASI03 |
 | A-10 | ログインしていないユーザーになりすます | BFFを乗っ取った | STS：federated roleは、Cognitoが署名したIDトークンでしか引き受けられない | `scenario/microservice-path`「Cognitoが署名していないIDトークン（User Poolの発行者を名乗り、自分の鍵で署名）では、federated roleを引き受けられない」 | 防ぐ（テストあり） | — |
 | A-11 | ログイン中のユーザーとして振る舞う | BFFを乗っ取った | 止めない（BFFは信頼の起点。guide §5） | 信頼の起点：[入口のADR](adr/20260930083437-entry-via-bff.md)、要件定義の前提（[根拠](#防がないものの根拠)） | 防がない | — |
 | A-12 | Pre Token Generationの関数やUser Poolの設定を改ざんし、任意のSourceIdentityを入れる | 設定を変えられる | 止めない（AWSは値の正しさを検証しない） | 信頼の起点：[IdPのADR](adr/20260930091026-idp-cognito-user-pool.md)、要件定義の前提（[根拠](#防がないものの根拠)） | 防がない | — |
-| A-13 | IAMの信頼ポリシーを書き換え、別のIdPや自分のroleを信頼させる | アカウントの管理者 | 止めない（各ホップのJWTには元のIdPが残らない。境界はアカウントの分離やSCPで作る） | アカウントの境界の外：要件定義の前提（単一のアカウント、IAMを管理する主体は信頼の起点）（[根拠](#防がないものの根拠)） | 防がない | — |
+| A-13 | IAMの信頼ポリシーを書き換え、別のIdPや自分のroleを信頼させる | アカウントの管理者 | 止めない（各ホップのJWTには元のIdPが残らない。別のIdPを通すには、federated roleと目的を刻むroleの2つの信頼ポリシーを書き換える必要がある。境界はアカウントの分離やSCPで作る） | アカウントの境界の外：要件定義の前提（単一のアカウント、IAMを管理する主体は信頼の起点）（[根拠](#防がないものの根拠)） | 防がない | — |
 
 ## B. 呼び出し元のなりすまし（どのサービスから来たか）
 
@@ -85,7 +85,7 @@
 | D-6 | chainで新しいtagのキー（`role`など）を加え、受信側に権限と誤解させる | 途中のホップ | STS：chain用roleの信頼が、tagのキーを`purpose`と`requestId`に限る | `scenario/microservice-path`「chainで新しいtagのキーを加えられない」 | 防ぐ（テストあり） | — |
 | D-7 | リクエストIDを変え、監査で自分の操作を追えなくする | 途中のホップ | STS：chainのセッション名を刻まれたリクエストIDに限る。受信側の検証：ヘッダーとJWTの照合 | `scenario/microservice-path`「chainのセッション名を、刻まれたリクエストIDと違う値にできない」「chainでリクエストIDのtagを上書きできない」 | 防ぐ（テストあり） | — |
 | D-8 | IAMの設定の誤りで発行された、許していないscopeを受け付けさせる | IAMの設定が誤っている | 受信側の検証：提供側の定義との照合 | `inbound`「提供側の定義にないscopeを拒否する」「目的の制限があるscopeは、許された目的と呼び出し元のときだけ受け付ける」 | 防ぐ（テストあり） | — |
-| D-9 | IAMの条件の書き方の誤り（`ForAnyValue`、Denyの欠落、tagのキーの制限の欠落など）を突く | IAMの設定が誤っている | 単体テスト：条件を壊したテンプレートを見逃さない | `hop`「条件を壊したテンプレートを見逃さない」、`purpose-role`「条件を壊したテンプレートを見逃さない」 | 防ぐ（テストあり） | — |
+| D-9 | IAMの条件の書き方の誤り（`ForAnyValue`、Denyの欠落、tagのキーの制限の欠落など）を突く | IAMの設定が誤っている | 単体テスト：条件を壊したテンプレートを見逃さない | `hop`「条件を壊したテンプレートを見逃さない」、`purpose-role`「条件を壊したテンプレートを見逃さない」、`auth-foundation`「条件を壊したテンプレートを見逃さない」 | 防ぐ（テストあり） | — |
 
 ## E. 業務上のアクセス権（オブジェクト単位の認可）
 
@@ -145,7 +145,7 @@
 |---|---|---|---|
 | A-11 | 信頼の起点。BFFはログイン中のユーザーのIDトークンを持ち、リクエストの目的を決める | [入口のADR](adr/20260930083437-entry-via-bff.md)、要件定義の「前提と範囲」、[設計ガイド§5](guide.md#5-この構成が守らないもの) | 刻める目的はIAMが一覧に限る（D-5）。ログインしていないユーザーにはなれない（A-10） |
 | A-12 | 信頼の起点。SourceIdentityの値はPre Token Generationの関数が決め、AWSは値の正しさを検証しない | [IdPのADR](adr/20260930091026-idp-cognito-user-pool.md)の「結果として引き受けること」、要件定義の「前提と範囲」 | アプリクライアントに属性の書き込みを許さない。セルフサインアップは無効 |
-| A-13 | 信頼の起点。この構成は、単一のアカウントの中でIAMに強制させるので、IAMそのものを書き換えられる主体（アカウントの管理者）は対象にしない。各ホップのJWTには元のIdPが残らないので、ホップの側でも見分けられない | 要件定義の「前提と範囲」、[検証](../experiments/federated-provider/RESULTS.md) | 本番では、SCPで信頼ポリシーの書き換えを、RCPで許可していないIdPからの引き受けを、組織の側で制限する。アカウントを分ける |
+| A-13 | 信頼の起点。この構成は、単一のアカウントの中でIAMに強制させるので、IAMそのものを書き換えられる主体（アカウントの管理者）は対象にしない。各ホップのJWTには元のIdPが残らないので、ホップの側でも見分けられない | 要件定義の「前提と範囲」、[検証](../experiments/federated-provider/RESULTS.md)、[IdPの確認のADR](adr/20261003111952-purpose-role-federated-provider.md) | 別のIdPを通すには、federated roleと目的を刻むroleの2つの信頼ポリシーを書き換える必要があり、片方の誤りだけでは通らない。本番では、SCPで信頼ポリシーの書き換えを、RCPで許可していないIdPからの引き受けを、組織の側で制限する。アカウントを分ける |
 | B-6 | 構成の性質。呼び出し元の関数の限定（`lambda:SourceFunctionArn`）は、認証情報に刻まれた関数のARNで判定するので、持ち出した認証情報で呼んでも、その関数からの呼び出しとして扱われる | [検証](../experiments/source-function-arn/RESULTS.md)で、持ち出した認証情報で実際に呼べた | 受け渡すセッションは15分、JWTは5分で切れる。IPv6の送信元で縛れることは確かめたが、ホップをVPCにつなぐ必要があるので採らない（[検証](../experiments/network-binding/RESULTS.md)） |
 | C-4 | 影響なし。再送には、直前のホップの実行roleの署名が要る。その署名を作れる主体は、もともと同じ宛先に新しいJWTを発行できるので、再送で増える能力はない | 設計書§4（JWTは呼び出し元のchain用roleが発行し、呼び出しは実行roleで署名する） | `jti`の使用済みの記録は持たない（状態を持たない設計） |
 | E-5 | 信頼の起点。業務上のアクセス権は、属性サービスのデータがすべてを決める | [委任の範囲のADR](adr/20260930150529-delegation-scope-and-entitlements.md) | 委任の範囲は広がらない。データを書き換えても、エージェントのリクエストでは解除できない（D-3のテストが、アクセス権によらずJWTが発行されないことを示す） |
