@@ -1,0 +1,10 @@
+{
+  "name": "gekko08-exp-federated-provider",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "cdk": "cdk",
+    "run": "tsx scripts/run.ts"
+  }
+}
