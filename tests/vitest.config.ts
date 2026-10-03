@@ -1,5 +1,5 @@
 import { defineConfig } from 'vitest/config';
-import { REGION } from '../infra/lib/region';
+import { REGION } from '../infra/lib/region.ts';
 
 export default defineConfig({
   test: {

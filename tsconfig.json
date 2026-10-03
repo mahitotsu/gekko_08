@@ -9,6 +9,7 @@
     "skipLibCheck": true,
     "resolveJsonModule": true,
     "noEmit": true,
+    "allowImportingTsExtensions": true,
     "jsx": "react-jsx"
   },
   "include": ["infra", "packages/*/src", "packages/*/test", "services/*/src", "services/*/test", "services/*/authz.ts", "tests", "web/src", "web/vite.config.ts"],
