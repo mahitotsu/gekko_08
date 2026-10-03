@@ -80,7 +80,7 @@ describe('createHopHandler', () => {
     const handler = createHopHandler(async () => { called = true; return { status: 200, body: {} }; }, config);
     expect(statusOf(await handler(event({ 'x-authz-context': token, 'x-request-id': 'forged-1' })))).toBe(401);
     expect(called).toBe(false);
-    const rejected = lines.map((l) => JSON.parse(l)).find((l) => l.message === 'rejected');
+    const rejected = lines.map((l) => JSON.parse(l) as { message: string }).find((l) => l.message === 'rejected');
     expect(rejected).toMatchObject({ requestId: 'forged-1', stampedRequestId: 'req-1', status: 401 });
   });
 });

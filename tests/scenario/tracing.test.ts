@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it } from 'vitest';
-import { browserGet, browserPost, handledLogs, loginSession, provisionTestData, type SpanRecord, TEST_DATA as T, traceSpans, USERS } from './helpers';
+import { browserGet, browserPost, handledLogs, loginSession, provisionTestData, requestIdOf, type SpanRecord, TEST_DATA as T, traceSpans, USERS } from './helpers';
 
 // トレース（FR-6）。各ホップの受信と送信のスパンが、traceparentの引き継ぎで1つのトレースにつながり、
 // 検証の結果（呼び出し元、目的、scope、ユーザー）が属性に入ることを、CloudWatch Transaction Search（aws/spans）で確かめる。
@@ -40,9 +40,10 @@ beforeAll(async () => {
   // ブラウザが送ったtraceparentは、bffが引き継がない
   const s = await browserGet(`/api/cases/${T.tokyoCase}/summary`, manager, { traceparent: `00-${BROWSER_TRACE_ID}-00f067aa0ba902b7-01` });
   const a = await browserPost('/api/agent', JSON.stringify({ caseId: T.tokyoCase }), manager);
-  const logs = await handledLogs([s.body.requestId, a.body.requestId], ['bff'], startTime);
-  const summaryTrace = logs(s.body.requestId).bff!.traceId!;
-  const agentTrace = logs(a.body.requestId).bff!.traceId!;
+  const [summaryId, agentId] = [requestIdOf(s), requestIdOf(a)];
+  const logs = await handledLogs([summaryId, agentId], ['bff'], startTime);
+  const summaryTrace = logs(summaryId).bff!.traceId!;
+  const agentTrace = logs(agentId).bff!.traceId!;
   browserTraceIgnored = { bffTraceId: summaryTrace };
   [summary, agent] = await Promise.all([
     // bff、case-service、account-service、属性サービス（2回）の受信と、それぞれへの送信

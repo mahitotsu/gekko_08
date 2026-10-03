@@ -31,51 +31,5 @@ export async function post<T = Record<string, unknown>>(path: string, body = '')
   return toResult<T>(res);
 }
 
-export interface Me {
-  username: string;
-  /** 所属と役職は属性サービス（人事データ）から得たもの。トークンには入れていない */
-  branch?: string;
-  title?: string;
-}
-
-export interface Transaction {
-  date: string;
-  amount: number;
-  memo: string;
-}
-
-export interface Case {
-  caseId: string;
-  branch: string;
-  accountId: string;
-  title: string;
-  transactions: Transaction[];
-}
-
-export interface Account {
-  accountId: string;
-  branch: string;
-  holder: string;
-  status: string;
-  frozenReason?: string;
-  [key: string]: unknown;
-}
-
-export interface ToolCall {
-  name: string;
-  input: Record<string, unknown>;
-  status: number;
-  reason?: string;
-}
-
-/** bffが返す本文。requestIdとpurposeはbffが付ける */
-export interface HopBody {
-  requestId?: string;
-  purpose?: string;
-  error?: string;
-  reason?: string;
-  case?: Case;
-  account?: Account & { reason?: string; error?: string };
-  analysis?: string;
-  toolCalls?: ToolCall[];
-}
+// bffの本文の型は、bffのパッケージが定義する
+export type { Account, Case, CaseTransaction, HopBody, LogoutBody, Me, ToolCall } from '@gekko08/bff/api';

@@ -6,7 +6,12 @@ import { beforeAll, describe, expect, it, vi } from 'vitest';
  */
 
 type Call = (target: string, body: unknown, options?: unknown) => Promise<{ status: number; body: unknown }>;
-type Business = (body: Record<string, unknown>, ctx: { headers: Record<string, string>; call: Call }) => Promise<{ status: number; body: any }>;
+/** JSON-RPCの応答のうち、テストが読む項目 */
+interface RpcResponse {
+  result?: { tools?: { name: string; inputSchema: { required?: string[] } }[]; isError?: boolean };
+  error?: unknown;
+}
+type Business = (body: Record<string, unknown>, ctx: { headers: Record<string, string>; call: Call }) => Promise<{ status: number; body?: RpcResponse }>;
 const captured: { fn?: Business } = {};
 
 vi.mock('@gekko08/authz-context', () => ({
@@ -44,7 +49,7 @@ describe('fraud-mcp（2025年の版、ステートレス）', () => {
 
   it('ツールの一覧に、3つのツールと入力のスキーマを返す', async () => {
     const r = await rpc({ jsonrpc: '2.0', id: 2, method: 'tools/list' });
-    const tools = r.body.result.tools as { name: string; inputSchema: { required?: string[] } }[];
+    const tools = r.body?.result?.tools ?? [];
     expect(tools.map((t) => t.name).sort()).toEqual(['get_account', 'get_case', 'unfreeze_account']);
     expect(tools.find((t) => t.name === 'get_case')?.inputSchema.required).toEqual(['caseId']);
   });
@@ -52,9 +57,9 @@ describe('fraud-mcp（2025年の版、ステートレス）', () => {
   it('ツールは、受け取った委任で業務のホップを呼び、拒否はツールのエラーとして返す', async () => {
     calls.length = 0;
     const ok = await rpc({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'get_account', arguments: { accountId: 'A-101' } } });
-    expect(ok.body.result).toMatchObject({ isError: false, structuredContent: { status: 200 } });
+    expect(ok.body?.result).toMatchObject({ isError: false, structuredContent: { status: 200 } });
     const denied = await rpc({ jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'unfreeze_account', arguments: { accountId: 'A-999' } } });
-    expect(denied.body.result).toMatchObject({ isError: true, structuredContent: { status: 403, body: { reason: 'scope does not allow the action' } } });
+    expect(denied.body?.result).toMatchObject({ isError: true, structuredContent: { status: 403, body: { reason: 'scope does not allow the action' } } });
     expect(calls).toEqual([
       { target: 'account-service', body: { action: 'get', accountId: 'A-101' } },
       { target: 'account-service', body: { action: 'unfreeze', accountId: 'A-999' } },
@@ -64,7 +69,7 @@ describe('fraud-mcp（2025年の版、ステートレス）', () => {
   it('入力のスキーマに合わない引数では、業務のホップを呼ばない', async () => {
     calls.length = 0;
     const r = await rpc({ jsonrpc: '2.0', id: 5, method: 'tools/call', params: { name: 'get_case', arguments: { caseId: 1001 } } });
-    expect(r.body.result?.isError ?? r.body.error).toBeTruthy();
+    expect(r.body?.result?.isError ?? r.body?.error).toBeTruthy();
     expect(calls).toEqual([]);
   });
 });

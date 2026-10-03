@@ -38,9 +38,9 @@ const ns = (over: Record<string, unknown> = {}) => ({
 const claims = ns();
 
 async function rejected(p: Promise<unknown>, status: number) {
-  const e = await p.then(() => undefined, (err) => err);
+  const e: unknown = await p.then(() => undefined, (err: unknown) => err);
   expect(e).toBeInstanceOf(AuthzError);
-  expect(e.status).toBe(status);
+  expect((e as AuthzError).status).toBe(status);
 }
 
 describe('verifyInbound', () => {
@@ -81,7 +81,7 @@ describe('verifyInbound', () => {
     // STSのGetWebIdentityTokenはRS256でも署名できるので、発行者の鍵の一覧にはRS256の鍵も載りうる。IAMはES384でしか発行させない
     const rs = await generateKeyPair('RS256');
     const rsJwk = { ...(await exportJWK(rs.publicKey)), kid: 'k2', alg: 'RS256' };
-    const both = { ...opts, keys: createLocalJWKSet({ keys: [publicJwk as never, rsJwk] }) };
+    const both = { ...opts, keys: createLocalJWKSet({ keys: [publicJwk, rsJwk] }) };
     const token = await new SignJWT(claims).setProtectedHeader({ alg: 'RS256', kid: 'k2' })
       .setIssuer(ISSUER).setAudience('aud-account').setSubject(CHAIN).setIssuedAt().setExpirationTime('5m').sign(rs.privateKey);
     await rejected(verifyInbound(token, CALLER_ARN, both, RID), 401);

@@ -92,11 +92,13 @@ describe('traceparentの引き継ぎ', () => {
 
 describe('AWS SDKの呼び出しのスパン', () => {
   // AWS SDKのクライアントの代わり。登録されたミドルウェアで、1回の呼び出しを再現する
+  type Handler = (args: { input: unknown }) => Promise<unknown>;
+  type Middleware = (next: Handler, ctx: { clientName: string; commandName: string }) => Handler;
   function fakeClient() {
-    let mw: any;
-    const client = { middlewareStack: { add: (m: any) => { mw = m; } } };
-    traceAwsClient(client);
-    return (input: unknown, output: unknown) => mw(async () => output, { clientName: 'DynamoDBClient', commandName: 'GetItemCommand' })({ input });
+    let mw: Middleware | undefined;
+    const client = { middlewareStack: { add: (m: Middleware) => { mw = m; } } };
+    traceAwsClient(client as unknown as Parameters<typeof traceAwsClient>[0]);
+    return (input: unknown, output: unknown) => mw!(() => Promise.resolve(output), { clientName: 'DynamoDBClient', commandName: 'GetItemCommand' })({ input });
   }
 
   it('サービス名・操作名・テーブル名・リクエストIDを属性に入れ、キーは入れない', async () => {

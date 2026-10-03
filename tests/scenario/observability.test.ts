@@ -61,7 +61,7 @@ describe('FR-6: 1回のリクエストを、各ホップのログでリクエス
       return names.has('AssumeRole') && names.has('GetWebIdentityToken') ? Events! : undefined;
     }, 20 * 60_000, 30_000);
     for (const e of events.filter((x) => ['AssumeRole', 'GetWebIdentityToken'].includes(x.EventName!))) {
-      const detail = JSON.parse(e.CloudTrailEvent!);
+      const detail = JSON.parse(e.CloudTrailEvent!) as { userIdentity: { arn: string; sessionContext: { sourceIdentity?: string } } };
       expect(detail.userIdentity.sessionContext.sourceIdentity).toBe(USERS.tokyoManager);
       expect(detail.userIdentity.arn).toContain(`/${allowedId}`);
     }

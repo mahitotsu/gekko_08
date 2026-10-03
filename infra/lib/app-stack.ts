@@ -54,6 +54,9 @@ function claudeCodeBundling(): NodeFunctionProps['bundling'] {
   };
 }
 
+/** contextの真偽値。`-c`では文字列、cdk.jsonでは真偽値で届く */
+const isTrue = (v: unknown) => v === true || v === 'true';
+
 /** 参照実装の単一のスタック（設計書§9） */
 export class Gekko08AppStack extends cdk.Stack {
   // 構成を外から拡張するための参照（呼び出し関係とbffの設定は合成時に決まるので、作成後に加えたホップも反映される）
@@ -96,8 +99,7 @@ export class Gekko08AppStack extends cdk.Stack {
       environment: {
         BEDROCK_MODEL_ID: BEDROCK_PROFILE,
         // 原因を調べるときだけ（`cdk deploy -c agentLogStderr=true`）、異常終了したClaude Codeの標準エラー出力をログに出す（設計書§8）
-        // `-c`では文字列、cdk.jsonでは真偽値で届く
-        ...([true, 'true'].includes(this.node.tryGetContext('agentLogStderr')) ? { AGENT_LOG_STDERR: '1' } : {}),
+        ...(isTrue(this.node.tryGetContext('agentLogStderr')) ? { AGENT_LOG_STDERR: '1' } : {}),
       },
       timeout: cdk.Duration.seconds(55), memorySize: 1024,
       bundling: claudeCodeBundling(),

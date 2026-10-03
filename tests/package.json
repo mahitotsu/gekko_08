@@ -19,6 +19,7 @@
     "@gekko08/account-service": "*",
     "@gekko08/audit-service": "*",
     "@gekko08/authz-context": "*",
+    "@gekko08/bff": "*",
     "@gekko08/case-service": "*",
     "@smithy/signature-v4": "^5.7.4",
     "jose": "^6.2.12"

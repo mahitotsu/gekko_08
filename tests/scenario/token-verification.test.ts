@@ -23,9 +23,9 @@ const optsFor = (audience: string, callers: Record<string, string>): VerifyOptio
 });
 
 async function rejectedWith(p: Promise<unknown>, status: number) {
-  const e = await p.then(() => undefined, (err) => err);
+  const e: unknown = await p.then(() => undefined, (err: unknown) => err);
   expect(e).toBeInstanceOf(AuthzError);
-  expect(e.status).toBe(status);
+  expect((e as AuthzError).status).toBe(status);
 }
 
 const b64 = (x: unknown) => Buffer.from(JSON.stringify(x)).toString('base64url');
@@ -44,11 +44,12 @@ const caseOpts = () => optsFor(o.CaseServiceAudience, { 'bff-exec': o.PurposeRol
 describe('FR-1: 各ホップは、STSが署名したJWTでsubject・宛先・委任の範囲を確かめる', () => {
   it('bffが目的を刻んだセッションで作ったcase-service宛てのJWTから、subject・目的・scopeを取り出せる', async () => {
     const v = await verifyInbound(await toCase(), callerArn('bff-exec'), caseOpts(), purpose.requestId);
-    expect(v).toEqual({
+    const { tokenId, ...rest } = v;
+    expect(rest).toEqual({
       subject: { id: USERS.tokyoManager }, purpose: 'case-summary', scope: 'case:summary', actor: 'bff-exec', actorRole: 'bff-exec', tokenSub: o.PurposeRoleArn,
-      // JWTの`jti`。CloudTrailの`webIdentityTokenId`と一致し、監査で突き合わせる
-      tokenId: expect.stringMatching(/^[0-9a-f-]{36}$/),
     });
+    // JWTの`jti`。CloudTrailの`webIdentityTokenId`と一致し、監査で突き合わせる
+    expect(tokenId).toMatch(/^[0-9a-f-]{36}$/);
   });
 
   it('chainしたセッションが作ったJWTにも、同じsubjectと目的が引き継がれる', async () => {
@@ -91,7 +92,7 @@ describe('FR-1: 各ホップは、STSが署名したJWTでsubject・宛先・委
 
   it('署名なし（alg=none）に書き換えたJWTは401', async () => {
     const token = await toCase();
-    const header = { ...JSON.parse(Buffer.from(parts(token)[0], 'base64url').toString()), alg: 'none' };
+    const header = { ...(JSON.parse(Buffer.from(parts(token)[0], 'base64url').toString()) as Record<string, unknown>), alg: 'none' };
     await rejectedWith(verifyInbound(`${b64(header)}.${parts(token)[1]}.`, callerArn('bff-exec'), caseOpts(), purpose.requestId), 401);
   });
 

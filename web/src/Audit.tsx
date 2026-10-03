@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useState } from 'react';
-import { get, type ApiResult } from './api';
+import type { ApiResult } from './api';
 import type { Check, EventRef, Field, Reconciled as AuditResponse, Transaction, TransactionList } from '@gekko08/audit-service/api';
 import { PURPOSE_LABELS, ROUTE_LABELS } from './labels';
 import { Denial, PurposeChip } from './parts';
+import { useApi } from './useApi';
 
 // 監査の画面。1回のリクエストについて、各ホップのログ（アプリが書いた記録）と、CloudTrail（AWSが記録したSTSの呼び出し）を突き合わせる。
 // 判定は監査サービスが行い、画面は表示だけを行う
@@ -29,21 +29,7 @@ function day(t: string): string {
 const short = (id?: string) => (id ? `${id.slice(0, 8)}…` : '—');
 
 export function Audit({ requestId, onSelect }: { requestId?: string; onSelect: (id: string) => void }) {
-  const [list, setList] = useState<ApiResult<Partial<TransactionList> & Denied>>();
-  const [loadingList, setLoadingList] = useState(false);
-
-  const loadList = useCallback(async () => {
-    setLoadingList(true);
-    try {
-      setList(await get('/api/audit/requests'));
-    } finally {
-      setLoadingList(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void loadList();
-  }, [loadList]);
+  const { result: list, loading: loadingList, reload: loadList } = useApi<Partial<TransactionList> & Denied>('/api/audit/requests');
 
   const denied = list && list.status !== 200;
 
@@ -182,21 +168,7 @@ function CheckBadge({ check }: { check: Check }) {
 }
 
 function ReconcileView({ requestId }: { requestId: string }) {
-  const [r, setR] = useState<ApiResult<Reconciled & Denied>>();
-  const [loading, setLoading] = useState(false);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      setR(await get(`/api/audit/requests/${encodeURIComponent(requestId)}`));
-    } finally {
-      setLoading(false);
-    }
-  }, [requestId]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
+  const { result: r, loading, reload: load } = useApi<Reconciled & Denied>(`/api/audit/requests/${encodeURIComponent(requestId)}`);
 
   if (!r) return <section className="card"><p className="muted"><span className="spinner inline-spinner" aria-hidden /> 突き合わせ中…（ログとCloudTrailを読む。数秒かかる）</p></section>;
   if (r.status !== 200) return <section className="card"><AuditDenied result={r} /></section>;
@@ -211,7 +183,7 @@ function ReconcileView({ requestId }: { requestId: string }) {
       <header className="result-head">
         <div>
           <div className="result-title">
-            {tx ? (ROUTE_LABELS[tx.route] ?? tx.route) : 'リクエスト'}<span className="muted">　{tx?.user}</span>
+            {tx ? (ROUTE_LABELS[tx.route] ?? tx.route) : 'リクエスト'}<span className="muted aside">{tx?.user}</span>
           </div>
           <div className="result-meta">
             {tx && <PurposeChip purpose={tx.purpose} />}
@@ -321,7 +293,7 @@ function RecordHead(props: {
       <span className="nowrap muted small">{clock(props.time)}</span>
       <span className="record-name">
         {props.depth > 0 && <span className="muted" aria-hidden>└ </span>}<code>{props.name}</code>
-        {props.actor && <span className="muted small">　呼び出し元 {props.depth > 0 ? <code>{props.actor}</code> : props.actor}</span>}
+        {props.actor && <span className="muted small aside">呼び出し元 {props.depth > 0 ? <code>{props.actor}</code> : props.actor}</span>}
       </span>
       <span className="record-result">
         <StatusBadge status={props.status} />
@@ -345,7 +317,7 @@ function EventSource({ e }: { e: EventRef }) {
   return (
     <div className="event-src">
       CloudTrail：<code>{e.event}</code>
-      <span className="muted">　{day(e.time)} {clock(e.time)}</span>
+      <span className="muted aside">{day(e.time)} {clock(e.time)}</span>
       <div><span className="label">イベントID</span><code>{e.eventId ?? '—'}</code></div>
     </div>
   );

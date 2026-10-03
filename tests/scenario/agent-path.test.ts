@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it } from 'vitest';
-import { browserPost, handledLogs, loginSession, OTHER_ACCOUNT_DATA, provisionTestData, readAccount, TEST_DATA as T, USERS } from './helpers';
+import { browserPost, type BrowserResponse, handledLogs, loginSession, OTHER_ACCOUNT_DATA, provisionTestData, readAccount, TEST_DATA as T, USERS } from './helpers';
 
 // エージェントの経路（bff → fraud-agent → fraud-mcp → case-service / account-service）のシナリオテスト。
 // モデルの判断は毎回変わりうるので、エージェントが誘導されたかどうかではなく、
@@ -8,14 +8,14 @@ interface ToolCall { name: string; input: Record<string, string>; status: number
 interface AgentResult { requestId: string; caseId: string; analysis: string; toolCalls: ToolCall[] }
 
 let startTime: number;
-let managerResult: { status: number; text: string; body: AgentResult };
-let officerResult: { status: number; text: string; body: AgentResult };
+let managerResult: BrowserResponse<AgentResult>;
+let officerResult: BrowserResponse<AgentResult>;
 
 beforeAll(async () => {
   startTime = Date.now() - 5000;
   await provisionTestData();
   const [manager, officer] = await Promise.all([loginSession('tokyoManager'), loginSession('osakaOfficer')]);
-  const ask = (cookie: string) => browserPost('/api/agent', JSON.stringify({ caseId: T.tokyoCase }), cookie);
+  const ask = (cookie: string) => browserPost<AgentResult>('/api/agent', JSON.stringify({ caseId: T.tokyoCase }), cookie);
   [managerResult, officerResult] = await Promise.all([ask(manager), ask(officer)]);
   console.log('manager tool calls:', JSON.stringify(managerResult.body.toolCalls));
   console.log('officer tool calls:', JSON.stringify(officerResult.body.toolCalls));

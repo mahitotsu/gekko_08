@@ -56,8 +56,8 @@ const fixture = buildFixture();
 const r = (f: Fixture, v: unknown): Json => f.stack.resolve(v);
 const logicalId = (f: Fixture, c: { node: { defaultChild?: unknown } } | cdk.CfnElement): string =>
   f.stack.getLogicalId((c instanceof cdk.CfnElement ? c : c.node.defaultChild) as cdk.CfnElement);
-const roleId = (f: Fixture, role: iam.IRole) => logicalId(f, role as iam.Role);
-const fnId = (f: Fixture, fn: lambda.IFunction) => logicalId(f, fn as lambda.Function);
+const roleId = (f: Fixture, role: iam.IRole) => logicalId(f, role);
+const fnId = (f: Fixture, fn: lambda.IFunction) => logicalId(f, fn);
 
 /** 呼び出し元の組（このホップを呼ぶ相手） */
 function callersOf(f: Fixture, hop: Hop): HopCaller[] {
@@ -84,7 +84,7 @@ function checkEntry(f: Fixture, hop: Hop): string[] {
   const url = t.Resources[logicalId(f, hop.url)];
   if (url?.Properties.AuthType !== 'AWS_IAM') problems.push(`${hop.hopName}: function URL auth type is ${url?.Properties.AuthType}`);
 
-  const policy = t.Resources[logicalId(f, hop.node.findChild('EntryPolicy') as cdk.CfnElement)];
+  const policy = t.Resources[logicalId(f, hop.node.findChild('EntryPolicy'))];
   if (!policy) return [...problems, `${hop.hopName}: no entry policy`];
   const fnArn = r(f, hop.fn.functionArn);
   const roles = callersOf(f, hop).map((c) => r(f, c.execRole.roleArn));
@@ -267,7 +267,7 @@ function replaceDeep(obj: Json, value: Json, replacement: Json): Json {
   return obj;
 }
 
-const entryPolicy = (f: Fixture, t: Json, hop: Hop) => t.Resources[logicalId(f, hop.node.findChild('EntryPolicy') as cdk.CfnElement)].Properties.PolicyDocument;
+const entryPolicy = (f: Fixture, t: Json, hop: Hop) => t.Resources[logicalId(f, hop.node.findChild('EntryPolicy'))].Properties.PolicyDocument;
 const chainPolicies = (f: Fixture, t: Json, role: iam.IRole) => Object.values<Json>(t.Resources)
   .filter((x) => x.Type === 'AWS::IAM::Policy' && x.Properties.Roles.some((y: Json) => y.Ref === roleId(f, role)))
   .map((x) => x.Properties.PolicyDocument);

@@ -1,6 +1,6 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
-  browserPost, chainTo, handledLogs, loginSession, mintJwt, type Outputs, provisionTestData, purposeSession, readAccount, stackOutputs,
+  browserPost, chainTo, handledLogs, loginSession, mintJwt, type Outputs, provisionTestData, purposeSession, readAccount, requestIdOf, stackOutputs,
   TEST_DATA as T, USERS,
 } from './helpers';
 
@@ -49,7 +49,8 @@ describe('FR-7, FR-2: 凍結の解除は、人間の解除のリクエストで�
 
   it('FR-6: 解除のリクエストのログに、目的と解除のscopeが残る', async () => {
     const r = await unfreeze(T.unfreezeCase, manager);
-    const l = (await handledLogs([r.body.requestId], ['bff', 'case-service', 'account-service'], startTime))(r.body.requestId);
+    const id = requestIdOf(r);
+    const l = (await handledLogs([id], ['bff', 'case-service', 'account-service'], startTime))(id);
     expect(l.bff).toMatchObject({ user: USERS.tokyoManager, route: 'case-unfreeze', purpose: 'account-unfreeze', status: 200 });
     expect(l['case-service']).toMatchObject({ actor: 'bff', purpose: 'account-unfreeze', scope: 'case:unfreeze' });
     expect(l['account-service']).toMatchObject({ actor: 'case-service', purpose: 'account-unfreeze', scope: 'account:unfreeze', subject: { id: USERS.tokyoManager } });

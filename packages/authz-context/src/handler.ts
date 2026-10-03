@@ -146,7 +146,7 @@ function createHandle(business: HopHandler, config: HopConfig) {
     const session = decodeSession(headers[HEADER_SESSION]);
     const call: Call = config.chainRoleArn && session
       ? createCaller({ session, chainRoleArn: config.chainRoleArn, requestId, targets: config.targets, timings })
-      : async () => { throw new Error('this hop cannot call other hops'); };
+      : () => Promise.reject(new Error('this hop cannot call other hops'));
 
     let result: CallResult;
     const body = parseJsonObject(readBody(event));

@@ -6,17 +6,20 @@ import { HopMcpTransport, startMcpRelay, type McpExchange, type McpRelay } from 
 import type { Call, CallOptions } from '../src/outbound';
 
 // 呼び出し先のホップの代わり。送られたメッセージと、そのときのコンテキストを記録する
-function fakeCall(respond: (body: any) => { status: number; body: unknown }) {
-  const sent: { target: string; body: any; options?: CallOptions; traceId?: string; parentSpanId?: string }[] = [];
+/** テストで送るJSON-RPCのメッセージ */
+type Message = { jsonrpc: '2.0'; id?: number; method: string };
+
+function fakeCall(respond: (body: Message) => { status: number; body: unknown }) {
+  const sent: { target: string; body: Message; options?: CallOptions; traceId?: string; parentSpanId?: string }[] = [];
   const call: Call = async (target, body, options) => {
     const sc = trace.getSpanContext(context.active());
-    sent.push({ target, body, options, traceId: sc?.traceId, parentSpanId: sc?.spanId });
-    return respond(body);
+    sent.push({ target, body: body as Message, options, traceId: sc?.traceId, parentSpanId: sc?.spanId });
+    return respond(body as Message);
   };
   return { call, sent };
 }
 
-const echo = (body: any) => (body.id === undefined ? { status: 202, body: undefined } : { status: 200, body: { jsonrpc: '2.0', id: body.id, result: { ok: body.method } } });
+const echo = (body: Message) => (body.id === undefined ? { status: 202, body: undefined } : { status: 200, body: { jsonrpc: '2.0', id: body.id, result: { ok: body.method } } });
 
 describe('HopMcpTransport', () => {
   it('メッセージを1つずつ呼び出し先のホップへ送り、応答をMCPクライアントに渡す', async () => {

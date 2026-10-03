@@ -6,6 +6,7 @@ import { ProtobufTraceSerializer } from '@opentelemetry/otlp-transformer';
 import { resourceFromAttributes } from '@opentelemetry/resources';
 import { BatchSpanProcessor, type ReadableSpan, type SpanExporter } from '@opentelemetry/sdk-trace-base';
 import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
+import type { MetadataBearer, MiddlewareStack } from '@smithy/types';
 import type { LambdaFunctionURLResult } from 'aws-lambda';
 import { requireEnv } from './env';
 import { log } from './log';
@@ -174,14 +175,8 @@ export async function startOtlpTraceRelay(): Promise<OtlpTraceRelay | undefined>
   };
 }
 
-type AwsClient = {
-  middlewareStack: {
-    add(
-      mw: (next: (args: any) => Promise<any>, ctx: { clientName?: string; commandName?: string }) => (args: any) => Promise<any>,
-      options: { step: 'initialize'; name: string },
-    ): void;
-  };
-};
+/** AWS SDKのクライアント（ミドルウェアを足せるもの）。入出力の中身は読まない */
+type AwsClient = { middlewareStack: MiddlewareStack<object, MetadataBearer> };
 
 /**
  * AWS SDKのクライアントの呼び出しごとに、CLIENTのスパンを作る。esbuildで1ファイルにまとめた関数では、AWS SDKの自動計装が効かないため。
@@ -191,14 +186,14 @@ export function traceAwsClient<T extends AwsClient>(client: T): T {
   client.middlewareStack.add((next, ctx) => (args) => {
     const service = (ctx.clientName ?? 'AWS').replace(/Client$/, '');
     const method = (ctx.commandName ?? 'Unknown').replace(/Command$/, '');
-    const table = (args.input as { TableName?: unknown } | undefined)?.TableName;
+    const table = (args.input as { TableName?: unknown }).TableName;
     return tracer().startActiveSpan(`${service}.${method}`, {
       kind: SpanKind.CLIENT,
       attributes: { 'rpc.system': 'aws-api', 'rpc.service': service, 'rpc.method': method, ...(typeof table === 'string' ? { 'aws.dynamodb.table_names': [table] } : {}) },
     }, async (span) => {
       try {
         const r = await next(args);
-        const meta = (r.output as { $metadata?: { requestId?: string; httpStatusCode?: number } } | undefined)?.$metadata;
+        const meta = r.output.$metadata;
         if (meta?.requestId) span.setAttribute('aws.request_id', meta.requestId);
         if (meta?.httpStatusCode) span.setAttribute(ATTR.status, meta.httpStatusCode);
         return r;

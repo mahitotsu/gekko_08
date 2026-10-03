@@ -11,8 +11,8 @@ export const handler = async (event: CloudFormationCustomResourceEvent) => {
   try {
     info = await iam.send(new GetOutboundWebIdentityFederationInfoCommand({}));
   } catch (e) {
-    throw new Error(`IAM outbound identity federation is not available (${(e as Error).name}). ` +
-      'Enable it with `aws iam enable-outbound-web-identity-federation` and deploy again.');
+    throw new Error(`IAM outbound identity federation is not available (${e instanceof Error ? e.name : String(e)}). ` +
+      'Enable it with `aws iam enable-outbound-web-identity-federation` and deploy again.', { cause: e });
   }
   if (!info.JwtVendingEnabled || !info.IssuerIdentifier) {
     throw new Error('IAM outbound identity federation is disabled for this account. ' +

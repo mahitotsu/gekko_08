@@ -1,6 +1,7 @@
 import { AssumeRoleWithWebIdentityCommand, STSClient } from '@aws-sdk/client-sts';
 import { generateKeyPair, SignJWT } from 'jose';
 import { beforeAll, describe, expect, it } from 'vitest';
+import type { LogoutBody } from '@gekko08/bff/api';
 import {
   browserGet, browserPost, chainTo, federatedSession, loginSession, mintJwt, type Outputs, provisionTestData, purposeSession, readAccount, signedPost, stackOutputs,
   TEST_DATA as T, USERS,
@@ -22,8 +23,9 @@ describe('FR-1, FR-2: 委任の範囲と業務上のアクセス権の両方で�
   it('支店長（tokyo）は自分の支店の案件を開ける。口座の凍結の状態と理由はaccount-serviceから届く', async () => {
     const r = await browserGet(`/api/cases/${T.tokyoCase}/summary`, manager);
     expect(r.status).toBe(200);
-    expect(r.body.case.caseId).toBe(T.tokyoCase);
-    expect(r.body.account).toMatchObject({ accountId: T.tokyoAccount, branch: 'tokyo', status: 'frozen', frozenReason: expect.any(String) });
+    expect(r.body.case?.caseId).toBe(T.tokyoCase);
+    expect(r.body.account).toMatchObject({ accountId: T.tokyoAccount, branch: 'tokyo', status: 'frozen' });
+    expect(r.body.account?.frozenReason).toBeTypeOf('string');
   });
 
   it('担当者（osaka）も自分の支店の案件を開ける', async () => {
@@ -191,7 +193,7 @@ describe('FR-5: ブラウザには認証情報を持たせない', () => {
 
   it('ログアウトするとセッションが無効になり、cookieが消える', async () => {
     const session = await loginSession('tokyoManager');
-    const r = await browserPost('/api/logout', '', session);
+    const r = await browserPost<LogoutBody>('/api/logout', '', session);
     expect(r.status).toBe(200);
     expect(r.headers.get('set-cookie')).toMatch(/__Host-sid=; .*Max-Age=0/);
     expect((await browserGet('/api/me', session)).status).toBe(401);

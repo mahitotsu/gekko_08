@@ -45,14 +45,25 @@ function tag(tags: unknown, key: string): string | undefined {
   return typeof t?.value === 'string' ? t.value : undefined;
 }
 
+/** CloudTrailのイベント（`CloudTrailEvent`のJSON）のうち、突き合わせに読む項目。STSのイベントの記録の形による */
+interface CloudTrailEventJson {
+  eventName: string;
+  eventTime: string;
+  eventID?: string;
+  errorCode?: string;
+  userIdentity?: { arn?: string; sessionContext?: { sourceIdentity?: string; sessionIssuer?: { arn?: string } } };
+  requestParameters?: { roleArn?: string; tags?: unknown; audience?: string | string[] };
+  responseElements?: { sourceIdentity?: string; webIdentityTokenId?: string };
+}
+
 /**
  * CloudTrailのイベント（`CloudTrailEvent`のJSON）から、突き合わせに使う項目だけを名前を決めて取り出す。
  * イベントをそのまま返さない。`AssumeRole`の`responseElements`には認証情報の一部が入るので、`credentials`は読まない（SR-3）
  */
 export function toAwsRecord(cloudTrailEvent: string | undefined, dir: Directory): TrailRecord | undefined {
   if (!cloudTrailEvent) return undefined;
-  const d = JSON.parse(cloudTrailEvent);
-  const name: string = d.eventName;
+  const d = JSON.parse(cloudTrailEvent) as CloudTrailEventJson;
+  const name = d.eventName;
   if (!['AssumeRole', 'AssumeRoleWithWebIdentity', 'GetWebIdentityToken'].includes(name)) return undefined;
   const req = d.requestParameters ?? {};
   const rec: AwsRecord = {
@@ -61,10 +72,10 @@ export function toAwsRecord(cloudTrailEvent: string | undefined, dir: Directory)
     eventId: d.eventID,
     caller: name === 'AssumeRoleWithWebIdentity' ? 'Cognitoのユーザー（IDトークン）' : principal(dir, d.userIdentity?.arn),
     sourceIdentity: d.userIdentity?.sessionContext?.sourceIdentity ?? d.responseElements?.sourceIdentity,
-    ...(d.errorCode ? { error: String(d.errorCode) } : {}),
+    ...(d.errorCode ? { error: d.errorCode } : {}),
   };
   if (name !== 'GetWebIdentityToken') return { ...rec, role: principal(dir, req.roleArn), purpose: tag(req.tags, 'purpose') };
-  const audiences: string[] = Array.isArray(req.audience) ? req.audience : [req.audience].filter(Boolean);
+  const audiences = Array.isArray(req.audience) ? req.audience : req.audience ? [req.audience] : [];
   const audienceHop = (aud: string) => (aud.startsWith(dir.audiencePrefix) ? aud.slice(dir.audiencePrefix.length) : '（参照実装の外の宛先）');
   return {
     ...rec,

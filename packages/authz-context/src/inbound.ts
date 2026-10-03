@@ -1,4 +1,4 @@
-import { createRemoteJWKSet, jwtVerify, type JWTVerifyGetKey } from 'jose';
+import { createRemoteJWKSet, jwtVerify, type JWTPayload, type JWTVerifyGetKey } from 'jose';
 import { TAG_PURPOSE, TAG_REQUEST_ID, TAG_SCOPE, type CallerEntry, type Provides, type Subject } from './types';
 
 const STS_NAMESPACE = 'https://sts.amazonaws.com/';
@@ -86,7 +86,7 @@ export async function verifyInbound(token: string | undefined, callerArn: string
   if (!token) throw new AuthzError(401, 'missing authorization context');
 
   const keys = opts.keys ?? (await remoteKeys(opts.issuer));
-  let payload;
+  let payload: JWTPayload;
   try {
     ({ payload } = await jwtVerify(token, keys, {
       issuer: opts.issuer,
@@ -118,5 +118,5 @@ export async function verifyInbound(token: string | undefined, callerArn: string
   if (!rule) throw new AuthzError(403, 'scope is not provided');
   if (rule.purposes && !rule.purposes.includes(purpose)) throw new AuthzError(403, 'scope is not allowed for the purpose');
   if (rule.callers && !rule.callers.includes(caller.hop)) throw new AuthzError(403, 'scope is not allowed for the caller');
-  return { subject: { id }, purpose, scope, actor: caller.hop, actorRole, tokenSub: payload.sub, ...(typeof payload.jti === 'string' ? { tokenId: payload.jti } : {}) };
+  return { subject: { id }, purpose, scope, actor: caller.hop, actorRole, tokenSub: caller.sub, ...(typeof payload.jti === 'string' ? { tokenId: payload.jti } : {}) };
 }

@@ -93,18 +93,22 @@ export async function startMcpRelay(call: Call, target: string, observe?: McpObs
     };
     // ステートレスなので、SSEのストリーム（GET）やセッションの終了（DELETE）は受け付けない
     if (req.method !== 'POST') return reply(405);
-    let raw = '';
-    req.on('data', (c: Buffer) => { raw += c; });
-    req.on('end', async () => {
-      let message: JSONRPCMessage;
+    const chunks: Buffer[] = [];
+    req.on('data', (c: Buffer) => chunks.push(c));
+    req.on('end', () => void relay(Buffer.concat(chunks).toString()));
+
+    async function relay(raw: string) {
+      let parsed: unknown;
       try {
-        message = JSON.parse(raw);
+        parsed = JSON.parse(raw);
       } catch {
         return reply(400, { jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } });
       }
-      if (typeof message !== 'object' || message === null || Array.isArray(message)) {
+      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
         return reply(400, { jsonrpc: '2.0', id: null, error: { code: -32600, message: 'Invalid Request' } });
       }
+      // 中身の検証は、呼び出し先のMCPサーバー（SDK）が行う。中継はそのまま転送する
+      const message = parsed as JSONRPCMessage;
       try {
         const parent = propagation.extract(context.active(), req.headers);
         const r = await context.with(parent, () => send(call, target, message, mcpHeaders(req.headers)));
@@ -117,7 +121,7 @@ export async function startMcpRelay(call: Call, target: string, observe?: McpObs
       } catch {
         return reply(502, { jsonrpc: '2.0', id: (message as { id?: unknown }).id ?? null, error: { code: -32603, message: 'relay failed' } });
       }
-    });
+    }
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const { port } = server.address() as AddressInfo;

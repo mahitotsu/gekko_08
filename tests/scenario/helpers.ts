@@ -10,6 +10,7 @@ import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, GetCommand, PutCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { AssumeRoleCommand, AssumeRoleWithWebIdentityCommand, GetWebIdentityTokenCommand, STSClient, type Tag } from '@aws-sdk/client-sts';
 import { defaultProvider } from '@aws-sdk/credential-provider-node';
+import type { HopBody } from '@gekko08/bff/api';
 import type { AwsCredentialIdentity } from '@smithy/types';
 import { SignatureV4 } from '@smithy/signature-v4';
 
@@ -123,27 +124,41 @@ export async function loginSession(user: DemoUser): Promise<string> {
   return `__Host-sid=${sid}`;
 }
 
-/** ブラウザと同じ経路（CloudFront）でbffを呼ぶ */
-export async function browserGet(path: string, cookie?: string, headers: Record<string, string> = {}) {
-  const o = await stackOutputs();
-  const res = await fetch(`${o.WebUrl}${path}`, { headers: { ...(cookie ? { cookie } : {}), ...headers }, redirect: 'manual' });
+/** bffの応答。bodyは、JSONならTの形として読んだもの（形は確かめない。テストのexpectが確かめる）で、JSONでなければ空のオブジェクト */
+export interface BrowserResponse<T> {
+  status: number;
+  headers: Headers;
+  text: string;
+  body: T;
+}
+
+async function toBrowserResponse<T>(res: Response): Promise<BrowserResponse<T>> {
   const text = await res.text();
-  let body: any = text;
-  try { body = JSON.parse(text); } catch { /* 文字列のまま */ }
-  return { status: res.status, headers: res.headers, text, body };
+  let body: unknown = {};
+  try { body = JSON.parse(text); } catch { /* JSONでない（リダイレクトなど）。textで確かめる */ }
+  return { status: res.status, headers: res.headers, text, body: body as T };
+}
+
+/** bffがホップを呼んだ応答の、bffが付けたリクエストID。ホップを呼んだ応答には必ずある */
+export function requestIdOf(r: BrowserResponse<{ requestId?: string }>): string {
+  const id = r.body.requestId;
+  if (!id) throw new Error(`no requestId in the response (${r.status}): ${r.text}`);
+  return id;
+}
+
+/** ブラウザと同じ経路（CloudFront）でbffを呼ぶ */
+export async function browserGet<T = HopBody>(path: string, cookie?: string, headers: Record<string, string> = {}): Promise<BrowserResponse<T>> {
+  const o = await stackOutputs();
+  return toBrowserResponse<T>(await fetch(`${o.WebUrl}${path}`, { headers: { ...(cookie ? { cookie } : {}), ...headers }, redirect: 'manual' }));
 }
 
 /** ブラウザと同じ経路（CloudFront）でbffにPOSTする。OACの要件で本文のSHA-256を付ける */
-export async function browserPost(path: string, body: string, cookie?: string) {
+export async function browserPost<T = HopBody>(path: string, body: string, cookie?: string): Promise<BrowserResponse<T>> {
   const o = await stackOutputs();
-  const res = await fetch(`${o.WebUrl}${path}`, {
+  return toBrowserResponse<T>(await fetch(`${o.WebUrl}${path}`, {
     method: 'POST', body, redirect: 'manual',
     headers: { 'content-type': 'application/json', 'x-amz-content-sha256': createHash('sha256').update(body).digest('hex'), ...(cookie ? { cookie } : {}) },
-  });
-  const text = await res.text();
-  let parsed: any = text;
-  try { parsed = JSON.parse(text); } catch { /* 文字列のまま */ }
-  return { status: res.status, headers: res.headers, text, body: parsed };
+  }));
 }
 
 /**

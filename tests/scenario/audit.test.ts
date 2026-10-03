@@ -1,10 +1,12 @@
 import { beforeAll, describe, expect, it } from 'vitest';
-import type { HopRecord, Reconciled as AuditResponse } from '@gekko08/audit-service/api';
-import { browserGet, browserPost, eventually, loginSession, provisionTestData, TEST_DATA as T, USERS } from './helpers';
+import type { Reconciled as AuditResponse, TransactionList } from '@gekko08/audit-service/api';
+import type { Stamped } from '@gekko08/bff/api';
+import { browserGet, browserPost, eventually, loginSession, provisionTestData, requestIdOf, TEST_DATA as T, USERS } from './helpers';
 
 // FR-7(d)：監査の画面で、1回のリクエストについて、各ホップの記録をAWSの記録と突き合わせて示す。監査は、監査の権限を持つユーザーだけが使える
 /** bffは、監査サービスの応答に、この監査の操作のリクエストIDと目的を加える */
-type Reconciled = AuditResponse & { requestId: string; purpose: string };
+type Reconciled = AuditResponse & Stamped;
+type AuditList = TransactionList & Stamped;
 
 let manager: string;
 let auditor: string;
@@ -16,19 +18,19 @@ beforeAll(async () => {
   [manager, auditor] = await Promise.all([loginSession('tokyoManager'), loginSession('auditor')]);
   const r = await browserGet(`/api/cases/${T.tokyoCase}/summary`, manager);
   expect(r.status).toBe(200);
-  requestId = r.body.requestId;
+  requestId = requestIdOf(r);
   // 同じログインのセッションで、続けて他の支店の案件の凍結の解除を試みる（一連の操作）。拒否されるので、口座の状態は変わらない
   const u = await browserPost(`/api/cases/${T.osakaCase}/unfreeze`, '', manager);
   expect(u.status).toBe(403);
-  unfreezeId = u.body.requestId;
+  unfreezeId = requestIdOf(u);
 }, 60_000);
 
 /** ログが届くまで待って、突き合わせの結果を得る */
 async function reconciled(ready: (r: Reconciled) => boolean, timeoutMs: number, intervalMs = 5000): Promise<Reconciled> {
   return eventually(async () => {
-    const r = await browserGet(`/api/audit/requests/${requestId}`, auditor);
+    const r = await browserGet<Reconciled>(`/api/audit/requests/${requestId}`, auditor);
     expect(r.status).toBe(200);
-    return ready(r.body) ? (r.body as Reconciled) : undefined;
+    return ready(r.body) ? r.body : undefined;
   }, timeoutMs, intervalMs);
 }
 
@@ -60,29 +62,29 @@ describe('FR-7(d): 監査担当は、リクエストごとに各ホップの記�
 
   it('最近のリクエストの一覧に、そのリクエストが出る', async () => {
     const list = await eventually(async () => {
-      const r = await browserGet('/api/audit/requests', auditor);
+      const r = await browserGet<AuditList>('/api/audit/requests', auditor);
       expect(r.status).toBe(200);
-      return r.body.transactions.some((t: { requestId: string }) => t.requestId === requestId) ? r.body.transactions : undefined;
+      return r.body.transactions.some((t) => t.requestId === requestId) ? r.body.transactions : undefined;
     }, 120_000, 5000);
-    expect(list.find((t: { requestId: string }) => t.requestId === requestId)).toMatchObject({ user: USERS.tokyoManager, purpose: 'case-summary', caseId: T.tokyoCase });
+    expect(list.find((t) => t.requestId === requestId)).toMatchObject({ user: USERS.tokyoManager, purpose: 'case-summary', caseId: T.tokyoCase });
   }, 130_000);
 
   it('監査の操作もリクエストとして一覧に出る。監査対象のリクエストIDと、監査サービスを通った記録を引ける', async () => {
-    const own = await browserGet(`/api/audit/requests/${requestId}`, auditor);
+    const own = await browserGet<Reconciled>(`/api/audit/requests/${requestId}`, auditor);
     expect(own.status).toBe(200);
     // 応答のリクエストIDと目的は、bffがこの監査の操作に刻んだもの。監査サービスの本文の値では上書きされない
-    const auditId: string = own.body.requestId;
+    const auditId = own.body.requestId;
     expect(auditId).not.toBe(requestId);
     expect(own.body.purpose).toBe('audit');
     const list = await eventually(async () => {
-      const r = await browserGet('/api/audit/requests', auditor);
-      return r.body.transactions?.find((t: { requestId: string }) => t.requestId === auditId);
+      const r = await browserGet<AuditList>('/api/audit/requests', auditor);
+      return r.body.transactions.find((t) => t.requestId === auditId);
     }, 120_000, 5000);
     expect(list).toMatchObject({ route: 'audit-reconcile', auditTarget: requestId, user: USERS.auditor, purpose: 'audit', status: 200 });
     // 監査の操作も、他のリクエストと同じく、各ホップがbffの刻んだリクエストIDで記録している
     const r = await eventually(async () => {
-      const x = await browserGet(`/api/audit/requests/${list.requestId}`, auditor);
-      return x.body.hops?.some((h: HopRecord) => h.hop === 'entitlement-service') ? (x.body as Reconciled) : undefined;
+      const x = await browserGet<Reconciled>(`/api/audit/requests/${list.requestId}`, auditor);
+      return x.body.hops.some((h) => h.hop === 'entitlement-service') ? x.body : undefined;
     }, 120_000, 5000);
     expect(r.transaction).toMatchObject({ route: 'audit-reconcile', purpose: 'audit', user: USERS.auditor });
     expect(r.hops.map((h) => `${h.depth}:${h.hop}`)).toEqual(['1:audit-service', '2:entitlement-service']);
@@ -91,20 +93,20 @@ describe('FR-7(d): 監査担当は、リクエストごとに各ホップの記�
 
   it('同じログインのセッションの操作は、1つのまとまりとして時刻の順に並ぶ', async () => {
     const list = await eventually(async () => {
-      const r = await browserGet('/api/audit/requests', auditor);
-      return r.body.transactions?.some((t: { requestId: string }) => t.requestId === unfreezeId) ? r.body.transactions : undefined;
+      const r = await browserGet<AuditList>('/api/audit/requests', auditor);
+      return r.body.transactions.some((t) => t.requestId === unfreezeId) ? r.body.transactions : undefined;
     }, 120_000, 5000);
-    const ids = list.map((t: { requestId: string }) => t.requestId);
+    const ids = list.map((t) => t.requestId);
     const a = list[ids.indexOf(requestId)];
     const b = list[ids.indexOf(unfreezeId)];
-    expect(a.sessionRef).toBeTypeOf('string');
-    expect(b.sessionRef).toBe(a.sessionRef);
+    expect(a?.sessionRef).toBeTypeOf('string');
+    expect(b?.sessionRef).toBe(a?.sessionRef);
     expect(b).toMatchObject({ purpose: 'account-unfreeze', caseId: T.osakaCase, status: 403 });
     // 案件を開く → 凍結を解除の順で、間に別のセッションの操作が挟まらない
     const i = ids.indexOf(requestId);
     const j = ids.indexOf(unfreezeId);
     expect(j).toBeGreaterThan(i);
-    expect(list.slice(i, j + 1).every((t: { sessionRef?: string }) => t.sessionRef === a.sessionRef)).toBe(true);
+    expect(list.slice(i, j + 1).every((t) => t.sessionRef === a?.sessionRef)).toBe(true);
   }, 130_000);
 
   // CloudTrailは届くまでに最大15分ほどかかるため、CHECK_CLOUDTRAIL=1のときだけ実行する

@@ -12,6 +12,12 @@ const OPERATIONS: Record<string, { scope: string; permission: string }> = {
   unfreeze: { scope: 'account:unfreeze', permission: 'account:unfreeze' },
 };
 
+/** 口座のテーブルの項目のうち、判定に使う項目（ほかの項目は、そのまま応答に返す） */
+interface AccountItem {
+  accountId: string;
+  branch: string;
+}
+
 // 口座の参照と凍結の解除。委任の範囲が操作を許し、かつ業務上のアクセス権が口座を許すときだけ行う
 export const handler = createHopHandler(async (body, { subject, scope, requestId, call }) => {
   const action = typeof body.action === 'string' ? body.action : 'get';
@@ -25,9 +31,10 @@ export const handler = createHopHandler(async (body, { subject, scope, requestId
     fetchEntitlements(call),
   ]);
   if (!ent || !ent.permissions.includes(op.permission)) return { status: 403, body: { error: 'forbidden', reason: 'no entitlement' } };
-  if (!Item) return { status: 404, body: { error: 'not found' } };
-  if (Item.branch !== ent.branch) return { status: 403, body: { error: 'forbidden', reason: 'branch mismatch' } };
-  if (action === 'get') return { status: 200, body: { account: Item } };
+  const item = Item as AccountItem | undefined;
+  if (!item) return { status: 404, body: { error: 'not found' } };
+  if (item.branch !== ent.branch) return { status: 403, body: { error: 'forbidden', reason: 'branch mismatch' } };
+  if (action === 'get') return { status: 200, body: { account: item } };
 
   // 凍結を解除し、誰が（subject）、いつ、どのリクエストで解除したかを記録する
   try {

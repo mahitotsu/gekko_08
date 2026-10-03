@@ -23,8 +23,8 @@ export function encodeSession(creds: SessionCredentials): string {
 export function decodeSession(header: string | undefined): SessionCredentials | undefined {
   if (!header) return undefined;
   try {
-    const c = JSON.parse(Buffer.from(header, 'base64url').toString());
-    if (typeof c.accessKeyId === 'string' && typeof c.secretAccessKey === 'string' && typeof c.sessionToken === 'string') {
+    const c = JSON.parse(Buffer.from(header, 'base64url').toString()) as Partial<Record<keyof SessionCredentials, unknown>> | null;
+    if (typeof c?.accessKeyId === 'string' && typeof c.secretAccessKey === 'string' && typeof c.sessionToken === 'string') {
       return { accessKeyId: c.accessKeyId, secretAccessKey: c.secretAccessKey, sessionToken: c.sessionToken };
     }
   } catch {

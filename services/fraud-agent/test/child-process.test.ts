@@ -1,3 +1,4 @@
+import type { Options } from '@anthropic-ai/claude-agent-sdk';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 /**
@@ -7,11 +8,11 @@ import { beforeAll, describe, expect, it, vi } from 'vitest';
  */
 
 type Business = (body: Record<string, unknown>, ctx: Record<string, unknown>) => Promise<{ status: number; body: Record<string, unknown> }>;
-const captured: { fn?: Business; options?: Record<string, any> } = {};
+const captured: { fn?: Business; options?: Options } = {};
 const MODEL_CREDS = { AccessKeyId: 'MODELKEY', SecretAccessKey: 'model-secret', SessionToken: 'model-token', Expiration: new Date(Date.now() + 3_600_000) };
 
 vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
-  query: ({ options }: { options: Record<string, unknown> }) => {
+  query: ({ options }: { options: Options }) => {
     captured.options = options;
     return (async function* () { yield { type: 'result', subtype: 'success', result: '提案', num_turns: 1 }; })();
   },
@@ -52,8 +53,8 @@ describe('Claude Codeの子プロセスに渡す設定', () => {
     expect(o.allowedTools).toEqual(['mcp__fraud__*']);
     // 許したツール以外は、確認を求めずに拒否する
     expect(o.permissionMode).toBe('dontAsk');
-    expect(Object.keys(o.mcpServers)).toEqual(['fraud']);
-    expect(o.mcpServers.fraud).toEqual({ type: 'http', url: 'http://127.0.0.1:9999/mcp' });
+    expect(Object.keys(o.mcpServers ?? {})).toEqual(['fraud']);
+    expect(o.mcpServers?.fraud).toEqual({ type: 'http', url: 'http://127.0.0.1:9999/mcp' });
   });
 
   it('設定ファイルを読まず、セッションを保存せず、ターン数を限る', () => {
@@ -64,7 +65,7 @@ describe('Claude Codeの子プロセスに渡す設定', () => {
   });
 
   it('環境変数は引き継がず、決めたものだけを渡す', () => {
-    expect(Object.keys(captured.options!.env).sort()).toEqual([
+    expect(Object.keys(captured.options!.env ?? {}).sort()).toEqual([
       'ANTHROPIC_DEFAULT_HAIKU_MODEL', 'AWS_ACCESS_KEY_ID', 'AWS_REGION', 'AWS_SECRET_ACCESS_KEY', 'AWS_SESSION_TOKEN',
       'CLAUDE_AGENT_SDK_CLIENT_APP', 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC', 'CLAUDE_CODE_ENABLE_TELEMETRY', 'CLAUDE_CODE_ENHANCED_TELEMETRY_BETA',
       'CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CONFIG_DIR', 'DISABLE_AUTOUPDATER', 'HOME', 'LANG', 'OTEL_BSP_SCHEDULE_DELAY',
@@ -73,7 +74,7 @@ describe('Claude Codeの子プロセスに渡す設定', () => {
   });
 
   it('AWSの認証情報は、モデルの呼び出しだけを許すroleのもので、実行roleのものではない', () => {
-    const env = captured.options!.env;
+    const env = captured.options!.env ?? {};
     expect([env.AWS_ACCESS_KEY_ID, env.AWS_SECRET_ACCESS_KEY, env.AWS_SESSION_TOKEN]).toEqual(['MODELKEY', 'model-secret', 'model-token']);
     const text = JSON.stringify(captured.options);
     for (const v of ['EXECKEY', 'exec-secret', 'exec-token', 'AUTHZ_', 'issuer.example']) expect(text).not.toContain(v);

@@ -3,6 +3,7 @@ import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DeleteCommand, DynamoDBDocumentClient, GetCommand, PutCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { log, requireEnv, traceAwsClient } from '@gekko08/authz-context';
 import type { LambdaFunctionURLEvent, LambdaFunctionURLResult } from 'aws-lambda';
+import type { LogoutBody } from './api';
 import type { Settings } from './config';
 import { cookie, json, readCookie, redirect } from './http';
 
@@ -147,5 +148,6 @@ export async function logout(settings: Settings, event: LambdaFunctionURLEvent):
   // 消さないと、次のログインで、ユーザー名とパスワードを聞かれずに同じユーザーでログインする
   const cognitoLogout = new URL(`${config.authDomain}/logout`);
   cognitoLogout.search = new URLSearchParams({ client_id: config.clientId, logout_uri: config.logoutUri }).toString();
-  return json(200, { loggedOut: true, logoutUrl: cognitoLogout.toString() }, [cookie(SESSION_COOKIE, '', 0, 'Strict')]);
+  const body: LogoutBody = { loggedOut: true, logoutUrl: cognitoLogout.toString() };
+  return json(200, body, [cookie(SESSION_COOKIE, '', 0, 'Strict')]);
 }

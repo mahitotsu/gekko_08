@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
-import { get, post, type Account, type ApiResult, type Case, type HopBody, type Me, type ToolCall } from './api';
+import { useEffect, useState } from 'react';
+import { get, post, type Account, type ApiResult, type Case, type HopBody, type LogoutBody, type Me, type ToolCall } from './api';
 import { Audit } from './Audit';
 import { BRANCH_LABELS, TOOL_LABELS } from './labels';
 import { Denial, PurposeChip } from './parts';
@@ -62,26 +62,28 @@ type View = 'ops' | 'audit';
 
 export function App() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
+  // ログインの状態を読み直すたびに増やす
+  const [meVersion, setMeVersion] = useState(0);
   const [view, setView] = useState<View>('ops');
   const [auditId, setAuditId] = useState<string>();
 
-  const loadMe = useCallback(async () => {
-    const r = await get<Me>('/api/me');
-    setMe(r.status === 200 ? r.body : null);
-  }, []);
-
   useEffect(() => {
-    void loadMe();
-  }, [loadMe]);
+    // 古い応答で上書きしない（Reactの文書の、Effectでデータを取得するときの書き方）
+    let ignore = false;
+    void get<Me>('/api/me').then((r) => {
+      if (!ignore) setMe(r.status === 200 ? r.body : null);
+    });
+    return () => { ignore = true; };
+  }, [meVersion]);
 
   const logout = async () => {
-    const r = await post<{ logoutUrl?: string }>('/api/logout');
+    const r = await post<Partial<LogoutBody>>('/api/logout');
     // Cognitoのマネージドログインのログイン状態も消す。消さないと、別のユーザーでログインし直せない
     if (r.body.logoutUrl) {
       location.assign(r.body.logoutUrl);
       return;
     }
-    await loadMe();
+    setMeVersion((v) => v + 1);
   };
 
   return (
@@ -94,7 +96,7 @@ export function App() {
             <div className="brand-sub">「誰の権限で、何のためのリクエストか」を、最後のホップまでIAMに強制させる</div>
           </div>
         </div>
-        {me && <UserBox me={me} onLogout={logout} />}
+        {me && <UserBox me={me} onLogout={() => void logout()} />}
       </header>
       {/* 監査は一覧と詳細を左右に並べるので、幅を広げる */}
       <main className={`content ${me && view === 'audit' ? 'wide' : ''}`}>
@@ -184,7 +186,7 @@ function Workspace({ onAudit }: { onAudit: (requestId: string) => void }) {
         </div>
         <div className="actions">
           {(Object.keys(ACTIONS) as ActionKey[]).map((k) => (
-            <ActionCard key={k} def={ACTIONS[k]} danger={k === 'unfreeze'} disabled={!valid} onRun={() => run(k)} />
+            <ActionCard key={k} def={ACTIONS[k]} danger={k === 'unfreeze'} disabled={!valid} onRun={() => void run(k)} />
           ))}
         </div>
       </section>
@@ -264,7 +266,7 @@ function ResultCard({ entry, onAudit }: { entry: Entry; onAudit: (requestId: str
     <article className={`card result ${v ? `tone-${v.tone}` : 'pending'}`}>
       <header className="result-head">
         <div>
-          <div className="result-title">{def.label}<span className="muted">　{entry.caseId}</span></div>
+          <div className="result-title">{def.label}<span className="muted aside">{entry.caseId}</span></div>
           <div className="result-meta">
             <PurposeChip purpose={r?.body.purpose ?? def.purpose} />
             {r?.body.requestId && <span className="rid" title="リクエストID。ログ、CloudTrail、トレース、記録で同じ値をたどれる">{r.body.requestId}</span>}
@@ -313,7 +315,7 @@ function ResultBody({ action, result }: { action: ActionKey; result: ApiResult<H
 function CaseView({ c }: { c: Case }) {
   return (
     <div className="panel">
-      <div className="panel-title">案件 {c.caseId}<span className="muted">　{BRANCH_LABELS[c.branch] ?? c.branch}・口座 {c.accountId}</span></div>
+      <div className="panel-title">案件 {c.caseId}<span className="muted aside">{BRANCH_LABELS[c.branch] ?? c.branch}・口座 {c.accountId}</span></div>
       <div className="case-title">{c.title}</div>
       <table className="tx">
         <thead><tr><th>日付</th><th className="num">金額</th><th>取引メモ（データ）</th></tr></thead>
@@ -335,16 +337,16 @@ function AccountView({ a }: { a: Account }) {
   const frozen = a.status === 'frozen';
   return (
     <div className="panel">
-      <div className="panel-title">口座 {a.accountId}<span className="muted">　{BRANCH_LABELS[a.branch] ?? a.branch}・{a.holder}</span></div>
+      <div className="panel-title">口座 {a.accountId}<span className="muted aside">{BRANCH_LABELS[a.branch] ?? a.branch}・{a.holder}</span></div>
       <div className="account-row">
         <span className={`status ${frozen ? 'frozen' : 'active'}`}>{frozen ? '凍結中' : '解除済み'}</span>
         {frozen && a.frozenReason && <span>{a.frozenReason}</span>}
       </div>
-      {!frozen && typeof a.unfrozenBy === 'string' && (
+      {!frozen && a.unfrozenBy && (
         <dl className="kv">
           <dt>解除したユーザー</dt><dd>{a.unfrozenBy}<span className="muted small">（STSが署名したJWTのsource_identity）</span></dd>
-          <dt>日時</dt><dd>{String(a.unfrozenAt ?? '')}</dd>
-          <dt>リクエストID</dt><dd><code>{String(a.unfreezeRequestId ?? '')}</code></dd>
+          <dt>日時</dt><dd>{a.unfrozenAt}</dd>
+          <dt>リクエストID</dt><dd><code>{a.unfreezeRequestId}</code></dd>
         </dl>
       )}
     </div>
@@ -365,7 +367,7 @@ function AgentView({ analysis, toolCalls }: { analysis?: string; toolCalls: Tool
         <div className="callout neutral">今回は、エージェントは凍結の解除を試みなかった（モデルの判断は毎回変わる）。</div>
       )}
       <div className="panel">
-        <div className="panel-title">ツールの呼び出し<span className="muted">　fraud-agent → fraud-mcp → 業務のホップ</span></div>
+        <div className="panel-title">ツールの呼び出し<span className="muted aside">fraud-agent → fraud-mcp → 業務のホップ</span></div>
         <ol className="timeline">
           {toolCalls.map((t, i) => {
             const v = verdict(t.status);
