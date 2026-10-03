@@ -346,8 +346,8 @@ flowchart LR
 
 | role | 信頼する相手 | 条件 |
 |---|---|---|
-| federated role | Cognitoを指すOIDC provider | `aud`＝アプリクライアントのID。IDトークンにtagがないので、`sts:TagSession`は許さない |
-| 目的を刻むrole | federated role | `sts:AssumeRole`は、このUser PoolのIdPから来たセッション（`"aws:FederatedProvider": "<OIDC providerのARN>"`）で、`RoleSessionName`が刻む`requestId`のtagと同じ値（`"sts:RoleSessionName": "${aws:RequestTag/requestId}"`）のときだけ（[IdPの確認のADR](../adr/20261003111952-purpose-role-federated-provider.md)。各ホップのJWTには元のIdPが残らないので、IdPを実行時に確かめるのはここだけ）。`sts:TagSession`は、キーを`purpose`と`requestId`だけ、`purpose`の値を目的の一覧（`profile`・`case-summary`・`account-unfreeze`・`agent-analysis`・`audit`）だけに限る |
+| federated role | Cognitoを指すOIDC provider | `aud`＝アプリクライアントのID。IDトークンにtagがないので、`sts:TagSession`は許さない。各ホップのJWTには元のIdPが残らないので（[検証](../../experiments/federated-provider/RESULTS.md)）、ユーザーを認証したIdPを確かめるのはここだけである |
+| 目的を刻むrole | federated role | `sts:AssumeRole`は、`RoleSessionName`が刻む`requestId`のtagと同じ値（`"sts:RoleSessionName": "${aws:RequestTag/requestId}"`）のときだけ。`sts:TagSession`は、キーを`purpose`と`requestId`だけ、`purpose`の値を目的の一覧（`profile`・`case-summary`・`account-unfreeze`・`agent-analysis`・`audit`）だけに限る |
 | chain用role | 呼び出し元のchain用role（bffの呼び出し先では目的を刻むrole） | セッション名を、刻まれたリクエストIDに限る。新しいtagのキーは加えられない（[リクエストIDのtagのADR](../adr/20261002154129-request-id-transitive-tag.md)） |
 
 chain用roleの信頼ポリシー：
@@ -786,7 +786,7 @@ AWSの認証情報はモデル用のroleのもので実行roleのものではな
 
 | 確かめること | わざと壊して、見逃さないことを確かめる条件 |
 |---|---|
-| federated roleだけを、このUser PoolのIdPから来たセッションで信頼すること | IdPの条件を外す、IdPの条件を別のproviderにする |
+| federated roleだけを信頼すること | — |
 | セッション名を`requestId`のtagと同じ値に限ること | セッション名の条件を外す |
 | tagのキーが`purpose`と`requestId`だけで、目的の値が一覧だけであること | 目的の値の制限を外す、目的を増やす |
 | federated roleが、目的を刻むroleへのchainだけを持つこと | — |

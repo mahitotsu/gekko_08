@@ -58,16 +58,12 @@ export class Bff extends Construct {
   /**
    * 目的を刻むroleを作り、federated roleとつなぐ。bffはリクエストごとにfederated roleのセッションからこのroleへchainし、
    * リクエストの目的とリクエストIDをtransitive session tagとして刻む。刻める目的はpurposesに限る。
-   * セッション名はリクエストIDのtagと同じ値に限り、以降のchainもその値に縛る（FR-6）。
-   * 引き受けられるのは、このUser PoolのIdPで認証されたfederated roleのセッションだけ（`aws:FederatedProvider`）。
-   * JWTには元のIdPが残らないので、IdPを実行時に確かめられるのはここだけである
+   * セッション名はリクエストIDのtagと同じ値に限り、以降のchainもその値に縛る（FR-6）
    */
   connect(auth: AuthFoundation, purposes: string[]): void {
     const principal = new iam.ArnPrincipal(auth.federatedRole.roleArn);
     this.purposeRole = new iam.Role(this, 'PurposeRole', {
-      assumedBy: principal.withConditions({
-        StringEquals: { 'sts:RoleSessionName': `\${aws:RequestTag/${REQUEST_ID_TAG}}`, 'aws:FederatedProvider': auth.oidcProviderArn },
-      }),
+      assumedBy: principal.withConditions({ StringEquals: { 'sts:RoleSessionName': `\${aws:RequestTag/${REQUEST_ID_TAG}}` } }),
       description: 'bff: stamps the transaction purpose and request ID as transitive session tags',
     });
     this.purposeRole.assumeRolePolicy!.addStatements(

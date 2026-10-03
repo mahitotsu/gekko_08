@@ -13,7 +13,6 @@ import { atoms, canonical, diffAtoms, roleStatements, type Json } from './policy
  */
 
 const PURPOSES = ['p-a', 'p-b'];
-const PROVIDER = 'arn:aws:iam::111111111111:oidc-provider/cognito-idp.ap-northeast-1.amazonaws.com/pool';
 
 function buildFixture() {
   // バンドルを飛ばす（テンプレートだけを見る）
@@ -22,7 +21,7 @@ function buildFixture() {
   // 目的を刻むroleの配線が使うのはfederated roleだけ。Cognitoは作らない
   const federatedRole = new iam.Role(stack, 'Federated', { assumedBy: new iam.AccountRootPrincipal() });
   const bff = new Bff(stack, 'Bff');
-  bff.connect({ federatedRole, oidcProviderArn: PROVIDER } as unknown as AuthFoundation, PURPOSES);
+  bff.connect({ federatedRole } as unknown as AuthFoundation, PURPOSES);
   const purposeRole = bff.asCaller().chainRole;
   const template: Json = Template.fromStack(stack).toJSON();
   const id = (role: iam.Role) => stack.getLogicalId(role.node.defaultChild as cdk.CfnElement);
@@ -33,17 +32,14 @@ type Fixture = ReturnType<typeof buildFixture>;
 const fixture = buildFixture();
 const r = (f: Fixture, v: unknown): Json => f.stack.resolve(v);
 
-/**
- * 目的を刻むroleの信頼：federated roleだけを、このUser PoolのIdPから来たセッション（`aws:FederatedProvider`）で、
- * 刻むリクエストIDと同じセッション名でだけ信頼し、刻めるのは目的とリクエストIDのtagだけ
- */
+/** 目的を刻むroleの信頼：federated roleだけを、刻むリクエストIDと同じセッション名でだけ信頼し、刻めるのは目的とリクエストIDのtagだけ */
 function checkTrust(f: Fixture): string[] {
   const doc = f.template.Resources[f.purposeRoleId].Properties.AssumeRolePolicyDocument;
   const principal = { AWS: r(f, f.federatedRole.roleArn) };
   const expected = atoms([
     {
       Effect: 'Allow', Principal: principal, Action: 'sts:AssumeRole',
-      Condition: { StringEquals: { 'sts:RoleSessionName': `\${aws:RequestTag/${REQUEST_ID_TAG}}`, 'aws:FederatedProvider': PROVIDER } },
+      Condition: { StringEquals: { 'sts:RoleSessionName': `\${aws:RequestTag/${REQUEST_ID_TAG}}` } },
     },
     { Effect: 'Allow', Principal: principal, Action: 'sts:SetSourceIdentity' },
     {
@@ -67,7 +63,7 @@ function checkFederated(f: Fixture): string[] {
 const checks: Record<string, (f: Fixture) => string[]> = { trust: checkTrust, federated: checkFederated };
 
 describe('目的を刻むroleのテンプレート', () => {
-  it('信頼：federated roleだけを、このUser PoolのIdPから来たセッションで、リクエストIDのtagと同じセッション名でだけ信頼し、tagのキーは目的とリクエストID、目的の値は一覧だけ', () => {
+  it('信頼：federated roleだけを、リクエストIDのtagと同じセッション名でだけ信頼し、tagのキーは目的とリクエストID、目的の値は一覧だけ', () => {
     expect(checks.trust(fixture)).toEqual([]);
   });
 
@@ -82,15 +78,7 @@ const statementFor = (f: Fixture, t: Json, action: string) => trustStatements(f,
 const mutations: { name: string; check: keyof typeof checks; mutate: (f: Fixture, t: Json) => void }[] = [
   {
     name: 'セッション名の条件を外す', check: 'trust',
-    mutate: (f, t) => { delete statementFor(f, t, 'sts:AssumeRole').Condition.StringEquals['sts:RoleSessionName']; },
-  },
-  {
-    name: 'IdPの条件を外す（別のIdPから来たセッションも受け付ける）', check: 'trust',
-    mutate: (f, t) => { delete statementFor(f, t, 'sts:AssumeRole').Condition.StringEquals['aws:FederatedProvider']; },
-  },
-  {
-    name: 'IdPの条件を、別のproviderにする', check: 'trust',
-    mutate: (f, t) => { statementFor(f, t, 'sts:AssumeRole').Condition.StringEquals['aws:FederatedProvider'] = 'arn:aws:iam::111111111111:oidc-provider/evil.example.com'; },
+    mutate: (f, t) => { delete statementFor(f, t, 'sts:AssumeRole').Condition; },
   },
   {
     name: 'セッション名を、刻むtagではなく任意の値で許す', check: 'trust',

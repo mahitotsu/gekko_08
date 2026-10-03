@@ -86,9 +86,6 @@ describe('federated roleのテンプレート（SourceIdentityを刻む入口）
     expect(checks.provider(fixture)).toEqual([]);
   });
 
-  it('`AuthFoundation`が公開するOIDC providerのARNは、federated roleが信頼するproviderと同じ', () => {
-    expect(fixture.stack.resolve(fixture.auth.oidcProviderArn)).toEqual({ Ref: fixture.providerId });
-  });
 });
 
 const trustStatement = (f: Fixture, t: Json, action: string) =>

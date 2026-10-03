@@ -22,4 +22,4 @@
 | [デモの画面はReactの静的なSPA](20261002065842-demo-ui-react-static.md) | 画面はReactとViteの静的なSPAにし、合成のときにビルドしてS3から配信する。SSRは使わない。目的と拒否した層を表示する | 有効 |
 | [監査サービス](20261002074437-audit-service.md) | 監査サービスをホップとして加え、1回のリクエストについて、各ホップのログとCloudTrailの記録をリクエストIDで突き合わせて示す。監査は監査担当だけ | 有効。「リクエストIDはSTSもIAMも強制しない」を[リクエストIDのtag](20261002154129-request-id-transitive-tag.md)で改訂 |
 | [リクエストIDのtag](20261002154129-request-id-transitive-tag.md) | リクエストIDをtransitive session tagとして刻み、各chainの`RoleSessionName`をその値に限る。受信側はJWTの値とヘッダーを照合する | 有効 |
-| [目的を刻むroleのIdPの確認](20261003111952-purpose-role-federated-provider.md) | 目的を刻むroleは、このUser PoolのIdPから来たセッション（`aws:FederatedProvider`）だけを受け付ける。各ホップのJWTには元のIdPが残らないため | 提案 |
+| [目的を刻むroleのIdPの確認](20261003111952-purpose-role-federated-provider.md) | 目的を刻むroleは、このUser PoolのIdPから来たセッション（`aws:FederatedProvider`）だけを受け付ける。各ホップのJWTには元のIdPが残らないため | 却下。条件を付けると、正規のリクエストも拒否された |

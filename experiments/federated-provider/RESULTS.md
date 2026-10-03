@@ -33,4 +33,14 @@ IdPを実行時に確かめられるのは、OIDC providerで引き受けたfede
   chain用roleは信頼ポリシーの連鎖によって、federated roleから始まったセッションからしか引き受けられないので、この照合が元のIdPの確認を間接的に担う。
 - 連鎖の根元を、2か所で確かめる。federated roleの信頼ポリシー（このUser PoolのOIDC providerと`aud`）と、目的を刻むroleの信頼ポリシー
   （`aws:FederatedProvider`＝このUser PoolのOIDC provider）。後者は、federated roleのセッションが目的を刻むroleを引き受ける要求に
-  `aws:FederatedProvider`が入ることを前提にする。この前提は、条件を足してデプロイしたあとのシナリオテストで確かめる。
+  `aws:FederatedProvider`が入ることを前提にする。この前提は、下の追加の観測で成り立たなかった。
+
+## 追加の観測：目的を刻むroleの信頼ポリシーで`aws:FederatedProvider`を条件にする
+
+実施：2026-10-03（UTC）。目的を刻むroleの信頼ポリシーの`sts:AssumeRole`に、`"aws:FederatedProvider": "<このUser PoolのOIDC providerのARN>"`の条件を足してデプロイし、
+シナリオテストを流した。
+
+- federated roleのセッションから目的を刻むroleへの`AssumeRole`が、正規の手順でも、すべて`AccessDenied`になった。画面の操作はすべて500になった。
+- 条件キーが要求に入っていないのか、値の形（ARNか、発行者のURLか）が違うのかは、この観測からは区別できない。
+- 条件を外して元に戻した。federated roleのセッションが次のroleを引き受けるときにIdPを確かめる方法は、今のところ得られていない。
+  IdPを確かめるのは、federated roleの信頼ポリシー（このUser PoolのOIDC providerと`aud`）だけである。
