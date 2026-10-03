@@ -48,7 +48,7 @@
 
 ![全体構成（AWSのアイコンによる図）](../diagrams/architecture.png)
 
-実線はホップの呼び出し（§4の手順で呼ぶ）、点線はAWSのサービスの呼び出しである。STS、ログ、スパンへの呼び出しは、各ホップが行うので、
+実線はリクエストの経路とホップの呼び出し（ホップ間は§4の手順で呼ぶ）、破線はAWSのサービスの呼び出し、点線はSTSの呼び出しがCloudTrailに記録されることを表す。STS、ログ、スパンへの呼び出しは、各ホップが行うので、
 ホップのまとまりから1本で描いている。図は[docs/diagrams](../diagrams/README.md)のコードから生成する。
 
 | 構成要素 | 役割 | 呼び出し元 | 呼び出し先 | データ |
@@ -60,6 +60,7 @@
 | fraud-mcp | エージェント向けのツールを提供するMCPサーバー | fraud-agent | case-service、account-service | なし |
 | audit-service | 1回のリクエストについて、各ホップのログとCloudTrailの記録を突き合わせる（§8） | bff | entitlement-service、CloudWatch Logs、CloudTrail | なし（ロググループとCloudTrailのイベント履歴を読む） |
 | entitlement-service | 属性サービス。ユーザー本人の業務上のアクセス権を返す（終端） | bff、case-service、account-service、audit-service | なし | 人事データ、権限マスタ（読むだけ） |
+| pretoken | CognitoのPre Token Generation V2トリガー。IDトークンにSourceIdentityだけを入れる（ホップではない） | Cognito | なし | なし |
 
 データはDynamoDBに置き、各サービスが自分の実行roleで扱う。
 
@@ -68,6 +69,7 @@
 | マイクロサービスの経路（案件を開く、凍結を解除する） | bff → case-service → account-service |
 | エージェントの経路 | bff → fraud-agent → fraud-mcp → case-service または account-service |
 | 監査の経路 | bff → audit-service（→ entitlement-service） |
+| 本人の表示（ユーザー名と所属） | bff → entitlement-service |
 
 ## 3. ログインとセッション（bff）
 
@@ -206,7 +208,7 @@ sequenceDiagram
 - chainは`DurationSeconds`＝900、`RoleSessionName`＝リクエストID。JWTは`DurationSeconds`＝300、`SigningAlgorithm`＝`ES384`。
 - ホップを呼ぶ署名は、常に呼び出し元の実行roleで行う。chain用role（bffでは目的を刻むrole）のセッションは、JWTを作るためと、次のホップに渡すためだけに使い、
   ホップを呼ぶ権限を持たない（SR-1）。
-- bffは、chainをせずに、目的を刻むroleのセッションでJWTを作る（上の図の3から）。
+- bffは、chainをせずに、目的を刻むroleのセッションでJWTを作る（上の図の`GetWebIdentityToken`から）。
 - JWTの`Tags`のscopeは、業務のコードが呼び出しごとに指定する。利用側の定義でその呼び出し先に1つしか求めていなければ省略できる。
 
 ### 委任の範囲
@@ -423,11 +425,11 @@ bffの入口は、CloudFrontのサービスプリンシパルを`AWS:SourceArn`�
 | 3 | `x-authz-context`のJWTの署名がES384で正しく、`iss`＝自アカウントのSTS発行者、`aud`＝自分で、`exp`・`iat`・`sub`がある | 401 |
 | 4 | `sub`が、呼び出し元の実行roleに対応するchain用roleである | 401 |
 | 5 | `https://sts.amazonaws.com/`名前空間に、subject（`source_identity`）、リクエストの目的（`principal_tags.purpose`）、scope（`request_tags.scope`）がある。scopeのないJWTは何も許さない | 401 |
-| 5 | bffが刻んだリクエストID（`principal_tags.requestId`）があり、ヘッダーのリクエストIDと一致する | 401。`rejected`のログに、刻まれていた値（`stampedRequestId`）も書く |
-| 6 | scopeが提供側の定義にあり、目的の制限があるscopeなら、目的と呼び出し元が許されたもの | 403 |
+| 6 | bffが刻んだリクエストID（`principal_tags.requestId`）があり、ヘッダーのリクエストIDと一致する | 401。`rejected`のログに、刻まれていた値（`stampedRequestId`）も書く |
+| 7 | scopeが提供側の定義にあり、目的の制限があるscopeなら、目的と呼び出し元が許されたもの | 403 |
 
 - 4の対応表（実行role名 → 呼び出し元のホップ名とchain用roleのARN）は、デプロイ時に環境変数で渡す。
-- 6は、IAMが発行させない組み合わせなので、通常は起きない。IAMの設定の誤りや手での変更を、提供側の定義で止めるための照合である。
+- 7は、IAMが発行させない組み合わせなので、通常は起きない。IAMの設定の誤りや手での変更を、提供側の定義で止めるための照合である。
 - JWKSはメモリにキャッシュし、10分ごとか、未知の`kid`のときに取り直す。未知の`kid`による取り直しは30秒に1回まで。
 - 通ったら、subject、呼び出し元のホップ名（actor）、scopeを業務のコードに渡す。目的は渡さない（ログとトレースには出す）。ヘッダーや引数に含まれるユーザー情報は使わない。
 - 業務のコードが例外を投げたら500を返す。

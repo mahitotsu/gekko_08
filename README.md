@@ -30,9 +30,10 @@ AWS上のマイクロサービスで、Authorization Context（誰の権限で�
 |---|---|
 | マイクロサービスの経路（案件を開く、凍結を解除する） | bff → case-service → account-service |
 | エージェントの経路（Claude Agent SDK） | bff → fraud-agent → fraud-mcp → case-service または account-service |
-| 監査の経路 | bff → audit-service |
+| 監査の経路 | bff → audit-service（→ entitlement-service） |
+| 本人の表示（ユーザー名と所属） | bff → entitlement-service |
 
-実線はホップの呼び出し、点線はAWSのサービスの呼び出しである。属性サービス（entitlement-service）は、bff・case-service・account-service・audit-serviceから呼ばれる。
+実線はリクエストの経路とホップの呼び出し、破線はAWSのサービスの呼び出し、点線はSTSの呼び出しがCloudTrailに記録されることを表す。属性サービス（entitlement-service）は、bff・case-service・account-service・audit-serviceから呼ばれる。
 
 | ディレクトリ | 内容 |
 |---|---|

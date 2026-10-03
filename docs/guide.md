@@ -51,15 +51,16 @@ sequenceDiagram
   participant A as 呼び出し元のホップ
   participant I as 受信側の入口（IAM）
   participant R as 受信側のアプリ
-  Note over C,F: ログイン
+  Note over C,F: ログイン（bffはIDトークンをセッションに保存する）
   C->>F: IDトークン（source_identity）
-  F->>S: AssumeRoleWithWebIdentity
+  Note over F,S: リクエストの開始（リクエストのたびに行い、STSの認証情報は保存しない）
+  F->>S: AssumeRoleWithWebIdentity（IDトークン）
   S-->>F: federated roleのセッション（SourceIdentity＝yamada）
-  Note over F,S: リクエストの開始
   F->>S: AssumeRole（purpose＝agent-analysisとrequestIdをtransitive tagで刻む）
   S-->>F: 目的を刻むroleのセッション
-  Note over A,R: ホップ間（bffも、最初のホップを同じ手順で呼ぶ）
+  Note over A,R: ホップ間（bffはchainを省き、目的を刻むroleのセッションでJWTの発行から行う）
   A->>S: 受け取ったセッションで、自分のchain用roleにchain（目的は引き継がれ、変えられない）
+  S-->>A: chain用roleのセッション
   A->>S: GetWebIdentityToken（aud＝受信側、Tags＝scope）
   Note right of S: IAMが宛先とscopeを限り、<br/>影響の大きいscopeは目的でも限る
   S-->>A: JWT
@@ -477,7 +478,7 @@ case-serviceとaccount-serviceはそれぞれ属性サービスも呼ぶ）を10
 - 文書にある上限は、`AssumeRole`などが共有する毎秒600件（アカウント・リージョンごと。[IAMとSTSのクォータ](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_iam-quotas.html#reference_iam-quotas-sts-requests)）である。参照実装では、chainのたびに`AssumeRole`を呼ぶ。
   案件を開くリクエストでは1回あたり3回なので、アカウント全体でおよそ毎秒200リクエストが目安になる。
 - JWTの発行（`GetWebIdentityToken`）は、ホップへの呼び出しのたびに行うので、`AssumeRole`より回数が多い。ところが、その上限は文書にも
-  Service Quotasにも記載がない。ログインの`AssumeRoleWithWebIdentity`も同じである。この参照実装では、両者の上限を確認できなかった。
+  Service Quotasにも記載がない。リクエストごとに呼ぶ`AssumeRoleWithWebIdentity`も同じである。この参照実装では、両者の上限を確認できなかった。
   負荷をかけて観測しても、その日、そのアカウントでの値にすぎず、上限の根拠にはならないので、実測もしていない。
 
 上限に近づいたときの対処の方向：

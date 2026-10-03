@@ -7,7 +7,8 @@
 neatoは入れ子の枠を描かないので、まとまり（ホップ、bffが使うもの、追跡と監査）は最上位の枠にし、
 AWSのアカウントの境界は、背景に置いた塗りのない四角で表す。neatoは枠の余白（margin）も無視するので、
 枠の隅の外側に見えない点を置いて、アイコンと枠の間の余白を取る。
-実線はホップの呼び出し、点線はAWSのサービスの呼び出し。各ホップに共通する呼び出し（STS、スパン、ログ）は、ホップの枠の右端から1本で描く。
+実線はリクエストの経路とホップの呼び出し、破線はAWSのサービスの呼び出し、点線はSTSの呼び出しがCloudTrailに記録されること。
+各ホップに共通する呼び出し（STS、スパン、ログ）は、ホップの枠の右端から1本で描く。
 """
 
 from pathlib import Path
@@ -98,7 +99,7 @@ with Diagram("", filename=str(OUT), outformat="png", show=False,
 
     with Cluster("bffが使うもの"):
         start = len(placed)
-        cognito = place(Cognito, "Cognito\nUser Pool", 3.0, TOP)
+        cognito = place(Cognito, "Cognito User Pool\nPre Token Generation", 3.0, TOP)
         ssm = place(SystemsManagerParameterStore, "Parameter Store\nbffの設定", 5.4, TOP)
         sessions = place(Dynamodb, "DynamoDB\nセッション", 7.8, TOP)
         pad(start)
@@ -133,7 +134,7 @@ with Diagram("", filename=str(OUT), outformat="png", show=False,
 
     # 入口
     browser >> cdn
-    cdn >> static
+    cdn >> aws_call() >> static
     cdn >> Edge(label="/api/*") >> bff
     bff >> aws_call() >> cognito
     bff >> aws_call() >> ssm
@@ -165,5 +166,4 @@ with Diagram("", filename=str(OUT), outformat="png", show=False,
     # 途中の区間は向きを持たない「-」でつなぎ、矢じりは最後の区間だけに付ける
     audit - aws_call() - turn1
     turn1 - aws_call(above("ログとCloudTrailを読む")) - turn2
-    turn2 - aws_call() - audit_in
-    audit_in >> aws_call() >> logs
+    turn2 >> aws_call() >> audit_in  # 枠（CloudWatchとCloudTrailの両方）に向ける
