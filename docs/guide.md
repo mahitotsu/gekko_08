@@ -42,15 +42,32 @@ AWSが保証した値ではないので、受信側の判定は変わらない�
 
 ## 2. 仕組み
 
-```
-ログイン     Cognito ─(IDトークン: source_identity)─> bff ─AssumeRoleWithWebIdentity─> federated roleのセッション（SourceIdentity＝yamada）
-リクエストの開始   bff ─AssumeRole（purpose＝agent-analysisとrequestIdをtransitive tagで刻む）─> 目的を刻むroleのセッション
-ホップ間     呼び出し元                                                           受信側
-             ① 受け取ったセッションで自分のchain用roleにchain（目的は引き継がれ、変えられない）
-             ② GetWebIdentityToken（aud＝受信側、Tags＝scope）。IAMが宛先とscopeを限り、影響の大きいscopeは目的でも限る
-             ③ 自分の実行roleでSigV4署名して呼ぶ ──────────────────────────────> 入口のIAM：実行roleと関数を確かめる（actor）
-                x-authz-context: JWT                                             アプリ：JWTを検証する（subject、aud、目的、scope）
-                x-authz-session: chainのセッション（受信側がさらに先を呼ぶ場合）   業務のコード：属性サービスからアクセス権を得て判定
+```mermaid
+sequenceDiagram
+  autonumber
+  participant C as Cognito
+  participant F as bff
+  participant S as STS
+  participant A as 呼び出し元のホップ
+  participant I as 受信側の入口（IAM）
+  participant R as 受信側のアプリ
+  Note over C,F: ログイン
+  C->>F: IDトークン（source_identity）
+  F->>S: AssumeRoleWithWebIdentity
+  S-->>F: federated roleのセッション（SourceIdentity＝yamada）
+  Note over F,S: リクエストの開始
+  F->>S: AssumeRole（purpose＝agent-analysisとrequestIdをtransitive tagで刻む）
+  S-->>F: 目的を刻むroleのセッション
+  Note over A,R: ホップ間（bffも、最初のホップを同じ手順で呼ぶ）
+  A->>S: 受け取ったセッションで、自分のchain用roleにchain（目的は引き継がれ、変えられない）
+  A->>S: GetWebIdentityToken（aud＝受信側、Tags＝scope）
+  Note right of S: IAMが宛先とscopeを限り、<br/>影響の大きいscopeは目的でも限る
+  S-->>A: JWT
+  A->>I: 実行roleでSigV4署名して呼ぶ（x-authz-context：JWT、<br/>x-authz-session：chainのセッション。受信側がさらに先を呼ぶ場合）
+  I->>I: 実行roleと関数を確かめる（actor）
+  I->>R: 許可されたときだけ届く
+  R->>R: JWTを検証する（subject、aud、目的、scope）
+  R->>R: 業務のコードが、属性サービスからアクセス権を得て判定する
 ```
 
 要素の対応：
