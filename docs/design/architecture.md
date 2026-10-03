@@ -347,7 +347,7 @@ flowchart LR
 | role | 信頼する相手 | 条件 |
 |---|---|---|
 | federated role | Cognitoを指すOIDC provider | `aud`＝アプリクライアントのID。IDトークンにtagがないので、`sts:TagSession`は許さない |
-| 目的を刻むrole | federated role | `sts:AssumeRole`は、`RoleSessionName`が刻む`requestId`のtagと同じ値（`"sts:RoleSessionName": "${aws:RequestTag/requestId}"`）のときだけ。`sts:TagSession`は、キーを`purpose`と`requestId`だけ、`purpose`の値を目的の一覧（`profile`・`case-summary`・`account-unfreeze`・`agent-analysis`・`audit`）だけに限る |
+| 目的を刻むrole | federated role | `sts:AssumeRole`は、このUser PoolのIdPから来たセッション（`"aws:FederatedProvider": "<OIDC providerのARN>"`）で、`RoleSessionName`が刻む`requestId`のtagと同じ値（`"sts:RoleSessionName": "${aws:RequestTag/requestId}"`）のときだけ（[IdPの確認のADR](../adr/20261003111952-purpose-role-federated-provider.md)。各ホップのJWTには元のIdPが残らないので、IdPを実行時に確かめるのはここだけ）。`sts:TagSession`は、キーを`purpose`と`requestId`だけ、`purpose`の値を目的の一覧（`profile`・`case-summary`・`account-unfreeze`・`agent-analysis`・`audit`）だけに限る |
 | chain用role | 呼び出し元のchain用role（bffの呼び出し先では目的を刻むrole） | セッション名を、刻まれたリクエストIDに限る。新しいtagのキーは加えられない（[リクエストIDのtagのADR](../adr/20261002154129-request-id-transitive-tag.md)） |
 
 chain用roleの信頼ポリシー：
@@ -703,7 +703,9 @@ Cognito User Poolのカスタム属性`custom:branch`は使わない。User Pool
 | シナリオテスト | デプロイしたスタック | `npm run test:scenario`（CloudTrailの確認は`npm run test:scenario:cloudtrail`） | する |
 | 共通部品の単体テスト | `packages/authz-context` | `npm test` | しない |
 | 監査の突き合わせの単体テスト | `services/audit-service/src/reconcile.ts`（テストは`services/audit-service/test/`） | `npm test` | しない |
-| テンプレートの単体テスト | `Hop`、目的を刻むrole、委任の範囲の定義の突き合わせ | `npm test` | しない |
+| テンプレートの単体テスト | `Hop`、目的を刻むrole、federated role、委任の範囲の定義の突き合わせ | `npm test` | しない |
+| 属性サービスの単体テスト | `services/entitlement-service` | `npm test` | しない |
+| fraud-agentの単体テスト | `services/fraud-agent`（子プロセスに渡す設定） | `npm test` | しない |
 
 ### シナリオテスト
 
@@ -767,11 +769,24 @@ Cognito User Poolのカスタム属性`custom:branch`は使わない。User Pool
 | `sub`の対応表 | `sub`を別のroleにする |
 | 委任の範囲の定義の突き合わせ（§4） | 整合しない定義で、合成が失敗する |
 
+**federated roleのテンプレート**（`infra/test/auth-foundation.test.ts`）：
+
+| 確かめること | わざと壊して、見逃さないことを確かめる条件 |
+|---|---|
+| 信頼：このUser PoolのOIDC providerだけを、`aud`の条件付きで信頼し、SourceIdentityを刻めるのも同じ相手だけ | `aud`の条件を外す、別のIdPも信頼する、別のIdPにもSourceIdentityを刻ませる |
+| `aud`の条件：このUser Poolの発行者の`aud`が、このアプリクライアントのID | `aud`を別のアプリクライアントにする |
+| OIDC provider：このUser Poolの発行者で、受け付けるクライアントはこのアプリクライアントだけ | 別のUser Poolにする、別のクライアントも受け付ける |
+
+**属性サービス**（`services/entitlement-service/test/`）：本文で別のユーザーを指定しても、JWTのsubject本人の分だけを読んで返すこと。
+
+**fraud-agent**（`services/fraud-agent/test/`）：Claude Codeの子プロセスに、組み込みのツールを無効にして中継のツールだけを許すこと、環境変数を引き継がず決めたものだけを渡すこと、
+AWSの認証情報はモデル用のroleのもので実行roleのものではないこと。
+
 **目的を刻むroleのテンプレート**：
 
 | 確かめること | わざと壊して、見逃さないことを確かめる条件 |
 |---|---|
-| federated roleだけを信頼すること | — |
+| federated roleだけを、このUser PoolのIdPから来たセッションで信頼すること | IdPの条件を外す、IdPの条件を別のproviderにする |
 | セッション名を`requestId`のtagと同じ値に限ること | セッション名の条件を外す |
 | tagのキーが`purpose`と`requestId`だけで、目的の値が一覧だけであること | 目的の値の制限を外す、目的を増やす |
 | federated roleが、目的を刻むroleへのchainだけを持つこと | — |

@@ -20,6 +20,8 @@ export class AuthFoundation extends Construct {
   readonly client: cognito.UserPoolClient;
   readonly authDomain: string;
   readonly federatedRole: iam.Role;
+  /** IDトークンの発行者（このUser Pool）を表すIAMのOIDC providerのARN。目的を刻むroleが、このIdPから来たセッションだけを受け付けるのに使う */
+  readonly oidcProviderArn: string;
 
   constructor(scope: Construct, id: string, props: AuthFoundationProps) {
     super(scope, id);
@@ -73,6 +75,7 @@ export class AuthFoundation extends Construct {
       url: `https://${issuer}`,
       clientIds: [this.client.userPoolClientId],
     });
+    this.oidcProviderArn = provider.oidcProviderArn;
     const principal = new iam.FederatedPrincipal(provider.oidcProviderArn, {
       StringEquals: new cdk.CfnJson(this, 'AudCondition', { value: { [`${issuer}:aud`]: this.client.userPoolClientId } }),
     }, 'sts:AssumeRoleWithWebIdentity');

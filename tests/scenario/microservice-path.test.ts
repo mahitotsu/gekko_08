@@ -1,6 +1,9 @@
+import { AssumeRoleWithWebIdentityCommand, STSClient } from '@aws-sdk/client-sts';
+import { generateKeyPair, SignJWT } from 'jose';
 import { beforeAll, describe, expect, it } from 'vitest';
 import {
-  browserGet, browserPost, chainTo, federatedSession, loginSession, mintJwt, type Outputs, provisionTestData, purposeSession, signedPost, stackOutputs, TEST_DATA as T, USERS,
+  browserGet, browserPost, chainTo, federatedSession, loginSession, mintJwt, type Outputs, provisionTestData, purposeSession, readAccount, signedPost, stackOutputs,
+  TEST_DATA as T, USERS,
 } from './helpers';
 
 // マイクロサービスの経路（bff → case-service → account-service）のうち、案件を開くリクエストのシナリオテスト。凍結の解除はunfreeze.test.ts。
@@ -64,6 +67,19 @@ describe('FR-6: リクエストIDは入口で確定し、途中のホップは�
 });
 
 describe('FR-3: ユーザーとリクエストの目的は入口で確定し、途中で変更も拡大もできない', () => {
+  it('Cognitoが署名していないIDトークン（User Poolの発行者を名乗り、自分の鍵で署名）では、federated roleを引き受けられない', async () => {
+    // BFFが乗っ取られても、ログインしていないユーザーにはなりすませない（脅威の総点検 A-10）
+    const { privateKey } = await generateKeyPair('RS256');
+    const forged = await new SignJWT({ 'https://aws.amazon.com/source_identity': USERS.tokyoManager, token_use: 'id' })
+      .setProtectedHeader({ alg: 'RS256', kid: 'forged' })
+      .setIssuer(`https://cognito-idp.${process.env.AWS_REGION}.amazonaws.com/${o.UserPoolId}`)
+      .setAudience(o.UserPoolClientId).setSubject('forged').setIssuedAt().setExpirationTime('5m')
+      .sign(privateKey);
+    await expect(new STSClient({}).send(new AssumeRoleWithWebIdentityCommand({
+      RoleArn: o.FederatedRoleArn, RoleSessionName: 'forged', WebIdentityToken: forged, DurationSeconds: 900,
+    }))).rejects.toThrow(/InvalidIdentityToken|signature|key/i);
+  });
+
   it('chainでSourceIdentityを変えられない', async () => {
     const s = await purposeSession('tokyoManager', 'case-summary');
     await expect(chainTo(s, o.CaseServiceChainRoleArn, { SourceIdentity: USERS.osakaOfficer })).rejects.toThrow(/source identity is already set/);
@@ -188,5 +204,35 @@ describe('FR-5: ブラウザには認証情報を持たせない', () => {
 
   it('セッションcookieがなければ401', async () => {
     expect((await browserGet('/api/me')).status).toBe(401);
+  });
+
+  it('攻撃者が選んだセッションID（存在しない値）のcookieは401で、セッションとして使われない', async () => {
+    // bffはブラウザが送ったセッションIDを採用せず、ログインのたびに自分で作る（脅威の総点検 G-5）
+    expect((await browserGet('/api/me', '__Host-sid=attacker-chosen-session-id')).status).toBe(401);
+  });
+
+  it('本文のハッシュのヘッダーがないPOST（別のサイトのフォームから送られる形）は、bffに届かず、口座は凍結されたまま', async () => {
+    // セッションのcookieはSameSite=Strictで、別のサイトからは付かない。加えて、CloudFrontのOACは本文のハッシュを求めるので、
+    // フォームのように任意のヘッダーを付けられない送信はbffに届かない（脅威の総点検 G-2）
+    const body = JSON.stringify({});
+    const res = await fetch(`${o.WebUrl}/api/cases/${T.tokyoCase}/unfreeze`, {
+      method: 'POST', body, redirect: 'manual', headers: { 'content-type': 'application/x-www-form-urlencoded', cookie: manager },
+    });
+    expect(res.status).toBe(403);
+    expect((await readAccount(T.tokyoAccount))?.status).toBe('frozen');
+  });
+
+  it('ログインのstateがcookieと違えば拒否し、一度使ったstateは二度と使えない', async () => {
+    // ログインCSRFとstateの使い回しを防ぐ（脅威の総点検 G-3）
+    const login = await browserGet('/api/login');
+    const state = /__Host-login=([\w-]+)/.exec(login.headers.get('set-cookie') ?? '')![1];
+    const cb = (qs: string, cookieState: string) => browserGet(`/api/callback?${qs}`, `__Host-login=${cookieState}`);
+    expect((await cb(`code=x&state=${state}`, 'other-state')).body).toEqual({ error: 'invalid login state' });
+    // 1回目：stateは消費される（認可コードは偽物なので、トークンの交換は失敗する）
+    expect((await cb(`code=x&state=${state}`, state)).status).not.toBe(302);
+    // 2回目：同じstateはもう使えない
+    const again = await cb(`code=x&state=${state}`, state);
+    expect(again.status).toBe(400);
+    expect(again.body).toEqual({ error: 'login expired' });
   });
 });

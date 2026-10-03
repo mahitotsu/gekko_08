@@ -3,6 +3,9 @@
   "private": true,
   "license": "Apache-2.0",
   "type": "module",
+  "scripts": {
+    "test": "vitest run"
+  },
   "dependencies": {
     "@gekko08/authz-context": "*",
     "@aws-sdk/client-dynamodb": "^3.1143.0",

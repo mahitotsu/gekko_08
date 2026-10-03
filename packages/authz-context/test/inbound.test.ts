@@ -8,11 +8,13 @@ const CALLER_ARN = 'arn:aws:sts::123456789012:assumed-role/case-exec/case-fn';
 const RID = 'req-0001';
 
 let opts: VerifyOptions;
+let publicJwk: Record<string, unknown>;
 let sign: (payload: JWTPayload, over?: { alg?: string; aud?: string; exp?: string; iss?: string }) => Promise<string>;
 
 beforeAll(async () => {
   const { privateKey, publicKey } = await generateKeyPair('ES384');
   const jwk = { ...(await exportJWK(publicKey)), kid: 'k1', alg: 'ES384' };
+  publicJwk = jwk;
   opts = {
     issuer: ISSUER, audience: 'aud-account', callers: { 'case-exec': { hop: 'case-service', sub: CHAIN } },
     provides: { 'account:read': {}, 'account:unfreeze': { purposes: ['account-unfreeze'], callers: ['case-service'] } },
@@ -65,6 +67,24 @@ describe('verifyInbound', () => {
     const [h, p, s] = t.split('.');
     const forged = Buffer.from(JSON.stringify({ ...JSON.parse(Buffer.from(p, 'base64url').toString()), ...ns({ source_identity: 'tanaka' }) })).toString('base64url');
     await rejected(verifyInbound(`${h}.${forged}.${s}`, CALLER_ARN, opts, RID), 401);
+  });
+  it('ES384以外のアルゴリズムで署名したJWTを拒否する（公開鍵をHMACの鍵として使う、鍵の種類の取り違えを含む）', async () => {
+    const forge = (alg: string) => new SignJWT(claims).setProtectedHeader({ alg, kid: 'k1' })
+      .setIssuer(ISSUER).setAudience('aud-account').setSubject(CHAIN).setIssuedAt().setExpirationTime('5m');
+    // 公開鍵は公開されているので、攻撃者はそれをHMACの共通鍵として使える
+    await rejected(verifyInbound(await forge('HS256').sign(new TextEncoder().encode(JSON.stringify(publicJwk))), CALLER_ARN, opts, RID), 401);
+    // 別の楕円曲線の鍵で、同じ`kid`を名乗る
+    const { privateKey: other } = await generateKeyPair('ES256');
+    await rejected(verifyInbound(await forge('ES256').sign(other), CALLER_ARN, opts, RID), 401);
+  });
+  it('発行者がRS256の鍵も公開していても、RS256で署名したJWTは受け付けない（ES384に固定する）', async () => {
+    // STSのGetWebIdentityTokenはRS256でも署名できるので、発行者の鍵の一覧にはRS256の鍵も載りうる。IAMはES384でしか発行させない
+    const rs = await generateKeyPair('RS256');
+    const rsJwk = { ...(await exportJWK(rs.publicKey)), kid: 'k2', alg: 'RS256' };
+    const both = { ...opts, keys: createLocalJWKSet({ keys: [publicJwk as never, rsJwk] }) };
+    const token = await new SignJWT(claims).setProtectedHeader({ alg: 'RS256', kid: 'k2' })
+      .setIssuer(ISSUER).setAudience('aud-account').setSubject(CHAIN).setIssuedAt().setExpirationTime('5m').sign(rs.privateKey);
+    await rejected(verifyInbound(token, CALLER_ARN, both, RID), 401);
   });
   it('JWTなしを拒否する', async () => rejected(verifyInbound(undefined, CALLER_ARN, opts, RID), 401));
 

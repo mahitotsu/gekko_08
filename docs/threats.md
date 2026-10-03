@@ -3,7 +3,7 @@
 既知の攻撃を一覧にし、この参照実装がそれぞれをどの層で止めるか、その証拠（テスト、検証記録）は何か、止めないものは何かを示す。
 侵害された要素ごとの影響の要約は[設計ガイド§5](guide.md#5-この構成が守らないもの)に、構成の詳細は[設計書](design/architecture.md)にある。
 
-> 下書き（2026-10-03（UTC））。攻撃の範囲と、「防ぐ（テストなし）」の行にテストを足す順番は、これから決める。
+> 2026-10-03（UTC）時点。「防ぐ（テストなし）」の2件（G-4、G-5）は、マネージドログインの画面を通す必要があり、自動のテストにしていない。
 
 ## 読み方
 
@@ -17,16 +17,17 @@
 | 状態 | **防ぐ（テストあり）**、**防ぐ（テストなし）**（設計とコードでは止めるが、確かめるテストがない）、**防がない**（設計上の範囲外） |
 | 出典 | 攻撃を拾った外部の分類（[出典](#出典)） |
 
-テストのファイルは、`scenario/`が[tests/scenario/](../tests/scenario/)のシナリオテスト（デプロイしたスタックに対して実行する）、`inbound`などが
-[packages/authz-context/test/](../packages/authz-context/test/)、`hop`と`purpose-role`が[infra/test/](../infra/test/)、`reconcile`が
-[services/audit-service/test/](../services/audit-service/test/)の単体テストである。
+テストのファイルは、`scenario/`が[tests/scenario/](../tests/scenario/)のシナリオテスト（デプロイしたスタックに対して実行する）である。ほかは単体テストで、
+`inbound`などが[packages/authz-context/test/](../packages/authz-context/test/)、`hop`・`purpose-role`・`auth-foundation`が[infra/test/](../infra/test/)、
+`reconcile`が[services/audit-service/test/](../services/audit-service/test/)、`entitlement-service`が[services/entitlement-service/test/](../services/entitlement-service/test/)、
+`fraud-agent`が[services/fraud-agent/test/](../services/fraud-agent/test/)にある。
 
 ## 集計
 
 | 状態 | 件数 |
 |---|---|
-| 防ぐ（テストあり） | 42 |
-| 防ぐ（テストなし） | 9 |
+| 防ぐ（テストあり） | 49 |
+| 防ぐ（テストなし） | 2 |
 | 防がない | 11 |
 | 計 | 62 |
 
@@ -39,11 +40,11 @@
 | A-3 | JWTの本文（ユーザー、目的、scope）を書き換える | JWTを手に入れた | 受信側の検証：STSの署名 | `scenario/token-verification`「本文を改ざんしたJWT（別のユーザー、目的、scopeに書き換え）は401」、`inbound`「改ざんしたJWTを拒否する」 | 防ぐ（テストあり） | RFC 9700 |
 | A-4 | 署名を外す（`alg=none`）、署名を書き換える | JWTを手に入れた | 受信側の検証：ES384の署名だけを受け付ける | `scenario/token-verification`「署名なし（alg=none）に書き換えたJWTは401」「署名を改ざんしたJWTは401」 | 防ぐ（テストあり） | RFC 8725 |
 | A-5 | 別の発行者（自分の鍵）で署名したJWTを渡す | 外部 | 受信側の検証：`iss`を自アカウントのSTSに限り、その発行者の鍵だけで検証する | `inbound`「発行者の違うJWTを拒否する」 | 防ぐ（テストあり） | RFC 8725 |
-| A-6 | 鍵の種類の取り違え（公開鍵をHMACの鍵として使うなど）で署名を偽る | 外部 | 受信側の検証：アルゴリズムをES384に固定する | （なし） | 防ぐ（テストなし） | RFC 8725 |
+| A-6 | 鍵の種類の取り違え（公開鍵をHMACの鍵として使うなど）で署名を偽る | 外部 | 受信側の検証：アルゴリズムをES384に固定する | `inbound`「ES384以外のアルゴリズムで署名したJWTを拒否する（公開鍵をHMACの鍵として使う、鍵の種類の取り違えを含む）」「発行者がRS256の鍵も公開していても、RS256で署名したJWTは受け付けない（ES384に固定する）」 | 防ぐ（テストあり） | RFC 8725 |
 | A-7 | chainの途中でSourceIdentityを別のユーザーに変える | 途中のホップ | STS：SourceIdentityは一度刻むと変えられない | `scenario/microservice-path`「chainでSourceIdentityを変えられない」 | 防ぐ（テストあり） | ASI03 |
-| A-8 | 別のIdP（別のUser Pool、外部のOIDC、同じUser Poolの別のアプリクライアント）のトークンで、同じSourceIdentityを持つfederated roleのセッションを作る | 別のIdPを持つ | STS：federated roleの信頼ポリシーが、このUser PoolのOIDC providerと`aud`だけを許す | （なし。信頼ポリシーの単体テストがない） | 防ぐ（テストなし） | RFC 9700（mix-up） |
+| A-8 | 別のIdP（別のUser Pool、外部のOIDC、同じUser Poolの別のアプリクライアント）のトークンで、同じSourceIdentityを持つfederated roleのセッションを作る | 別のIdPを持つ | STS：federated roleの信頼ポリシーが、このUser PoolのOIDC providerと`aud`だけを許す。目的を刻むroleが、このUser PoolのIdPから来たセッション（`aws:FederatedProvider`）だけを受け付ける | `auth-foundation`「信頼：このUser PoolのOIDC providerだけを、`aud`の条件付きで信頼し、SourceIdentityを刻めるのも同じ相手だけ」ほか、`purpose-role`「IdPの条件を外す（別のIdPから来たセッションも受け付ける）」ほか。`aws:FederatedProvider`の条件が実機で効くことは、デプロイしたあとのシナリオテストで確かめる | 防ぐ（テストあり） | RFC 9700（mix-up） |
 | A-9 | 別のIdPを信頼する自分のroleでSourceIdentityを刻み、そのセッションでJWTを作って渡す | アカウント内でroleを作れる | 受信側の検証：JWTの`sub`が、入口を通った呼び出し元のchain用roleと一致すること。STS：目的を刻むroleとchain用roleは、決まったroleだけを信頼する | `scenario/token-verification`「JWTを作ったroleが、入口を通った呼び出し元のchain用roleと違えば401」 | 防ぐ（テストあり） | ASI03 |
-| A-10 | ログインしていないユーザーになりすます | BFFを乗っ取った | STS：federated roleは、Cognitoが署名したIDトークンでしか引き受けられない | （なし） | 防ぐ（テストなし） | — |
+| A-10 | ログインしていないユーザーになりすます | BFFを乗っ取った | STS：federated roleは、Cognitoが署名したIDトークンでしか引き受けられない | `scenario/microservice-path`「Cognitoが署名していないIDトークン（User Poolの発行者を名乗り、自分の鍵で署名）では、federated roleを引き受けられない」 | 防ぐ（テストあり） | — |
 | A-11 | ログイン中のユーザーとして振る舞う | BFFを乗っ取った | 止めない（BFFは信頼の起点。guide §5） | — | 防がない | — |
 | A-12 | Pre Token Generationの関数やUser Poolの設定を改ざんし、任意のSourceIdentityを入れる | 設定を変えられる | 止めない（AWSは値の正しさを検証しない） | — | 防がない | — |
 | A-13 | IAMの信頼ポリシーを書き換え、別のIdPや自分のroleを信頼させる | アカウントの管理者 | 止めない（各ホップのJWTには元のIdPが残らない。境界はアカウントの分離やSCPで作る） | — | 防がない | — |
@@ -92,7 +93,7 @@
 |---|---|---|---|---|---|---|
 | E-1 | 他の支店の案件や口座のIDを指定して読む | 外部（ログイン済み） | 業務のコード：属性サービスの所属と比べる | `scenario/microservice-path`「他の支店の案件は、case-serviceが業務上のアクセス権で拒否する」 | 防ぐ（テストあり） | API1 |
 | E-2 | 権限のない役職で、影響の大きい操作をする | 外部（ログイン済み） | 業務のコード：権限マスタ | `scenario/unfreeze`「担当者（osaka）は、自分の支店の口座でも、解除の権限がないので解除できない」 | 防ぐ（テストあり） | API5 |
-| E-3 | 他人のアクセス権を属性サービスに問い合わせる | 途中のホップ、エージェント | 属性サービス：JWTのsubject本人の分だけを返し、相手を引数に取らない | （なし） | 防ぐ（テストなし） | API1 |
+| E-3 | 他人のアクセス権を属性サービスに問い合わせる | 途中のホップ、エージェント | 属性サービス：JWTのsubject本人の分だけを返し、相手を引数に取らない | `entitlement-service`「本文で別のユーザーを指定しても、subject本人の分だけを読んで返す（他人のアクセス権は問い合わせられない）」 | 防ぐ（テストあり） | API1 |
 | E-4 | 異動や権限の剥奪のあとも、古い権限で操作する | 外部（ログイン済み） | 属性サービス：判定のたびに読む | `scenario/entitlements`「支店長をtokyoからosakaへ異動させると、同じセッションのまま、次のリクエストから結果が変わる」 | 防ぐ（テストあり） | — |
 | E-5 | 属性サービスのデータを書き換え、自分に権限を与える | データを書き換えられる | 止めない。ただし委任の範囲は広がらない（エージェントのリクエストで解除はできない） | — | 防がない | — |
 | E-6 | 業務のコードの判定の誤り（口座や金額の単位）を突く | 外部（ログイン済み） | 止めない（IAMが強制するのは、呼び出し元・呼び出し先・scope・目的の組み合わせまで） | — | 防がない | API1 |
@@ -104,7 +105,7 @@
 | F-1 | プロンプトインジェクションで、エージェントに凍結を解除させる | データに文言を混ぜられる | STS：fraud-mcpはaccount-serviceに`account:read`しか付けられない | `scenario/agent-path`「エージェントが凍結の解除を試みても、account-serviceが拒否し、口座は凍結されたまま」 | 防ぐ（テストあり） | ASI01、ASI02 |
 | F-2 | プロンプトインジェクションで、他の支店のデータを応答に出させる | データに文言を混ぜられる | 業務のコード | `scenario/agent-path`「エージェントの応答に、他の支店の口座のデータが含まれない」 | 防ぐ（テストあり） | ASI01 |
 | F-3 | MCPサーバーに、受け取ったトークンをそのまま下流へ渡させる（トークンの素通し） | エージェントか途中のホップ | 受信側の検証：JWTは宛先ごとに作り直し、`aud`を確かめる（C-1） | `scenario/token-verification`「宛先の違うJWT（case-service宛てをaccount-serviceに渡す）は401」 | 防ぐ（テストあり） | MCP |
-| F-4 | 子プロセス（Claude Code）に任意のコードを実行させ、親の認証情報を読む | データに文言を混ぜられる | fraud-agent：組み込みのツールを無効にし、中継のツールだけを許す。委任に使う認証情報を子プロセスに渡さない | （なし） | 防ぐ（テストなし） | ASI05 |
+| F-4 | 子プロセス（Claude Code）に任意のコードを実行させ、親の認証情報を読む | データに文言を混ぜられる | fraud-agent：組み込みのツールを無効にし、中継のツールだけを許す。委任に使う認証情報を子プロセスに渡さない | `fraud-agent`「組み込みのツール（Bash、Readなど）を無効にし、中継のMCPサーバーのツールだけを許す」「環境変数は引き継がず、決めたものだけを渡す」「AWSの認証情報は、モデルの呼び出しだけを許すroleのもので、実行roleのものではない」 | 防ぐ（テストあり） | ASI05 |
 | F-5 | プロンプトや業務データ、注入された文言をトレースに残させる | データに文言を混ぜられる | fraud-agent：本文を記録させない設定 | `scenario/tracing`「プロンプト、業務データ、ツールの結果は、どのスパンにも記録されない（Claude Codeのスパンを含む）」 | 防ぐ（テストあり） | — |
 | F-6 | 子プロセスから、トレースの受け口に偽のスパンを書き込む | 子プロセスで任意のコードを実行できる | 止めない（guide §5） | — | 防がない | — |
 | F-7 | ユーザーの権限と委任の範囲の中で、エージェントに誤った操作をさせる（還付金詐欺） | データに文言を混ぜられる | 止めない。目的とscopeで範囲を狭めておく | — | 防がない | ASI01 |
@@ -114,10 +115,10 @@
 | ID | 攻撃 | 攻撃者の前提 | 止める層 | 証拠 | 状態 | 出典 |
 |---|---|---|---|---|---|---|
 | G-1 | XSSなどで、ブラウザからトークンやAWSの認証情報を盗む | ブラウザで任意のスクリプトを動かせる | BFF：ブラウザにはセッションIDの`HttpOnly`のcookieだけを渡す | `scenario/microservice-path`「/api/meはユーザー名と、属性サービスから得た所属・役職だけを返し、トークンもAWSの認証情報も含まない」「ログインのリダイレクトで付くcookieはHttpOnlyで、トークンを含まない」 | 防ぐ（テストあり） | RFC 9700 |
-| G-2 | 別のサイトから、ログイン中のユーザーに操作させる（CSRF） | ユーザーに別のサイトを開かせる | BFF：セッションのcookieは`SameSite=Strict`。CloudFrontのOACが、POSTに本文のハッシュのヘッダーを求める | （なし） | 防ぐ（テストなし） | API2 |
-| G-3 | ログインの`state`を偽る、使い回す（ログインCSRF） | ユーザーに細工したリンクを開かせる | BFF：`state`をcookieと照合し、1回で消す | （なし） | 防ぐ（テストなし） | RFC 9700 |
-| G-4 | 認可コードを横取りして交換する | リダイレクトのURLを盗み見る | BFF：PKCEとクライアントシークレット | （なし） | 防ぐ（テストなし） | RFC 9700 |
-| G-5 | 攻撃者が用意したセッションIDを使わせる（セッションの固定） | ユーザーのcookieを設定できる | BFF：ログインのたびに新しいセッションIDを作る | （なし） | 防ぐ（テストなし） | — |
+| G-2 | 別のサイトから、ログイン中のユーザーに操作させる（CSRF） | ユーザーに別のサイトを開かせる | BFF：セッションのcookieは`SameSite=Strict`。CloudFrontのOACが、POSTに本文のハッシュのヘッダーを求める | `scenario/microservice-path`「本文のハッシュのヘッダーがないPOST（別のサイトのフォームから送られる形）は、bffに届かず、口座は凍結されたまま」。`SameSite=Strict`の効果は、ブラウザでしか確かめられないので確かめていない | 防ぐ（テストあり） | API2 |
+| G-3 | ログインの`state`を偽る、使い回す（ログインCSRF） | ユーザーに細工したリンクを開かせる | BFF：`state`をcookieと照合し、1回で消す | `scenario/microservice-path`「ログインのstateがcookieと違えば拒否し、一度使ったstateは二度と使えない」 | 防ぐ（テストあり） | RFC 9700 |
+| G-4 | 認可コードを横取りして交換する | リダイレクトのURLを盗み見る | BFF：PKCEとクライアントシークレット | （なし。認可コードを得るにはマネージドログインの画面を通す必要があり、自動のテストにしていない） | 防ぐ（テストなし） | RFC 9700 |
+| G-5 | 攻撃者が用意したセッションIDを使わせる（セッションの固定） | ユーザーのcookieを設定できる | BFF：ログインのたびに新しいセッションIDを作る | `scenario/microservice-path`「攻撃者が選んだセッションID（存在しない値）のcookieは401で、セッションとして使われない」。ログインのたびに新しいセッションIDを作ることは、マネージドログインの画面を通す必要があり、確かめていない | 防ぐ（テストなし） | — |
 | G-6 | セッションなしで、bffに最初のホップを呼ばせる | 外部 | BFF | `scenario/microservice-path`「セッションcookieがなければ401」 | 防ぐ（テストあり） | API2 |
 | G-7 | ログアウトしたあとのセッションを使う | cookieを盗んだ | BFF：ログアウトでセッションを消す | `scenario/microservice-path`「ログアウトするとセッションが無効になり、cookieが消える」 | 防ぐ（テストあり） | — |
 | G-8 | ブラウザから`traceparent`を送り、他人のトレースに紛れ込ませる | 外部（ログイン済み） | BFF：ブラウザの`traceparent`を使わない | `scenario/tracing`「ブラウザから届いたtraceparentは引き継がず、bffで新しいトレースを始める」 | 防ぐ（テストあり） | — |
