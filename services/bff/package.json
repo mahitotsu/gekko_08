@@ -3,6 +3,12 @@
   "private": true,
   "license": "Apache-2.0",
   "type": "module",
+  "exports": {
+    "./authz": "./authz.ts"
+  },
+  "scripts": {
+    "test": "vitest run"
+  },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.1143.0",
     "@aws-sdk/client-ssm": "^3.1143.0",

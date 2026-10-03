@@ -1,6 +1,6 @@
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { AssumeRoleCommand, STSClient } from '@aws-sdk/client-sts';
-import { createHopHandler, log, startOtlpTraceRelay, traceAwsClient, type SessionCredentials } from '@gekko08/authz-context';
+import { createHopHandler, log, requireEnv, sessionFromSts, startOtlpTraceRelay, traceAwsClient, type SessionCredentials } from '@gekko08/authz-context';
 import { startMcpRelay, type McpExchange } from '@gekko08/authz-context/mcp';
 
 // 凍結の見直しの案件を分析し、解除してよいかを提案するAIエージェント。Claude Agent SDKが、Claude Code（同梱の実行ファイル）を子プロセスとして動かす。
@@ -8,7 +8,10 @@ import { startMcpRelay, type McpExchange } from '@gekko08/authz-context/mcp';
 // Bedrockのモデルの呼び出しだけを許すroleの認証情報だけで、ユーザーの情報、受け取ったJWT、受け渡されたセッションは渡さない（SR-3）
 // （Claude Agent SDKのADR）
 
-const MODEL_ID = process.env.BEDROCK_MODEL_ID!;
+const MODEL_ID = requireEnv('BEDROCK_MODEL_ID');
+const MODEL_ROLE_ARN = requireEnv('MODEL_ROLE_ARN');
+// Claude Code（linux-arm64の実行ファイル）は、関数の展開先に同梱する（infraのclaudeCodeBundling）
+const CLAUDE_CODE = `${requireEnv('LAMBDA_TASK_ROOT')}/claude`;
 const MAX_TURNS = 8;
 // 異常終了したClaude Codeの標準エラー出力をログに出すか。中身はClaude Codeが決めるので、既定では出さず、原因を調べるときだけ有効にする
 const LOG_STDERR = process.env.AGENT_LOG_STDERR === '1';
@@ -29,15 +32,17 @@ interface ToolCallRecord {
   reason?: string;
 }
 
+const sts = traceAwsClient(new STSClient({}));
+
 // モデルの呼び出しだけを許すroleの認証情報。実行環境ごとに使い回し、期限の10分前に引き受け直す
 let model: Promise<SessionCredentials & { expiration: number }> | undefined;
 function modelCredentials() {
   const fresh = (c: { expiration: number }) => c.expiration - Date.now() > 10 * 60_000;
   const assume = async () => {
-    const { Credentials: c } = await traceAwsClient(new STSClient({})).send(new AssumeRoleCommand({
-      RoleArn: process.env.MODEL_ROLE_ARN, RoleSessionName: 'fraud-agent-model', DurationSeconds: 3600,
+    const { Credentials } = await sts.send(new AssumeRoleCommand({
+      RoleArn: MODEL_ROLE_ARN, RoleSessionName: 'fraud-agent-model', DurationSeconds: 3600,
     }));
-    return { accessKeyId: c!.AccessKeyId!, secretAccessKey: c!.SecretAccessKey!, sessionToken: c!.SessionToken!, expiration: c!.Expiration!.getTime() };
+    return { ...sessionFromSts(Credentials), expiration: Credentials?.Expiration?.getTime() ?? 0 };
   };
   model = model?.then((c) => (fresh(c) ? c : assume())) ?? assume();
   model.catch(() => { model = undefined; });
@@ -117,7 +122,7 @@ export const handler = createHopHandler(async (body, { call, requestId }) => {
     for await (const m of query({
       prompt: `案件${caseId}を分析してください。`,
       options: {
-        pathToClaudeCodeExecutable: `${process.env.LAMBDA_TASK_ROOT}/claude`,
+        pathToClaudeCodeExecutable: CLAUDE_CODE,
         model: MODEL_ID,
         systemPrompt: SYSTEM_PROMPT,
         // 組み込みのツール（Bash、Readなど）は使わせず、中継のMCPサーバーのツールだけを許す
@@ -142,7 +147,7 @@ export const handler = createHopHandler(async (body, { call, requestId }) => {
     // Claude Codeは終了するときに残りのスパンを送る。届くのを待つ（転送の完了は、応答の前に共通部品が待つ）
     await otlp?.settle();
   } catch (e) {
-    log('error', 'agent failed', { hop: 'fraud-agent', requestId, error: (e as Error).message, ...(LOG_STDERR ? { stderr: stderr.join('').slice(-2000) } : {}) });
+    log('error', 'agent failed', { hop: 'fraud-agent', requestId, error: e instanceof Error ? e.message : String(e), ...(LOG_STDERR ? { stderr: stderr.join('').slice(-2000) } : {}) });
     throw e;
   } finally {
     await relay.close();

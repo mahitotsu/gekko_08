@@ -1,10 +1,11 @@
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, GetCommand } from '@aws-sdk/lib-dynamodb';
-import { createHopHandler, traceAwsClient } from '@gekko08/authz-context';
+import { createHopHandler, requireEnv, traceAwsClient } from '@gekko08/authz-context';
+import type { Entitlements } from './api';
 
 const db = DynamoDBDocumentClient.from(traceAwsClient(new DynamoDBClient({})));
-const STAFF = process.env.STAFF_TABLE!;
-const TITLE_PERMISSIONS = process.env.TITLE_PERMISSIONS_TABLE!;
+const STAFF = requireEnv('STAFF_TABLE');
+const TITLE_PERMISSIONS = requireEnv('TITLE_PERMISSIONS_TABLE');
 
 // 属性サービス。人事データと権限マスタから、JWTのsubject本人の業務上のアクセス権だけを返す。
 // 照会する相手を引数に取らないので、誘導されたエージェントや侵害されたホップが他人のアクセス権を問い合わせることはできない。
@@ -14,8 +15,8 @@ export const handler = createHopHandler(async (_body, { subject, scope }) => {
   const { Item: staff } = await db.send(new GetCommand({ TableName: STAFF, Key: { userId: subject.id }, ConsistentRead: true }));
   if (!staff) return { status: 403, body: { error: 'forbidden', reason: 'unknown user' } };
   const { Item: grant } = await db.send(new GetCommand({ TableName: TITLE_PERMISSIONS, Key: { title: staff.title }, ConsistentRead: true }));
-  return {
-    status: 200,
-    body: { userId: subject.id, branch: staff.branch, title: staff.title, permissions: (grant?.permissions as string[] | undefined) ?? [] },
+  const body: Entitlements = {
+    userId: subject.id, branch: String(staff.branch), title: String(staff.title), permissions: (grant?.permissions as string[] | undefined) ?? [],
   };
+  return { status: 200, body };
 });

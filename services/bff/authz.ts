@@ -1,4 +1,4 @@
-import type { DelegationDefinition } from '@gekko08/authz-context';
+import type { DelegationDefinition } from '@gekko08/authz-context/types';
 
 /**
  * リクエストの目的の一覧（設計書§4）。bffが経路ごとに決めて刻む。リクエストの種類として少数に保ち、画面を増やしても既存の目的で足りるなら増やさない。

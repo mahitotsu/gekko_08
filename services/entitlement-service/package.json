@@ -3,6 +3,10 @@
   "private": true,
   "license": "Apache-2.0",
   "type": "module",
+  "exports": {
+    "./api": "./src/api.ts",
+    "./authz": "./authz.ts"
+  },
   "scripts": {
     "test": "vitest run"
   },

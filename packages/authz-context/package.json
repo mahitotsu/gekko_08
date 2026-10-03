@@ -3,7 +3,6 @@
   "private": true,
   "license": "Apache-2.0",
   "type": "module",
-  "main": "src/index.ts",
   "scripts": {
     "test": "vitest run"
   },
@@ -23,7 +22,8 @@
   },
   "exports": {
     ".": "./src/index.ts",
-    "./mcp": "./src/mcp.ts"
+    "./mcp": "./src/mcp.ts",
+    "./types": "./src/types.ts"
   },
   "devDependencies": {
     "@opentelemetry/context-async-hooks": "^2.11.0"

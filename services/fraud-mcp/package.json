@@ -3,7 +3,15 @@
   "private": true,
   "license": "Apache-2.0",
   "type": "module",
+  "exports": {
+    "./authz": "./authz.ts"
+  },
+  "scripts": {
+    "test": "vitest run"
+  },
   "dependencies": {
-    "@gekko08/authz-context": "*"
+    "@gekko08/authz-context": "*",
+    "@modelcontextprotocol/server": "^2.3.0",
+    "zod": "^4.6.5"
   }
 }

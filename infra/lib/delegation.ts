@@ -1,4 +1,4 @@
-import type { DelegationDefinition } from '@gekko08/authz-context';
+import type { DelegationDefinition } from '@gekko08/authz-context/types';
 import type { Bff } from './constructs/bff';
 import type { Hop } from './constructs/hop';
 

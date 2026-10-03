@@ -18,10 +18,12 @@ export interface McpExchange {
 }
 export type McpObserver = (exchange: McpExchange) => void;
 
-async function send(call: Call, target: string, message: JSONRPCMessage, protocolVersion?: string): Promise<CallResult> {
-  const headers: Record<string, string> = { accept: ACCEPT };
-  if (protocolVersion) headers['mcp-protocol-version'] = protocolVersion;
-  return call(target, message, { headers });
+/**
+ * MCPのメッセージを送る。mcpHeadersには、MCPのヘッダー（`mcp-protocol-version`、2026-07-28版の`mcp-method`など）を渡す。
+ * どれも認証情報ではないので、そのまま転送する
+ */
+async function send(call: Call, target: string, message: JSONRPCMessage, mcpHeaders: Record<string, string> = {}): Promise<CallResult> {
+  return call(target, message, { headers: { ...mcpHeaders, accept: ACCEPT } });
 }
 
 /**
@@ -47,7 +49,7 @@ export class HopMcpTransport implements Transport {
   }
 
   async send(message: JSONRPCMessage): Promise<void> {
-    const r = await send(this.call, this.target, message, this.protocolVersion);
+    const r = await send(this.call, this.target, message, this.protocolVersion ? { 'mcp-protocol-version': this.protocolVersion } : {});
     if (r.status === 202) {
       this.observe?.({ request: message });
       return;
@@ -70,10 +72,12 @@ export interface McpRelay {
   close(): Promise<void>;
 }
 
-const header = (headers: IncomingHttpHeaders, name: string) => {
-  const v = headers[name];
-  return Array.isArray(v) ? v[0] : v;
-};
+/** 受信したヘッダーのうち、MCPのヘッダー（`mcp-`で始まるもの）だけを取り出す */
+const mcpHeaders = (headers: IncomingHttpHeaders): Record<string, string> =>
+  Object.fromEntries(Object.entries(headers).flatMap(([name, v]) => {
+    const value = Array.isArray(v) ? v[0] : v;
+    return name.startsWith('mcp-') && value !== undefined ? [[name, value]] : [];
+  }));
 
 /**
  * MCPの中継（中継型）。MCPクライアントを差し替えられず、固定のヘッダーしか付けられないフレームワーク（Claude Agent SDKなど）に使う。
@@ -103,7 +107,7 @@ export async function startMcpRelay(call: Call, target: string, observe?: McpObs
       }
       try {
         const parent = propagation.extract(context.active(), req.headers);
-        const r = await context.with(parent, () => send(call, target, message, header(req.headers, 'mcp-protocol-version')));
+        const r = await context.with(parent, () => send(call, target, message, mcpHeaders(req.headers)));
         if (r.status === 202) {
           observe?.({ request: message });
           return reply(202);

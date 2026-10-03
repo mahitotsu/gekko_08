@@ -9,7 +9,8 @@ type Business = (body: unknown, ctx: { subject: { id: string }; scope: string })
 const captured: { fn?: Business } = {};
 const reads: Record<string, unknown>[] = [];
 
-vi.mock('@gekko08/authz-context', () => ({
+vi.mock('@gekko08/authz-context', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@gekko08/authz-context')>()),
   createHopHandler: (fn: Business) => { captured.fn = fn; return fn; },
   traceAwsClient: <T>(c: T) => c,
 }));
@@ -32,6 +33,9 @@ vi.mock('@aws-sdk/lib-dynamodb', () => ({
 
 beforeEach(async () => {
   reads.length = 0;
+  // CDKが設定するテーブル名
+  process.env.STAFF_TABLE = 'staff';
+  process.env.TITLE_PERMISSIONS_TABLE = 'title-permissions';
   await import('../src/index');
 });
 

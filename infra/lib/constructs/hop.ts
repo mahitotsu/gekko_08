@@ -1,14 +1,12 @@
 import * as cdk from 'aws-cdk-lib';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
-import type { Provides } from '@gekko08/authz-context';
+import { TAG_PURPOSE as PURPOSE_TAG, TAG_REQUEST_ID as REQUEST_ID_TAG, TAG_SCOPE as SCOPE_TAG, type CallerEntry, type Provides, type Target } from '@gekko08/authz-context/types';
 import { Construct } from 'constructs';
 import { enableTelemetry, NodeFunction, type NodeFunctionProps } from './node-function';
 
-/** リクエストの目的を運ぶtransitive session tagのキー。chainで引き継ぎ、途中で変えられない */
-export const PURPOSE_TAG = 'purpose';
-/** リクエストIDを運ぶtransitive session tagのキー。bffが刻み、各chainの`RoleSessionName`をこの値に縛る（FR-6） */
-export const REQUEST_ID_TAG = 'requestId';
+// session tagのキーは、刻む側（bff）と読む側（共通部品の検証）と同じ値を使う
+export { PURPOSE_TAG, REQUEST_ID_TAG };
 
 /** 初期の信頼ポリシーに何も加えないprincipal */
 class TrustAddedLater extends iam.ArnPrincipal {
@@ -19,13 +17,8 @@ class TrustAddedLater extends iam.ArnPrincipal {
   addToAssumeRolePolicy(_doc: iam.PolicyDocument): void {}
 }
 
-export interface HopTarget {
-  url: string;
-  audience: string;
-  /** JWTに付けられるscope */
-  scopes: string[];
-  forwardSession: boolean;
-}
+/** 呼び出し先の設定。共通部品が読む形（`Target`）のまま、環境変数とbffの設定に書く */
+export type HopTarget = Target;
 
 /** 呼び出し元がこのホップ宛てのJWTに付けられるscope */
 export interface DelegatedScope {
@@ -71,7 +64,7 @@ export class Hop extends Construct {
   private readonly callerRoles: iam.IRole[] = [];
   /** 呼び出し元の実行roleごとの、許可する呼び出し元の関数 */
   private readonly callerFunctions = new Map<iam.IRole, lambda.IFunction[]>();
-  private readonly callers: Record<string, { hop: string; sub: string }> = {};
+  private readonly callers: Record<string, CallerEntry> = {};
   private readonly targets: Record<string, HopTarget> = {};
   private provides: Provides = {};
 
@@ -178,7 +171,7 @@ export class Hop extends Construct {
       Null: { 'sts:IdentityTokenAudience': 'false' },
     };
     const tagConditions = (stringEquals: Record<string, unknown>) => ({
-      'ForAllValues:StringEquals': { ...onlyThisAudience['ForAllValues:StringEquals'], 'aws:TagKeys': ['scope'] },
+      'ForAllValues:StringEquals': { ...onlyThisAudience['ForAllValues:StringEquals'], 'aws:TagKeys': [SCOPE_TAG] },
       Null: onlyThisAudience.Null,
       StringEquals: stringEquals,
     });
@@ -197,13 +190,13 @@ export class Hop extends Construct {
     const open = scopes.filter((s) => !s.purposes).map((s) => s.scope);
     if (open.length > 0) {
       caller.chainRole.addToPrincipalPolicy(new iam.PolicyStatement({
-        actions: ['sts:TagGetWebIdentityToken'], resources: ['*'], conditions: tagConditions({ 'aws:RequestTag/scope': open }),
+        actions: ['sts:TagGetWebIdentityToken'], resources: ['*'], conditions: tagConditions({ [`aws:RequestTag/${SCOPE_TAG}`]: open }),
       }));
     }
     for (const s of scopes.filter((x) => x.purposes)) {
       caller.chainRole.addToPrincipalPolicy(new iam.PolicyStatement({
         actions: ['sts:TagGetWebIdentityToken'], resources: ['*'],
-        conditions: tagConditions({ 'aws:RequestTag/scope': s.scope, [`aws:PrincipalTag/${PURPOSE_TAG}`]: s.purposes }),
+        conditions: tagConditions({ [`aws:RequestTag/${SCOPE_TAG}`]: s.scope, [`aws:PrincipalTag/${PURPOSE_TAG}`]: s.purposes }),
       }));
     }
 

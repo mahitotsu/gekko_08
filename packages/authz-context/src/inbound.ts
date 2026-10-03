@@ -1,5 +1,5 @@
 import { createRemoteJWKSet, jwtVerify, type JWTVerifyGetKey } from 'jose';
-import type { Provides, Subject } from './types';
+import { TAG_PURPOSE, TAG_REQUEST_ID, TAG_SCOPE, type CallerEntry, type Provides, type Subject } from './types';
 
 const STS_NAMESPACE = 'https://sts.amazonaws.com/';
 
@@ -14,14 +14,6 @@ export class AuthzError extends Error {
     super(message);
     if (stampedRequestId) this.stampedRequestId = stampedRequestId;
   }
-}
-
-/** 呼び出しを許したホップ。入口のIAMが確かめた実行roleから引く */
-export interface CallerEntry {
-  /** 呼び出し元のホップ名 */
-  hop: string;
-  /** JWTの`sub`として期待する、呼び出し元のchain用role（bffでは目的を刻むrole）のARN */
-  sub: string;
 }
 
 export interface VerifyOptions {
@@ -114,11 +106,11 @@ export async function verifyInbound(token: string | undefined, callerArn: string
   const id = ns?.source_identity;
   if (typeof id !== 'string' || !id) throw new AuthzError(401, 'authorization context lacks subject');
   // 委任の範囲が欠けたJWTは何も許さない
-  const purpose = tagValue(ns?.principal_tags?.purpose);
-  const scope = tagValue(ns?.request_tags?.scope);
+  const purpose = tagValue(ns?.principal_tags?.[TAG_PURPOSE]);
+  const scope = tagValue(ns?.request_tags?.[TAG_SCOPE]);
   if (!purpose || !scope) throw new AuthzError(401, 'authorization context lacks delegation scope');
   // リクエストIDは、途中のホップが変えられない値として、起点が刻んだものと照合する
-  const stamped = tagValue(ns?.principal_tags?.requestId);
+  const stamped = tagValue(ns?.principal_tags?.[TAG_REQUEST_ID]);
   if (!stamped) throw new AuthzError(401, 'authorization context lacks request id');
   if (stamped !== requestId) throw new AuthzError(401, 'request id does not match authorization context', stamped);
   // IAMが発行させない組み合わせ。IAMの設定の誤りや手での変更を、提供側の定義で止める

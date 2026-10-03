@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it } from 'vitest';
-import type { HopRecord, Reconciled as AuditResponse } from '../../services/audit-service/src/api';
+import type { HopRecord, Reconciled as AuditResponse } from '@gekko08/audit-service/api';
 import { browserGet, browserPost, eventually, loginSession, provisionTestData, TEST_DATA as T, USERS } from './helpers';
 
 // FR-7(d)：監査の画面で、1回のリクエストについて、各ホップの記録をAWSの記録と突き合わせて示す。監査は、監査の権限を持つユーザーだけが使える

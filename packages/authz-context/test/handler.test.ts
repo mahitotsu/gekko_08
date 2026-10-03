@@ -35,13 +35,33 @@ describe('createHopHandler', () => {
   it('業務のコードに、検証済みのsubject・呼び出し元のホップ名・scopeだけを渡す。リクエストの目的は渡さない', async () => {
     let got: Record<string, unknown> | undefined;
     const handler = createHopHandler(async (body, ctx: HopContext) => {
-      const { call: _call, ...rest } = ctx;
+      const { call: _call, headers: _headers, ...rest } = ctx;
       got = rest;
       return { status: 200, body: { caseId: body.caseId } };
     }, config);
     const r = await handler(event({ 'x-authz-context': token, 'x-request-id': 'req-1', 'x-user': 'tanaka' }));
     expect(statusOf(r)).toBe(200);
     expect(got).toEqual({ subject: { id: 'yamada' }, actor: 'bff', scope: 'case:summary', requestId: 'req-1' });
+  });
+
+  it('SR-3: 業務のコードに渡すヘッダーから、JWT、受け渡されたセッション、署名を除く', async () => {
+    let headers: Readonly<Record<string, string>> = {};
+    const handler = createHopHandler(async (_body, ctx) => { headers = ctx.headers; return { status: 200, body: {} }; }, config);
+    await handler(event({
+      'x-authz-context': token, 'x-authz-session': 'session', 'x-request-id': 'req-1', authorization: 'AWS4-HMAC-SHA256 ...',
+      'x-amz-security-token': 'secret', 'mcp-protocol-version': '2025-06-18',
+    }));
+    expect(headers).toEqual({ 'x-request-id': 'req-1', 'mcp-protocol-version': '2025-06-18' });
+  });
+
+  it('本文がJSONのオブジェクトでなければ400で、業務のコードを呼ばない', async () => {
+    let called = false;
+    const handler = createHopHandler(async () => { called = true; return { status: 200, body: {} }; }, config);
+    for (const body of ['{', '[1]', '"text"']) {
+      const e = { ...event({ 'x-authz-context': token, 'x-request-id': 'req-1' }), body } as LambdaFunctionURLEvent;
+      expect(statusOf(await handler(e))).toBe(400);
+    }
+    expect(called).toBe(false);
   });
 
   it('検証に失敗したら、業務のコードを呼ばない', async () => {

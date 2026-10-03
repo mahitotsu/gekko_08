@@ -2,6 +2,7 @@
   "name": "gekko08",
   "private": true,
   "license": "Apache-2.0",
+  "type": "module",
   "workspaces": [
     "web",
     "infra",
@@ -11,7 +12,7 @@
   ],
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "npm run test -w @gekko08/authz-context -w @gekko08/audit-service -w @gekko08/entitlement-service -w @gekko08/fraud-agent -w @gekko08/infra",
+    "test": "vitest run",
     "test:scenario": "npm run test -w @gekko08/tests",
     "deploy": "npm run cdk -w @gekko08/infra -- deploy",
     "destroy": "npm run cdk -w @gekko08/infra -- destroy",

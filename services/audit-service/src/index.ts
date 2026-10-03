@@ -1,6 +1,7 @@
 import { CloudTrailClient, LookupEventsCommand } from '@aws-sdk/client-cloudtrail';
 import { CloudWatchLogsClient, GetQueryResultsCommand, StartQueryCommand } from '@aws-sdk/client-cloudwatch-logs';
-import { createHopHandler, traceAwsClient, type Call, type CallResult } from '@gekko08/authz-context';
+import { createHopHandler, traceAwsClient, type CallResult } from '@gekko08/authz-context';
+import { fetchEntitlements } from '@gekko08/entitlement-service/api';
 import type { Reconciled, TransactionList } from './api';
 import { logTime, ownRows, reconcileRecords, toAwsRecord, transactionsFrom, type Directory, type Row, type TrailRecord } from './reconcile';
 
@@ -26,18 +27,15 @@ const forbidden = (reason: string): CallResult => ({ status: 403, body: { error:
 
 export const handler = createHopHandler(async (body, { scope, call }) => {
   if (scope !== 'audit:read') return forbidden('scope does not allow the action');
-  if (!(await canAudit(call))) return forbidden('no entitlement');
+  // 監査の権限は属性サービスから得る。得られなければ拒否する（fail closed）
+  const ent = await fetchEntitlements(call);
+  if (!ent?.permissions.includes('audit:view')) return forbidden('no entitlement');
   if (body.action === 'list') return { status: 200, body: await listTransactions() };
   if (body.action === 'reconcile' && typeof body.requestId === 'string' && REQUEST_ID.test(body.requestId)) {
     return { status: 200, body: await reconcile(body.requestId) };
   }
   return { status: 400, body: { error: 'invalid request' } };
 });
-
-async function canAudit(call: Call): Promise<boolean> {
-  const r = await call('entitlement-service', {}, { scope: 'entitlements:read' });
-  return r.status === 200 && ((r.body as { permissions?: string[] }).permissions ?? []).includes('audit:view');
-}
 
 // --- ホップの記録（Logs Insights） ---
 

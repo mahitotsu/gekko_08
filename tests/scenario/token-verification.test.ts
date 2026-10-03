@@ -1,8 +1,8 @@
 import { AuthzError, verifyInbound, type VerifyOptions } from '@gekko08/authz-context';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { chainTo, mintJwt, type Outputs, purposeSession, type RequestSession, stackOutputs, USERS } from './helpers';
-import { authz as accountServiceAuthz } from '../../services/account-service/authz';
-import { authz as caseServiceAuthz } from '../../services/case-service/authz';
+import { authz as accountServiceAuthz } from '@gekko08/account-service/authz';
+import { authz as caseServiceAuthz } from '@gekko08/case-service/authz';
 
 // FR-1：各ホップの受信側の検証を、STSが実際に発行したJWTと発行者の実際のJWKSで確かめる。
 // デプロイしたホップの入口は直前のホップしか通れないため、不正なJWTはホップと同じ共通部品（verifyInbound）に直接渡す

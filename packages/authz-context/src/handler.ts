@@ -1,10 +1,11 @@
-import { SpanKind, SpanStatusCode, type Span } from '@opentelemetry/api';
+import type { Span } from '@opentelemetry/api';
 import type { LambdaFunctionURLEvent, LambdaFunctionURLResult } from 'aws-lambda';
-import { AuthzError, verifyInbound, type CallerEntry, type VerifyOptions } from './inbound';
+import { requireEnv } from './env';
+import { AuthzError, verifyInbound, type VerifyOptions } from './inbound';
 import { log } from './log';
 import { createCaller, decodeSession, type Call, type Timings } from './outbound';
-import { ATTR, flushTelemetry, inboundContext, initTelemetry, tracer } from './telemetry';
-import { HEADER_CONTEXT, HEADER_REQUEST_ID, HEADER_SESSION, type CallResult, type Provides, type Subject, type Target } from './types';
+import { ATTR, inboundContext, initTelemetry, serve } from './telemetry';
+import { HEADER_CONTEXT, HEADER_REQUEST_ID, HEADER_SESSION, type CallerEntry, type CallResult, type Provides, type Subject, type Target } from './types';
 
 /** 環境変数で渡すホップの設定。CDKの`Hop`が設定する。 */
 export interface HopConfig {
@@ -20,15 +21,16 @@ export interface HopConfig {
   keys?: VerifyOptions['keys'];
 }
 
-export function hopConfigFromEnv(env = process.env): HopConfig {
+export function hopConfigFromEnv(env: NodeJS.ProcessEnv = process.env): HopConfig {
+  // callers、provides、targetsは、CDKが委任の範囲の定義から生成したJSON
   return {
-    hop: env.HOP_NAME!,
-    audience: env.HOP_AUDIENCE!,
-    issuer: env.AUTHZ_ISSUER!,
-    callers: JSON.parse(env.AUTHZ_CALLERS ?? '{}'),
-    provides: JSON.parse(env.AUTHZ_PROVIDES ?? '{}'),
+    hop: requireEnv('HOP_NAME', env),
+    audience: requireEnv('HOP_AUDIENCE', env),
+    issuer: requireEnv('AUTHZ_ISSUER', env),
+    callers: JSON.parse(requireEnv('AUTHZ_CALLERS', env)) as Record<string, CallerEntry>,
+    provides: JSON.parse(requireEnv('AUTHZ_PROVIDES', env)) as Provides,
     chainRoleArn: env.AUTHZ_CHAIN_ROLE || undefined,
-    targets: JSON.parse(env.AUTHZ_TARGETS ?? '{}'),
+    targets: JSON.parse(requireEnv('AUTHZ_TARGETS', env)) as Record<string, Target>,
   };
 }
 
@@ -42,17 +44,51 @@ export interface HopContext {
    */
   scope: string;
   requestId: string;
+  /** 受信したヘッダー（名前は小文字）。JWT、受け渡されたセッション、署名のヘッダーは除く（SR-3） */
+  headers: Readonly<Record<string, string>>;
   /** 次のホップを呼ぶ。呼び出し先がないホップでは使えない */
   call: Call;
 }
 
-export type HopHandler = (body: any, ctx: HopContext) => Promise<CallResult>;
+/**
+ * 業務のコード。bodyは、JSONのオブジェクトであることだけを共通部品が確かめた本文で、項目の形は業務のコードが確かめる
+ */
+export type HopHandler = (body: Record<string, unknown>, ctx: HopContext) => Promise<CallResult>;
 
 // RoleSessionNameにも使うので、その文字種と長さに収まるものだけを受け付ける
 const REQUEST_ID = /^[\w+=,.@-]{2,64}$/;
 
 function respond(status: number, body: unknown): LambdaFunctionURLResult {
+  // 本文のない応答（MCPの通知への202など）は、本文を付けない
+  if (body === undefined) return { statusCode: status };
   return { statusCode: status, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) };
+}
+
+/** Function URLのイベントの本文を、文字列で取り出す */
+export function readBody(event: LambdaFunctionURLEvent): string {
+  if (!event.body) return '';
+  return event.isBase64Encoded ? Buffer.from(event.body, 'base64').toString() : event.body;
+}
+
+/** 本文をJSONのオブジェクトとして読む。空ならから（`{}`）、JSONのオブジェクトでなければundefined */
+export function parseJsonObject(raw: string): Record<string, unknown> | undefined {
+  if (!raw) return {};
+  try {
+    const v: unknown = JSON.parse(raw);
+    return typeof v === 'object' && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+// 業務のコードに渡さないヘッダー。JWTと受け渡されたセッションは認証情報で、署名のヘッダーは業務に関係がない（SR-3）
+const isCredentialHeader = (name: string) => name.startsWith('x-authz-') || name.startsWith('x-amz-') || name === 'authorization';
+
+function businessHeaders(headers: Record<string, string | undefined>): Record<string, string> {
+  return Object.fromEntries(Object.entries(headers).flatMap(([k, v]) => {
+    const name = k.toLowerCase();
+    return v === undefined || isCredentialHeader(name) ? [] : [[name, v]];
+  }));
 }
 
 /**
@@ -62,20 +98,9 @@ function respond(status: number, body: unknown): LambdaFunctionURLResult {
 export function createHopHandler(business: HopHandler, config: HopConfig = hopConfigFromEnv()) {
   initTelemetry(config.hop);
   const handle = createHandle(business, config);
+  // 呼び出し元のtraceparentを親にする。このホップを呼べるのは、入口のIAMが確かめた呼び出し元だけ
   return (event: LambdaFunctionURLEvent): Promise<LambdaFunctionURLResult> =>
-    // 呼び出し元のtraceparentを親にする。このホップを呼べるのは、入口のIAMが確かめた呼び出し元だけ
-    tracer().startActiveSpan(config.hop, { kind: SpanKind.SERVER, attributes: { [ATTR.hop]: config.hop } }, inboundContext(event.headers ?? {}), async (span) => {
-      try {
-        const res = await handle(event, span);
-        const status = typeof res === 'object' ? res.statusCode ?? 200 : 200;
-        span.setAttribute(ATTR.status, status);
-        if (status >= 500) span.setStatus({ code: SpanStatusCode.ERROR });
-        return res;
-      } finally {
-        span.end();
-        await flushTelemetry();
-      }
-    });
+    serve(config.hop, inboundContext(event.headers ?? {}), (span) => handle(event, span));
 }
 
 function createHandle(business: HopHandler, config: HopConfig) {
@@ -104,9 +129,13 @@ function createHandle(business: HopHandler, config: HopConfig) {
     try {
       verified = await verifyInbound(headers[HEADER_CONTEXT], actorArn, config, requestId);
     } catch (e) {
-      const status = e instanceof AuthzError ? e.status : 401;
-      reject(status, (e as Error).message, e instanceof AuthzError ? e.stampedRequestId : undefined);
-      return respond(status, { error: status === 403 ? 'forbidden' : 'unauthorized' });
+      // 検証の拒否ではない失敗（発行者の公開鍵を取得できないなど）は、呼び出し元の誤りではないので500にする
+      if (!(e instanceof AuthzError)) {
+        log('error', 'verification failed', { ...base, error: e instanceof Error ? e.message : String(e) });
+        return respond(500, { error: 'internal error' });
+      }
+      reject(e.status, e.message, e.stampedRequestId);
+      return respond(e.status, { error: e.status === 403 ? 'forbidden' : 'unauthorized' });
     }
     timings.verifyMs = Math.round(performance.now() - tv);
     span.setAttributes({
@@ -120,13 +149,18 @@ function createHandle(business: HopHandler, config: HopConfig) {
       : async () => { throw new Error('this hop cannot call other hops'); };
 
     let result: CallResult;
-    try {
-      const raw = event.isBase64Encoded ? Buffer.from(event.body ?? '', 'base64').toString() : event.body;
-      const { subject, actor, scope } = verified;
-      result = await business(raw ? JSON.parse(raw) : {}, { subject, actor, scope, requestId, call });
-    } catch (e) {
-      log('error', 'handler failed', { ...base, error: (e as Error).name, detail: (e as Error).message });
-      result = { status: 500, body: { error: 'internal error' } };
+    const body = parseJsonObject(readBody(event));
+    if (!body) {
+      result = { status: 400, body: { error: 'invalid request body' } };
+    } else {
+      try {
+        const { subject, actor, scope } = verified;
+        result = await business(body, { subject, actor, scope, requestId, headers: businessHeaders(headers), call });
+      } catch (e) {
+        const error = e instanceof Error ? e : new Error(String(e));
+        log('error', 'handler failed', { ...base, error: error.name, detail: error.message });
+        result = { status: 500, body: { error: 'internal error' } };
+      }
     }
     log('info', 'handled', {
       ...base,

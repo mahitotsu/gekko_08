@@ -3,12 +3,17 @@
   "private": true,
   "license": "Apache-2.0",
   "type": "module",
+  "exports": {
+    "./api": "./src/api.ts",
+    "./authz": "./authz.ts"
+  },
   "scripts": {
     "test": "vitest run"
   },
   "dependencies": {
     "@aws-sdk/client-cloudtrail": "^3.1145.0",
     "@aws-sdk/client-cloudwatch-logs": "^3.1145.0",
-    "@gekko08/authz-context": "*"
+    "@gekko08/authz-context": "*",
+    "@gekko08/entitlement-service": "*"
   }
 }

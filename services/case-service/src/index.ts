@@ -1,9 +1,10 @@
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, GetCommand } from '@aws-sdk/lib-dynamodb';
-import { createHopHandler, traceAwsClient, type Call } from '@gekko08/authz-context';
+import { createHopHandler, requireEnv, traceAwsClient } from '@gekko08/authz-context';
+import { fetchEntitlements } from '@gekko08/entitlement-service/api';
 
 const db = DynamoDBDocumentClient.from(traceAwsClient(new DynamoDBClient({})));
-const TABLE = process.env.CASES_TABLE!;
+const TABLE = requireEnv('CASES_TABLE');
 
 // 操作ごとに必要なscope（委任の範囲）。目的との組み合わせはIAMと共通部品が守るので、ここではscopeだけを見る
 const REQUIRED_SCOPE: Record<string, string> = {
@@ -11,14 +12,6 @@ const REQUIRED_SCOPE: Record<string, string> = {
   get: 'case:read', // エージェントのツールからの取得（案件だけ）
   unfreeze: 'case:unfreeze', // 画面からの凍結の解除の依頼
 };
-
-interface Entitlements { branch: string; title: string; permissions: string[] }
-
-// 業務上のアクセス権は属性サービスから得る。得られなければ拒否する（fail closed）
-async function entitlementsOf(call: Call): Promise<Entitlements | undefined> {
-  const r = await call('entitlement-service', {});
-  return r.status === 200 ? (r.body as Entitlements) : undefined;
-}
 
 // 凍結の見直しの案件。委任の範囲が操作を許し、かつ業務上のアクセス権が案件を許すときだけ行う
 export const handler = createHopHandler(async (body, { scope, call }) => {
@@ -31,7 +24,7 @@ export const handler = createHopHandler(async (body, { scope, call }) => {
 
   const [{ Item }, ent] = await Promise.all([
     db.send(new GetCommand({ TableName: TABLE, Key: { caseId } })),
-    entitlementsOf(call),
+    fetchEntitlements(call),
   ]);
   if (!ent || !ent.permissions.includes('case:view')) return { status: 403, body: { error: 'forbidden', reason: 'no entitlement' } };
   if (!Item) return { status: 404, body: { error: 'not found' } };

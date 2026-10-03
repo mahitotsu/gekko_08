@@ -1,15 +1,15 @@
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { Sha256 } from '@aws-crypto/sha256-js';
-import { defaultProvider } from '@aws-sdk/credential-provider-node';
-import { context, propagation, ROOT_CONTEXT, SpanKind, SpanStatusCode, trace, type Context, type TextMapGetter } from '@opentelemetry/api';
+import { context, propagation, ROOT_CONTEXT, SpanKind, SpanStatusCode, trace, type Context, type Span, type TextMapGetter } from '@opentelemetry/api';
 import { ExportResultCode, type ExportResult } from '@opentelemetry/core';
 import { ProtobufTraceSerializer } from '@opentelemetry/otlp-transformer';
 import { resourceFromAttributes } from '@opentelemetry/resources';
 import { BatchSpanProcessor, type ReadableSpan, type SpanExporter } from '@opentelemetry/sdk-trace-base';
 import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
-import { SignatureV4 } from '@smithy/signature-v4';
+import type { LambdaFunctionURLResult } from 'aws-lambda';
+import { requireEnv } from './env';
 import { log } from './log';
+import { execSigner } from './signing';
 
 // トレース（設計書§7）。関数の中のSDKが、実行roleで署名して、CloudWatchのOTLPの受け口（X-Ray）に直接送り、
 // ホップの呼び出しの終わりに送り切る（送り方のADR）。環境変数`AUTHZ_TELEMETRY`が`cloudwatch`のときだけ有効にし、
@@ -31,14 +31,10 @@ export const ATTR = {
   status: 'http.response.status_code',
 } as const;
 
-const region = () => process.env.AWS_REGION!;
-
-let signer: SignatureV4 | undefined;
 /** X-RayのOTLPの受け口（`/v1/traces`）へ、OTLP/HTTPの本文を実行roleで署名して送る。要る権限は`xray:PutTraceSegments` */
 async function postTraces(body: Uint8Array | string, contentType: string): Promise<void> {
-  const host = `xray.${region()}.amazonaws.com`;
-  signer ??= new SignatureV4({ service: 'xray', region: region(), credentials: defaultProvider(), sha256: Sha256 });
-  const req = await signer.sign({ method: 'POST', protocol: 'https:', hostname: host, path: '/v1/traces', headers: { host, 'content-type': contentType }, body });
+  const host = `xray.${requireEnv('AWS_REGION')}.amazonaws.com`;
+  const req = await execSigner('xray').sign({ method: 'POST', protocol: 'https:', hostname: host, path: '/v1/traces', headers: { host, 'content-type': contentType }, body });
   const res = await fetch(`https://${host}/v1/traces`, { method: 'POST', headers: req.headers, body: body as BodyInit });
   await res.arrayBuffer();
   if (!res.ok) throw new Error(`xray: HTTP ${res.status}`);
@@ -46,7 +42,6 @@ async function postTraces(body: Uint8Array | string, contentType: string): Promi
 
 /** このプロセスのスパンを、X-RayのOTLPの受け口へprotobufで送る */
 export class XrayOtlpSpanExporter implements SpanExporter {
-
   export(spans: ReadableSpan[], done: (r: ExportResult) => void): void {
     this.send(spans).then(
       () => done({ code: ExportResultCode.SUCCESS }),
@@ -57,8 +52,9 @@ export class XrayOtlpSpanExporter implements SpanExporter {
     );
   }
 
-  private send(spans: ReadableSpan[]) {
-    return postTraces(ProtobufTraceSerializer.serializeRequest(spans)!, 'application/x-protobuf');
+  private async send(spans: ReadableSpan[]) {
+    const body = ProtobufTraceSerializer.serializeRequest(spans);
+    if (body) await postTraces(body, 'application/x-protobuf');
   }
 
   async shutdown(): Promise<void> {}
@@ -81,6 +77,25 @@ export const tracer = () => trace.getTracer('@gekko08/authz-context');
 
 /** 子プロセスのテレメトリの転送のうち、まだ終わっていないもの */
 const forwarding = new Set<Promise<void>>();
+
+/**
+ * 受信した1回の呼び出しを、SERVERのスパンで包む。HTTPのステータスを属性に入れ、5xxならエラーにし、応答を返す前にスパンを送り切る。
+ * parentには、呼び出し元を確かめられる場合だけ、受信した`traceparent`を渡す（`inboundContext`）。bffは`ROOT_CONTEXT`を渡す
+ */
+export function serve(name: string, parent: Context, handle: (span: Span) => Promise<LambdaFunctionURLResult>): Promise<LambdaFunctionURLResult> {
+  return tracer().startActiveSpan(name, { kind: SpanKind.SERVER, attributes: { [ATTR.hop]: name } }, parent, async (span) => {
+    try {
+      const res = await handle(span);
+      const status = typeof res === 'object' ? res.statusCode ?? 200 : 200;
+      span.setAttribute(ATTR.status, status);
+      if (status >= 500) span.setStatus({ code: SpanStatusCode.ERROR });
+      return res;
+    } finally {
+      span.end();
+      await flushTelemetry();
+    }
+  });
+}
 
 /** 応答を返す前に送り切る。送れなくても、ホップの処理は失敗させない */
 export async function flushTelemetry(timeoutMs = 2000): Promise<void> {

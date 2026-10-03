@@ -21,6 +21,14 @@ export interface Target {
   forwardSession: boolean;
 }
 
+/** 呼び出しを許したホップ。入口のIAMが確かめた実行roleから引く */
+export interface CallerEntry {
+  /** 呼び出し元のホップ名 */
+  hop: string;
+  /** JWTの`sub`として期待する、呼び出し元のchain用role（bffでは目的を刻むrole）のARN */
+  sub: string;
+}
+
 /** 提供側の定義の、scopeごとの制限。制限のないscopeは、どのリクエストでも、許された呼び出し元なら使える */
 export interface ScopeRule {
   /** このscopeを使ってよいリクエストの目的 */
@@ -45,6 +53,13 @@ export interface CallResult {
   status: number;
   body: unknown;
 }
+
+/** リクエストの目的を運ぶtransitive session tagのキー。bffが刻み、chainで引き継がれ、途中で変えられない */
+export const TAG_PURPOSE = 'purpose';
+/** リクエストIDを運ぶtransitive session tagのキー。bffが刻み、各chainの`RoleSessionName`をこの値に縛る（FR-6） */
+export const TAG_REQUEST_ID = 'requestId';
+/** JWTのリクエストのtag（`GetWebIdentityToken`の`Tags`）で、呼び出し元が宛先に付けるscopeのキー */
+export const TAG_SCOPE = 'scope';
 
 export const HEADER_CONTEXT = 'x-authz-context';
 export const HEADER_SESSION = 'x-authz-session';

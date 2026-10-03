@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { get, type ApiResult } from './api';
-import type { Check, EventRef, Field, Reconciled as AuditResponse, Transaction, TransactionList } from '../../services/audit-service/src/api';
+import type { Check, EventRef, Field, Reconciled as AuditResponse, Transaction, TransactionList } from '@gekko08/audit-service/api';
 import { PURPOSE_LABELS, ROUTE_LABELS } from './labels';
 import { Denial, PurposeChip } from './parts';
 

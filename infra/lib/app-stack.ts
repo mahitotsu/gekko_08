@@ -12,13 +12,13 @@ import { REPO_ROOT, type NodeFunctionProps } from './constructs/node-function';
 import { OutboundFederationCheck } from './constructs/outbound-federation-check';
 import { WebFrontend } from './constructs/web-frontend';
 import { connectHops } from './delegation';
-import { authz as accountServiceAuthz } from '../../services/account-service/authz';
-import { authz as auditServiceAuthz } from '../../services/audit-service/authz';
-import { authz as bffAuthz, PURPOSES } from '../../services/bff/authz';
-import { authz as caseServiceAuthz } from '../../services/case-service/authz';
-import { authz as entitlementServiceAuthz } from '../../services/entitlement-service/authz';
-import { authz as fraudAgentAuthz } from '../../services/fraud-agent/authz';
-import { authz as fraudMcpAuthz } from '../../services/fraud-mcp/authz';
+import { authz as accountServiceAuthz } from '@gekko08/account-service/authz';
+import { authz as auditServiceAuthz } from '@gekko08/audit-service/authz';
+import { authz as bffAuthz, PURPOSES } from '@gekko08/bff/authz';
+import { authz as caseServiceAuthz } from '@gekko08/case-service/authz';
+import { authz as entitlementServiceAuthz } from '@gekko08/entitlement-service/authz';
+import { authz as fraudAgentAuthz } from '@gekko08/fraud-agent/authz';
+import { authz as fraudMcpAuthz } from '@gekko08/fraud-mcp/authz';
 
 export { REGION } from './region';
 

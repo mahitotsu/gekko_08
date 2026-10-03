@@ -20,7 +20,8 @@ vi.mock('@aws-sdk/client-sts', () => ({
   STSClient: class { send = async () => ({ Credentials: MODEL_CREDS }); },
   AssumeRoleCommand: class { constructor(readonly input: unknown) {} },
 }));
-vi.mock('@gekko08/authz-context', () => ({
+vi.mock('@gekko08/authz-context', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@gekko08/authz-context')>()),
   createHopHandler: (fn: Business) => { captured.fn = fn; return fn; },
   log: () => {},
   traceAwsClient: <T>(c: T) => c,

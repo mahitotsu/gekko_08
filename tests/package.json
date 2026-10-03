@@ -16,8 +16,11 @@
     "@aws-sdk/client-sts": "^3.1143.0",
     "@aws-sdk/credential-provider-node": "^3.972.84",
     "@aws-sdk/lib-dynamodb": "^3.1143.0",
+    "@gekko08/account-service": "*",
+    "@gekko08/audit-service": "*",
+    "@gekko08/authz-context": "*",
+    "@gekko08/case-service": "*",
     "@smithy/signature-v4": "^5.7.4",
-    "jose": "^6.2.12",
-    "@gekko08/authz-context": "*"
+    "jose": "^6.2.12"
   }
 }
