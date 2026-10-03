@@ -23,4 +23,4 @@
 | [監査サービス](20261002074437-audit-service.md) | 監査サービスをホップとして加え、1回のリクエストについて、各ホップのログとCloudTrailの記録を、リクエストIDで集め、JWTの`jti`で1対1に突き合わせて示す。監査は監査担当だけ | 有効。「リクエストIDはSTSもIAMも強制しない」を[リクエストIDのtag](20261002154129-request-id-transitive-tag.md)で改訂 |
 | [リクエストIDのtag](20261002154129-request-id-transitive-tag.md) | リクエストIDをtransitive session tagとして刻み、各chainの`RoleSessionName`をその値に限る。受信側はJWTの値とヘッダーを照合する | 有効 |
 | [目的を刻むroleのIdPの確認](20261003111952-purpose-role-federated-provider.md) | 目的を刻むroleは、このUser Poolで認証されたセッション（`aws:FederatedProvider`＝`https://`を除いた発行者）だけを受け付ける。各ホップのJWTには元のIdPが残らないため | 有効 |
-| [MCPサーバーは公式SDK](20261003144613-fraud-mcp-on-official-sdk.md) | fraud-mcpは、MCPの公式SDKのv2で、ステートレスに、JSONで応答する。共通部品は、認証情報を除いたヘッダーを業務のコードに渡す | 提案（シナリオテストが通れば採用） |
+| [MCPサーバーは公式SDK](20261003144613-fraud-mcp-on-official-sdk.md) | fraud-mcpは、MCPの公式SDKのv2で、ステートレスに、JSONで応答する。共通部品は、認証情報を除いたヘッダーを業務のコードに渡す | 有効 |

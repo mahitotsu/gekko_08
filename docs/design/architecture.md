@@ -23,7 +23,7 @@
 | [実装言語はTypeScript](../adr/20260930093745-implementation-language-typescript.md) | 実装言語 |
 | [エージェントとMCPサーバーもLambdaのホップ](../adr/20260930093746-agent-and-mcp-on-lambda.md) | エージェントとMCPの置き場所 |
 | [エージェントはClaude Agent SDK、MCPは関数の中の中継から](../adr/20261001040729-fraud-agent-on-claude-agent-sdk.md) | エージェントの実装 |
-| [MCPサーバーは公式SDK](../adr/20261003144613-fraud-mcp-on-official-sdk.md) | MCPサーバーの実装（提案） |
+| [MCPサーバーは公式SDK](../adr/20261003144613-fraud-mcp-on-official-sdk.md) | MCPサーバーの実装 |
 | [トレースの収集先はCloudWatch、メトリクスは出さない](../adr/20261001020115-telemetry-destination-cloudwatch.md) | トレースの収集先 |
 | [トレースは関数の中のSDKが署名して直接送る](../adr/20261001053646-telemetry-direct-export.md) | トレースの送り方 |
 
