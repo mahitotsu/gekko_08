@@ -20,6 +20,11 @@ export class AuthFoundation extends Construct {
   readonly client: cognito.UserPoolClient;
   readonly authDomain: string;
   readonly federatedRole: iam.Role;
+  /**
+   * IDトークンの発行者（`https://`を除いたもの）。federated roleのセッションが次のroleを引き受ける要求の`aws:FederatedProvider`は、
+   * OIDC providerのARNではなく、この値になる（experiments/federated-provider）
+   */
+  readonly oidcIssuer: string;
 
   constructor(scope: Construct, id: string, props: AuthFoundationProps) {
     super(scope, id);
@@ -69,6 +74,7 @@ export class AuthFoundation extends Construct {
     });
 
     const issuer = `cognito-idp.${stack.region}.amazonaws.com/${this.userPool.userPoolId}`;
+    this.oidcIssuer = issuer;
     const provider = new iam.OidcProviderNative(this, 'OidcProvider', {
       url: `https://${issuer}`,
       clientIds: [this.client.userPoolClientId],

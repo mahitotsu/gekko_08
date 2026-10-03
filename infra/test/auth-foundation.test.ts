@@ -125,6 +125,13 @@ const mutations: { name: string; check: keyof typeof checks; mutate: (f: Fixture
   },
 ];
 
+describe('目的を刻むroleが確かめるIdP', () => {
+  it('`AuthFoundation`が公開する発行者は、federated roleが信頼するOIDC providerのURLから`https://`を除いたもの（`aws:FederatedProvider`の値）', () => {
+    const resolved = fixture.stack.resolve(fixture.auth.oidcIssuer);
+    expect(join(resolved['Fn::Join'][1])).toBe(join(issuer(fixture)));
+  });
+});
+
 describe('条件を壊したテンプレートを見逃さない', () => {
   it.each(mutations)('$name → $check', ({ check, mutate }) => {
     const template = structuredClone(fixture.template);
