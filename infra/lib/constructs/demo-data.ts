@@ -3,6 +3,8 @@ import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as cr from 'aws-cdk-lib/custom-resources';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import { Construct } from 'constructs';
+import { acknowledgeNag } from '../nag';
+import { lambdaLogGroup } from './node-function';
 
 // 凍結解除のデモデータ（設計書§8）。疑わしい取引で凍結された口座と、その凍結の見直しの案件。yamadaはtokyo、tanakaはosaka、suzukiは本部（honbu）の監査担当
 export const CASES = [
@@ -70,6 +72,7 @@ export class DemoData extends Construct {
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
       removalPolicy: cdk.RemovalPolicy.DESTROY,
     });
+    acknowledgeNag(this, 'デモのデータは、デプロイのたびに投入し直す', 'DDB3');
     this.cases = table('Cases', 'caseId');
     this.accounts = table('Accounts', 'accountId');
     this.staff = table('Staff', 'userId');
@@ -93,6 +96,7 @@ export class DemoData extends Construct {
       onUpdate: seed,
       policy: cr.AwsCustomResourcePolicy.fromSdkCalls({ resources: [this.cases, this.accounts, this.staff, this.titlePermissions].map((t) => t.tableArn) }),
       installLatestAwsSdk: false,
+      logGroup: lambdaLogGroup(this, 'SeedLogs'),
     });
   }
 }

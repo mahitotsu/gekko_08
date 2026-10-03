@@ -2,6 +2,7 @@ import * as cdk from 'aws-cdk-lib';
 import * as cognito from 'aws-cdk-lib/aws-cognito';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import { Construct } from 'constructs';
+import { acknowledgeNag } from '../nag';
 import { NodeFunction } from './node-function';
 
 export interface AuthFoundationProps {
@@ -42,6 +43,10 @@ export class AuthFoundation extends Construct {
       removalPolicy: cdk.RemovalPolicy.DESTROY,
     });
     this.userPool.addTrigger(cognito.UserPoolOperation.PRE_TOKEN_GENERATION_CONFIG, pretoken, cognito.LambdaVersion.V2_0);
+    // 本番での利用は想定しない（README）。デモのユーザーはテストとデモの手順が作る
+    acknowledgeNag(this.userPool, 'パスワードは長さ（12文字以上）で決め、文字種の組み合わせは求めない（NIST SP 800-63B）', 'COG1');
+    acknowledgeNag(this.userPool, 'デモのユーザーにMFAは求めない。本番での利用は想定しない（README）', 'COG2');
+    acknowledgeNag(this.userPool, 'Plusの機能（脅威の防御）は使わない。本番での利用は想定しない（README）', 'COG8');
 
     const domain = this.userPool.addDomain('Domain', {
       cognitoDomain: { domainPrefix: cdk.Fn.join('-', ['gekko08', cdk.Fn.select(2, cdk.Fn.split('/', stack.stackId))]) },

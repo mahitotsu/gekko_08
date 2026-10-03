@@ -6,9 +6,6 @@
   "exports": {
     "./authz": "./authz.ts"
   },
-  "scripts": {
-    "test": "vitest run"
-  },
   "dependencies": {
     "@gekko08/authz-context": "*",
     "@modelcontextprotocol/server": "^2.3.0",

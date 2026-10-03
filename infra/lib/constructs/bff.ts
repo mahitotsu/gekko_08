@@ -7,7 +7,8 @@ import * as ssm from 'aws-cdk-lib/aws-ssm';
 import { Construct } from 'constructs';
 import type { AuthFoundation } from './auth-foundation';
 import { PURPOSE_TAG, REQUEST_ID_TAG, type HopCaller, type HopTarget } from './hop';
-import { enableTelemetry, NodeFunction } from './node-function';
+import { acknowledgeNag, acknowledgeProviderInvoke } from '../nag';
+import { enableTelemetry, lambdaLogGroup, NodeFunction } from './node-function';
 
 /**
  * 入口のBFF：Lambda関数、Function URL（AWS_IAM、CloudFrontのOACからだけ呼ぶ）、セッションのテーブル。
@@ -34,6 +35,7 @@ export class Bff extends Construct {
       timeToLiveAttribute: 'ttl',
       removalPolicy: cdk.RemovalPolicy.DESTROY,
     });
+    acknowledgeNag(this.sessions, 'ログインのセッションは数時間で失効する一時的なデータで、失っても再ログインで済む', 'DDB3');
 
     this.fn = new NodeFunction(this, 'Function', {
       entry: 'services/bff/src/index.ts',
@@ -70,6 +72,7 @@ export class Bff extends Construct {
       }),
       description: 'bff: stamps the transaction purpose and request ID as transitive session tags',
     });
+    acknowledgeNag(this.purposeRole, 'sts:GetWebIdentityTokenはリソースで絞れず、宛先・署名の方式・有効期間・scopeを条件で限る', 'IAM5[Resource::*]');
     this.purposeRole.assumeRolePolicy!.addStatements(
       new iam.PolicyStatement({ actions: ['sts:SetSourceIdentity'], principals: [principal] }),
       new iam.PolicyStatement({
@@ -126,8 +129,10 @@ export class Bff extends Construct {
       actions: ['ssm:PutParameter', 'ssm:DeleteParameter'],
       resources: [stack.formatArn({ service: 'ssm', resource: 'parameter', resourceName: this.secretParamName.slice(1) })],
     }));
+    const provider = new cr.Provider(this, 'ClientSecretProvider', { onEventHandler: onEvent, logGroup: lambdaLogGroup(this, 'ClientSecretProviderLogs') });
+    acknowledgeProviderInvoke(provider, onEvent);
     new cdk.CustomResource(this, 'ClientSecret', {
-      serviceToken: new cr.Provider(this, 'ClientSecretProvider', { onEventHandler: onEvent }).serviceToken,
+      serviceToken: provider.serviceToken,
       properties: { UserPoolId: auth.userPool.userPoolId, ClientId: auth.client.userPoolClientId, ParameterName: this.secretParamName },
     });
   }

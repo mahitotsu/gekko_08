@@ -3,6 +3,7 @@ import * as iam from 'aws-cdk-lib/aws-iam';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import { TAG_PURPOSE as PURPOSE_TAG, TAG_REQUEST_ID as REQUEST_ID_TAG, TAG_SCOPE as SCOPE_TAG, type CallerEntry, type Provides, type Target } from '@gekko08/authz-context/types';
 import { Construct } from 'constructs';
+import { acknowledgeNag } from '../nag';
 import { enableTelemetry, NodeFunction, type NodeFunctionProps } from './node-function';
 
 // session tagのキーは、刻む側（bff）と読む側（共通部品の検証）と同じ値を使う
@@ -81,6 +82,8 @@ export class Hop extends Construct {
         assumedBy: new TrustAddedLater(),
         description: `${props.hopName}: chain role (issues JWTs for next hops only)`,
       });
+      acknowledgeNag(this.chainRole, 'sts:GetWebIdentityTokenはリソースで絞れず、宛先・署名の方式・有効期間・scopeを条件で限る。'
+        + 'このほかの権限を持たないことは、Hopのテンプレートの単体テストが確かめる', 'IAM5[Resource::*]');
     }
 
     this.fn = new NodeFunction(this, 'Function', {

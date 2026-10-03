@@ -1,6 +1,7 @@
 import * as cdk from 'aws-cdk-lib';
 import { Template } from 'aws-cdk-lib/assertions';
 import { describe, expect, it } from 'vitest';
+import { testApp } from './app';
 import { AuthFoundation } from '../lib/constructs/auth-foundation';
 import { atoms, canonical, diffAtoms, type Json } from './policy';
 
@@ -12,7 +13,7 @@ import { atoms, canonical, diffAtoms, type Json } from './policy';
 
 function buildFixture() {
   // バンドルを飛ばす（テンプレートだけを見る）
-  const app = new cdk.App({ context: { 'aws:cdk:bundling-stacks': [] } });
+  const app = testApp();
   const stack = new cdk.Stack(app, 'AuthFoundationTest', { env: { account: '111111111111', region: 'ap-northeast-1' } });
   const auth = new AuthFoundation(stack, 'Auth', { callbackUrl: 'https://example.com/api/callback', logoutUrl: 'https://example.com/' });
   const template: Json = Template.fromStack(stack).toJSON();

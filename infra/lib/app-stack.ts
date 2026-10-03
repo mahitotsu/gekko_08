@@ -11,6 +11,7 @@ import { Hop } from './constructs/hop';
 import { REPO_ROOT, type NodeFunctionProps } from './constructs/node-function';
 import { OutboundFederationCheck } from './constructs/outbound-federation-check';
 import { WebFrontend } from './constructs/web-frontend';
+import { acknowledgeNag, LAMBDA_BASIC_EXECUTION } from './nag';
 import { connectHops } from './delegation';
 import { authz as accountServiceAuthz } from '@gekko08/account-service/authz';
 import { authz as auditServiceAuthz } from '@gekko08/audit-service/authz';
@@ -20,7 +21,6 @@ import { authz as entitlementServiceAuthz } from '@gekko08/entitlement-service/a
 import { authz as fraudAgentAuthz } from '@gekko08/fraud-agent/authz';
 import { authz as fraudMcpAuthz } from '@gekko08/fraud-mcp/authz';
 
-export { REGION } from './region';
 
 const BEDROCK_MODEL = 'anthropic.claude-haiku-4-5-20251001-v1:0';
 
@@ -124,8 +124,6 @@ export class Gekko08AppStack extends cdk.Stack {
     const auditService = new Hop(this, 'AuditService', {
       hopName: 'audit-service', entry: 'services/audit-service/src/index.ts', issuer, callsOthers: true,
     });
-    auditService.fn.addToRolePolicy(new iam.PolicyStatement({ actions: ['cloudtrail:LookupEvents'], resources: ['*'] }));
-    auditService.fn.addToRolePolicy(new iam.PolicyStatement({ actions: ['logs:GetQueryResults'], resources: ['*'] }));
 
     // 入口
     const bff = new Bff(this, 'Bff');
@@ -146,7 +144,15 @@ export class Gekko08AppStack extends cdk.Stack {
     // 監査サービスが読むロググループと、CloudTrailの主体の表示名（role名→ホップ名とroleの種類）。ARNとアカウントIDは画面に出さない
     const hops = [caseService, accountService, entitlementService, fraudAgent, fraudMcp, auditService];
     const logGroups = { bff: bff.fn.logGroup, ...Object.fromEntries(hops.map((h) => [h.hopName, h.fn.logGroup])) };
-    auditService.fn.addToRolePolicy(new iam.PolicyStatement({ actions: ['logs:StartQuery'], resources: Object.values(logGroups).map((g) => g.logGroupArn) }));
+    // 監査サービスが読む記録。照会を始めるのは各ホップのロググループに限る。CloudTrailの照会と、照会の結果の取得は、リソースで絞れない
+    const auditRead = new iam.Policy(auditService, 'AuditReadPolicy', {
+      roles: [auditService.execRole],
+      statements: [
+        new iam.PolicyStatement({ actions: ['logs:StartQuery'], resources: Object.values(logGroups).map((g) => g.logGroupArn) }),
+        new iam.PolicyStatement({ actions: ['cloudtrail:LookupEvents', 'logs:GetQueryResults'], resources: ['*'] }),
+      ],
+    });
+    acknowledgeNag(auditRead, 'cloudtrail:LookupEventsとlogs:GetQueryResults（照会のIDで扱う）は、リソースで絞れない', 'IAM5[Resource::*]');
     auditService.fn.addEnvironment('AUDIT_LOG_GROUPS', this.toJsonString(Object.fromEntries(Object.entries(logGroups).map(([k, g]) => [k, g.logGroupName]))));
     const principals: [iam.IRole | undefined, string][] = [
       [auth.federatedRole, 'bff（federated role）'], [bff.asCaller().chainRole, 'bff（目的を刻むrole）'], [bff.fn.role, 'bff（実行role）'],
@@ -156,6 +162,9 @@ export class Gekko08AppStack extends cdk.Stack {
     auditService.fn.addEnvironment('AUDIT_AUDIENCE_PREFIX', `${this.stackName}:`);
 
     bff.writeSettings(auth, callbackUrl, logoutUrl);
+
+    // CDKがLambdaの実行roleに付ける既定の管理ポリシー。CloudWatch Logsに書く権限だけを持つ
+    acknowledgeNag(this, 'Lambdaの既定の実行role。CloudWatch Logsに書く権限だけを持つ', LAMBDA_BASIC_EXECUTION);
 
     new cdk.CfnOutput(this, 'WebUrl', { value: web.origin });
     new cdk.CfnOutput(this, 'UserPoolId', { value: auth.userPool.userPoolId });

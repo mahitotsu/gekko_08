@@ -2,6 +2,7 @@ import * as cdk from 'aws-cdk-lib';
 import { Template } from 'aws-cdk-lib/assertions';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import { describe, expect, it } from 'vitest';
+import { testApp } from './app';
 import type { AuthFoundation } from '../lib/constructs/auth-foundation';
 import { Bff } from '../lib/constructs/bff';
 import { PURPOSE_TAG, REQUEST_ID_TAG } from '../lib/constructs/hop';
@@ -18,7 +19,7 @@ const ISSUER = 'cognito-idp.ap-northeast-1.amazonaws.com/ap-northeast-1_pool';
 
 function buildFixture() {
   // バンドルを飛ばす（テンプレートだけを見る）
-  const app = new cdk.App({ context: { 'aws:cdk:bundling-stacks': [] } });
+  const app = testApp();
   const stack = new cdk.Stack(app, 'PurposeRoleTest', { env: { account: '111111111111', region: 'ap-northeast-1' } });
   // 目的を刻むroleの配線が使うのはfederated roleだけ。Cognitoは作らない
   const federatedRole = new iam.Role(stack, 'Federated', { assumedBy: new iam.AccountRootPrincipal() });

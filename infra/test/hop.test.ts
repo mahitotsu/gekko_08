@@ -3,6 +3,7 @@ import { Template } from 'aws-cdk-lib/assertions';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import { describe, expect, it } from 'vitest';
+import { testApp } from './app';
 import { Hop, PURPOSE_TAG, REQUEST_ID_TAG, type HopCaller } from '../lib/constructs/hop';
 import { atoms, canonical, diffAtoms, roleStatements, type Atom, type Json } from './policy';
 
@@ -24,7 +25,7 @@ const PROVIDES = {
 /** 呼び出し関係：origin（bffに相当する、Hopではない呼び出し元）→ front → leaf、origin → leaf */
 function buildFixture() {
   // バンドルを飛ばす（テンプレートだけを見る）
-  const app = new cdk.App({ context: { 'aws:cdk:bundling-stacks': [] } });
+  const app = testApp();
   const stack = new cdk.Stack(app, 'HopTest', { env: { account: '111111111111', region: 'ap-northeast-1' } });
   const entry = 'infra/test/fixtures/handler.ts';
 
