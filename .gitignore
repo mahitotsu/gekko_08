@@ -10,6 +10,7 @@ coverage/
 __pycache__/
 *.pyc
 .venv/
+.venv-diagrams/
 
 # 実機検証・デプロイの出力（アカウントIDやURL、トークンを含みうる）
 outputs.json

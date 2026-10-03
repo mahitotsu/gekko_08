@@ -24,22 +24,7 @@ AWS上のマイクロサービスで、Authorization Context（誰の権限で�
 
 ## 構成
 
-```mermaid
-flowchart LR
-  Browser[ブラウザ] --> CF[CloudFront] --> bff
-  bff --> case[case-service] --> account[account-service]
-  bff --> agent[fraud-agent] --> mcp[fraud-mcp]
-  mcp --> case
-  mcp --> account
-  agent -.-> Bedrock[Amazon Bedrock<br/>Claude Haiku 4.5]
-  bff --> audit[audit-service]
-  audit -.-> Logs[(CloudWatch Logs<br/>各ホップのログ)]
-  audit -.-> Trail[(CloudTrail<br/>STSのイベント)]
-  bff --> ent[entitlement-service<br/>属性サービス]
-  case --> ent
-  account --> ent
-  audit --> ent
-```
+![全体構成（AWSのアイコンによる図）](docs/diagrams/architecture.png)
 
 | 経路 | ホップ |
 |---|---|
@@ -47,7 +32,7 @@ flowchart LR
 | エージェントの経路（Claude Agent SDK） | bff → fraud-agent → fraud-mcp → case-service または account-service |
 | 監査の経路 | bff → audit-service |
 
-属性サービス（entitlement-service）は、bff・case-service・account-service・audit-serviceから呼ばれる。点線はAWSのサービスの呼び出しである。
+実線はホップの呼び出し、点線はAWSのサービスの呼び出しである。属性サービス（entitlement-service）は、bff・case-service・account-service・audit-serviceから呼ばれる。
 
 | ディレクトリ | 内容 |
 |---|---|

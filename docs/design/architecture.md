@@ -46,32 +46,10 @@
 
 ## 2. 全体構成
 
-```mermaid
-flowchart LR
-  Browser[ブラウザ] -->|HTTPS| CF[CloudFront]
-  CF -->|既定| S3[(S3<br/>静的なフロントエンド)]
-  CF -->|/api/*、OAC| bff
+![全体構成（AWSのアイコンによる図）](../diagrams/architecture.png)
 
-  subgraph hops[ホップ（Lambda、Function URLはAWS_IAM）]
-    bff --> case[case-service]
-    bff --> agent[fraud-agent]
-    bff --> audit[audit-service]
-    bff --> ent[entitlement-service]
-    case --> account[account-service]
-    agent --> mcp[fraud-mcp]
-    mcp --> case
-    mcp --> account
-    case --> ent
-    account --> ent
-    audit --> ent
-  end
-
-  agent -.->|Claude Codeの子プロセス| Bedrock[Amazon Bedrock<br/>Claude Haiku 4.5]
-  audit -.-> Logs[(CloudWatch Logs<br/>各ホップのログ)]
-  audit -.-> Trail[(CloudTrail<br/>STSのイベント)]
-```
-
-実線はホップの呼び出し（§4の手順で呼ぶ）、点線はAWSのサービスの呼び出しである。
+実線はホップの呼び出し（§4の手順で呼ぶ）、点線はAWSのサービスの呼び出しである。STS、ログ、スパンへの呼び出しは、各ホップが行うので、
+ホップのまとまりから1本で描いている。図は[docs/diagrams](../diagrams/README.md)のコードから生成する。
 
 | 構成要素 | 役割 | 呼び出し元 | 呼び出し先 | データ |
 |---|---|---|---|---|
