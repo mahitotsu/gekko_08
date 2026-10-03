@@ -363,7 +363,7 @@ filter message = "handled" and hop = "case-service"
 | stats pct(timings.chainMs, 50) as chain, pct(timings.mintMs, 50) as mint, pct(timings.totalMs, 50) as total, pct(timings.totalMs, 90) as total_p90
 ```
 
-- 入口のIAMが拒否した呼び出し（許可していない呼び出し元、署名のない呼び出し、ホップの飛ばし）は、関数に届かないので、関数のログにもトレースにも出ない。
+- 入口のIAMが拒否した呼び出し（許可していない呼び出し元、署名のない呼び出し、ホップの飛ばし）は、関数に届かないので、関数のログにもトレースにも出ない（[検証](../experiments/iam-denied-logging/RESULTS.md)）。
   `rejected`に出るのは、入口のIAMを通ったあとに共通部品が拒否したもの（JWTがない、宛先や`sub`が合わない、目的やscopeがないなど）である。
 - ログの`traceId`で、Transaction Searchのトレースを開ける。
 - 常に見張る（アラームを出す）には、ロググループのメトリクスフィルターを加える。
