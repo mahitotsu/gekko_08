@@ -33,7 +33,7 @@ IdPを実行時に確かめられるのは、OIDC providerで引き受けたfede
   chain用roleは信頼ポリシーの連鎖によって、federated roleから始まったセッションからしか引き受けられないので、この照合が元のIdPの確認を間接的に担う。
 - 連鎖の根元を、2か所で確かめる。federated roleの信頼ポリシー（このUser PoolのOIDC providerと`aud`）と、目的を刻むroleの信頼ポリシー
   （`aws:FederatedProvider`＝このUser PoolのOIDC provider）。後者は、federated roleのセッションが目的を刻むroleを引き受ける要求に
-  `aws:FederatedProvider`が入ることを前提にする。この前提は、下の追加の観測で成り立たなかった。
+  `aws:FederatedProvider`が入ることを前提にする。キーは入るが、値はOIDC providerのARNではなく発行者だった（下の追加の観測と追加の検証）。
 
 ## 追加の観測：目的を刻むroleの信頼ポリシーで`aws:FederatedProvider`を条件にする
 
@@ -42,5 +42,52 @@ IdPを実行時に確かめられるのは、OIDC providerで引き受けたfede
 
 - federated roleのセッションから目的を刻むroleへの`AssumeRole`が、正規の手順でも、すべて`AccessDenied`になった。画面の操作はすべて500になった。
 - 条件キーが要求に入っていないのか、値の形（ARNか、発行者のURLか）が違うのかは、この観測からは区別できない。
-- 条件を外して元に戻した。federated roleのセッションが次のroleを引き受けるときにIdPを確かめる方法は、今のところ得られていない。
-  IdPを確かめるのは、federated roleの信頼ポリシー（このUser PoolのOIDC providerと`aud`）だけである。
+- 条件を外して元に戻した。原因は、次の検証で、値の形の違いだとわかった。
+
+## 追加の検証：`aws:FederatedProvider`の値の形
+
+実施：2026-10-03（UTC）、ap-northeast-1。本体とは別のスタック`Gekko08ExpFederatedProvider`（[lib/stack.ts](lib/stack.ts)）を使った。
+本体のOIDC providerとアプリクライアントを信頼する検証用のfederated roleを作り、テスト専用のユーザーのIDトークンで引き受けた。そのセッションから、
+信頼ポリシーの条件だけが違う6つのroleの引き受けを試み、それぞれのセッションでJWTを発行した。
+
+### 結論
+
+**`aws:FederatedProvider`は、OIDC providerで引き受けたroleのセッションが次のroleを引き受ける要求に入る。値は、OIDC providerのARNではなく、
+`https://`を除いた発行者（`cognito-idp.ap-northeast-1.amazonaws.com/<User PoolのID>`）だった。** 本体で条件を付けたときに拒否されたのは、
+値をARNにしていたためである。条件キーの文書は、AWSの組み込みでないIdPの値をARNとしているが、Cognito User Pool（IAMのOIDC providerとして登録したもの）では違った。
+
+### 観測
+
+| role | 信頼ポリシーの条件 | 引き受け |
+|---|---|---|
+| V0 | なし（対照） | できた |
+| V1 | `aws:FederatedProvider`＝OIDC providerのARN | 拒否 |
+| V2 | `aws:FederatedProvider`＝`cognito-idp.ap-northeast-1.amazonaws.com/<pool>` | できた |
+| V3 | `aws:FederatedProvider`＝`https://cognito-idp.ap-northeast-1.amazonaws.com/<pool>` | 拒否 |
+| V4 | `aws:FederatedProvider`がある（`Null`＝`false`） | できた |
+| V5 | `aws:FederatedProvider`がない（`Null`＝`true`） | 拒否 |
+
+| JWTを発行したセッション | `federated_provider` |
+|---|---|
+| 検証用のfederated role（OIDC providerで引き受けたセッション） | `cognito-idp.ap-northeast-1.amazonaws.com/<pool>` |
+| V0、V2、V4（federated roleからchainしたセッション） | ない |
+
+- chainしたセッションでも、SourceIdentityは同じ値のまま残った。
+- JWTの`federated_provider`の値も、条件キーと同じく、`https://`を除いた発行者だった。
+
+### 再現
+
+本体のスタック`Gekko08App`をデプロイしたうえで、このディレクトリで次を実行する。結果は`out-results.json`（git管理外）にも書く。
+
+```sh
+export AWS_REGION=ap-northeast-1
+npx cdk deploy              # 本体のUser PoolのIDとアプリクライアントのIDは、本体のスタックの出力から読む
+npx tsx scripts/run.ts      # テスト専用のユーザー（test-tokyo-manager）でログインし、6つのroleを試す
+npx cdk destroy
+```
+
+### 設計への示唆
+
+- 目的を刻むroleの信頼ポリシーで、`"aws:FederatedProvider": "cognito-idp.<region>.amazonaws.com/<User PoolのID>"`を条件にすれば、
+  このUser Poolで認証されたfederated roleのセッションだけが、目的を刻むroleを引き受けられる。IdPを実行時に確かめる2か所目になる。
+- 各ホップのJWTには元のIdPが残らないことは、変わらない。
