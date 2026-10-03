@@ -4,7 +4,8 @@
 
 **今有効な決定**：IdPはCognito User Poolで、Pre Token Generation V2がIDトークンにSourceIdentityだけを入れる。BFFがIDトークンで`AssumeRoleWithWebIdentity`を呼ぶ。Identity Poolsは使わない。
 
-採用（2026-09-30）。業務属性をIDトークンの`tags`に入れてsession tagsにする部分（決定2・3の業務属性、結果の業務属性とsession tagsの上限）は、
+採用（2026-09-30）。federated roleの信頼ポリシーによるIdPの限定は、[目的を刻むroleのIdPの確認のADR](20261003111952-purpose-role-federated-provider.md)で、
+目的を刻むroleの条件でも重ねて確かめるようにした。業務属性をIDトークンの`tags`に入れてsession tagsにする部分（決定2・3の業務属性、結果の業務属性とsession tagsの上限）は、
 [委任の範囲と業務上のアクセス権のADR](20260930150529-delegation-scope-and-entitlements.md)で置き換えた。今のPre Token GenerationはSourceIdentityだけを入れ、
 federated roleは`sts:TagSession`を許さない。
 

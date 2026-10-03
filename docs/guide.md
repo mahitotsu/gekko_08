@@ -265,6 +265,9 @@ Token Exchangeでは、認可サーバーがトークンを交換するたびに
 - 受け渡すセッションとJWTをログや応答に出さない。共通部品は出さないが、業務のコードで`event`全体をログに出すと漏れる。
 - Pre Token Generationトリガー、User Poolの設定、属性サービスのデータを守る。SourceIdentityの値はこのLambdaが決め、AWSは値の正しさを
   検証しない。業務上のアクセス権は属性サービスのデータがすべてを決める。
+- ユーザーを認証するIdPを足すときは、federated roleの信頼ポリシーと、目的を刻むroleの`aws:FederatedProvider`の条件の両方を変える。
+  片方だけを変えると、足したIdPのユーザーはリクエストを始められない（目的を刻むroleで拒否される）。条件の値は、OIDC providerのARNではなく、
+  `https://`を除いた発行者である（[検証](../experiments/federated-provider/RESULTS.md)）。
 
 ## 5. この構成が守らないもの
 

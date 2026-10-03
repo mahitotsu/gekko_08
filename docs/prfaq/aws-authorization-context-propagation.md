@@ -337,6 +337,8 @@ Token Exchangeと同じく「どのサービスから来たか（actor）」と�
 - **AWSへのロックイン**：AWS外との相互運用には、`GetWebIdentityToken`などでの変換が必要になる。
   受け手には「ユーザーは`sub`（roleのARN）ではなく`source_identity`で表される」と取り決めてもらう必要がある。
 - **受信側の実装の正しさ**：入口のIAMが確かめるのはactorだけで、JWTの検証は各サービスが正しく実装する必要がある。共通部品として提供する。
+- **元のIdPは各ホップに届かない**：各ホップが受け取るJWTには、ユーザーを認証したIdPが残らない。IdPを確かめられるのは、IdPのトークンでroleを引き受ける入口と、
+  そのセッションが次のroleを引き受けるときのIAMの条件だけである（[検証](../../experiments/federated-provider/RESULTS.md)）。
 - **レイテンシ**：ホップごとにSTSの呼び出し（chainとJWTの発行）が加わる。認可サーバーとの往復をSTSとの往復に置き換えた形で、
   回数は減らない。認可サーバーを近くに置いた構成より遅くなりうる。目標値は置かず、実測した値を公開している
   （JWTの発行と検証の実測は[Token Exchange相当の構成](../../experiments/actor-subject-jwt/RESULTS.md)、目的を刻むchainの実測は[検証](../../experiments/scope-tags/RESULTS.md)）。
