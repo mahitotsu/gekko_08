@@ -298,7 +298,7 @@ const mutations: { name: string; check: keyof typeof checks; mutate: (f: Fixture
   },
   {
     name: '呼び出し元の実行roleのDenyを消す', check: 'callerGuard',
-    mutate: (f, t) => {
+    mutate: (_f, t) => {
       for (const [id, x] of Object.entries<Json>(t.Resources)) {
         if (x.Type === 'AWS::IAM::Policy' && x.Properties.PolicyDocument.Statement.some((s: Json) => s.Effect === 'Deny')) delete t.Resources[id];
       }
@@ -306,7 +306,7 @@ const mutations: { name: string; check: keyof typeof checks; mutate: (f: Fixture
   },
   {
     name: '呼び出し元の実行roleのDenyの例外を広げる', check: 'callerGuard',
-    mutate: (f, t) => {
+    mutate: (_f, t) => {
       for (const x of Object.values<Json>(t.Resources)) {
         if (x.Type !== 'AWS::IAM::Policy') continue;
         for (const s of x.Properties.PolicyDocument.Statement) {

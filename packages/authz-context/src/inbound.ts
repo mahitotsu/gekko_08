@@ -53,7 +53,7 @@ export interface Verified {
 
 const jwksByIssuer = new Map<string, Promise<JWTVerifyGetKey>>();
 
-// JWKSは実行環境ごとにキャッシュする。joseは未知のkidのときだけ取り直す
+// JWKSは実行環境ごとにキャッシュする。joseは10分ごとと、未知のkidのときに取り直す（未知のkidによる取り直しは30秒に1回まで）
 function remoteKeys(issuer: string): Promise<JWTVerifyGetKey> {
   let keys = jwksByIssuer.get(issuer);
   if (!keys) {

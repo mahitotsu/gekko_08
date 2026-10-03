@@ -14,6 +14,7 @@
 | [デモの画面はReactの静的なSPA](../adr/20261002065842-demo-ui-react-static.md) | 画面の作り |
 | [監査サービス](../adr/20261002074437-audit-service.md) | 各ホップのログとCloudTrailを、JWTの`jti`で突き合わせる |
 | [リクエストIDのtag](../adr/20261002154129-request-id-transitive-tag.md) | リクエストIDをtransitive session tagとして刻み、各chainのセッション名をその値に限る |
+| [目的を刻むroleのIdPの確認](../adr/20261003111952-purpose-role-federated-provider.md) | 目的を刻むroleは、このUser Poolで認証されたセッション（`aws:FederatedProvider`）だけを受け付ける |
 | [入口はBFF](../adr/20260930083437-entry-via-bff.md) | ブラウザに認証情報を持たせない |
 | [IdPはCognito User Pool](../adr/20260930091026-idp-cognito-user-pool.md) | IdPとPre Token Generation |
 | [ホップはLambdaとFunction URL、mTLSは使わない](../adr/20260930091257-lambda-function-url-without-mtls.md) | ホップの形と入口の認証 |
@@ -176,7 +177,7 @@ sequenceDiagram
 画面（`web/`）は、ReactとViteで作る静的なSPAである（[画面のADR](../adr/20261002065842-demo-ui-react-static.md)）。
 
 - 操作ごとに、リクエストの目的、リクエストID、結果、拒否したときはその層を表示する。
-- 理由から層への対応（`scope does not allow the action`は委任の範囲、`no entitlement`と`branch mismatch`は業務上のアクセス権）は、表示にだけ使う。
+- 理由から層への対応（`scope does not allow the action`は委任の範囲、`no entitlement`・`branch mismatch`・`unknown user`は業務上のアクセス権、`account is not frozen`は口座の状態）は、表示にだけ使う。
 - 画面は、ユーザーに応じて操作を隠さない。
 
 ## 4. ホップ間の呼び出し
@@ -209,7 +210,7 @@ sequenceDiagram
 - ホップを呼ぶ署名は、常に呼び出し元の実行roleで行う。chain用role（bffでは目的を刻むrole）のセッションは、JWTを作るためと、次のホップに渡すためだけに使い、
   ホップを呼ぶ権限を持たない（SR-1）。
 - bffは、chainをせずに、目的を刻むroleのセッションでJWTを作る（上の図の`GetWebIdentityToken`から）。
-- JWTの`Tags`のscopeは、業務のコードが呼び出しごとに指定する。利用側の定義でその呼び出し先に1つしか求めていなければ省略できる。
+- JWTの`Tags`のscopeの選び方は、§6の送信時にある。
 
 ### 委任の範囲
 
@@ -294,7 +295,7 @@ flowchart LR
 | すべて | 自分のデータ（DynamoDB）へのアクセス、ログ出力、トレースの送信（`xray:PutTraceSegments`。§7）。呼び出し先ごとに、自分の関数以外からの呼び出しをDenyする文（下の「呼び出し元の関数の限定」） |
 | fraud-agent | モデル用のroleの引き受け |
 | bff | セッションのテーブルと、SSMのパラメータ |
-| audit-service | `cloudtrail:LookupEvents`と、各ホップのロググループに限った`logs:StartQuery`・`logs:GetQueryResults`・`logs:StopQuery` |
+| audit-service | `cloudtrail:LookupEvents`、各ホップのロググループに限った`logs:StartQuery`、`logs:GetQueryResults`（照会のIDで扱う操作なので、ロググループには限れない） |
 
 ホップの呼び出しの許可は、実行roleに付けない。呼び出し先のresource policyで許可する。
 
@@ -431,7 +432,7 @@ bffの入口は、CloudFrontのサービスプリンシパルを`AWS:SourceArn`�
 - 4の対応表（実行role名 → 呼び出し元のホップ名とchain用roleのARN）は、デプロイ時に環境変数で渡す。
 - 7は、IAMが発行させない組み合わせなので、通常は起きない。IAMの設定の誤りや手での変更を、提供側の定義で止めるための照合である。
 - JWKSはメモリにキャッシュし、10分ごとか、未知の`kid`のときに取り直す。未知の`kid`による取り直しは30秒に1回まで。
-- 通ったら、subject、呼び出し元のホップ名（actor）、scopeを業務のコードに渡す。目的は渡さない（ログとトレースには出す）。ヘッダーや引数に含まれるユーザー情報は使わない。
+- 通ったら、subject、呼び出し元のホップ名（actor）、scope、照合済みのリクエストID（ログ用）を業務のコードに渡す。目的は渡さない（ログとトレースには出す）。ヘッダーや引数に含まれるユーザー情報は使わない。
 - 業務のコードが例外を投げたら500を返す。
 
 **送信時**：§4の手順を行う。
@@ -564,9 +565,6 @@ flowchart TD
 
 - **ホップが侵害された場合**：画面では再現できないので、シナリオテストで確かめる（§10）。案件を開くリクエストやエージェントのリクエストのcase-serviceのセッションからは、
   account-service宛てに`account:unfreeze`のJWTを発行できない。
-- **繰り返し**：解除は口座の状態を変える。デモを繰り返すときは、READMEのコマンドで口座を凍結し直す。
-- **保証の範囲**：示せるのは「エージェントのリクエストからは解除できない」ことで、「人間が操作したことの証明」ではない。bffは目的を決める信頼の起点で、
-  bffが侵害されれば、どの目的でも刻める。
 
 ### 監査
 
@@ -747,6 +745,8 @@ Cognito User Poolのカスタム属性`custom:branch`は使わない。User Pool
 
 ### 単体テスト
 
+**共通部品**（`packages/authz-context/test/`）：受信時の検証（§6の表の各段階での拒否、ES384以外の署名、発行者の違い）、業務のコードに渡す値（目的を渡さないこと）、送信時に予約したヘッダーを除くこと、MCPの部品、トレースの属性と引き継ぎ、スパンに認証情報を入れないこと。
+
 **監査の突き合わせ**：AWSを呼ばない純粋な関数（`services/audit-service/src/reconcile.ts`）を確かめる。応答の型（`src/api.ts`）は、画面とシナリオテストも参照する。
 
 - CloudTrailのイベントから突き合わせの項目だけを取り出し、認証情報もARNも残さないこと
@@ -777,11 +777,6 @@ Cognito User Poolのカスタム属性`custom:branch`は使わない。User Pool
 | `aud`の条件：このUser Poolの発行者の`aud`が、このアプリクライアントのID | `aud`を別のアプリクライアントにする |
 | OIDC provider：このUser Poolの発行者で、受け付けるクライアントはこのアプリクライアントだけ | 別のUser Poolにする、別のクライアントも受け付ける |
 
-**属性サービス**（`services/entitlement-service/test/`）：本文で別のユーザーを指定しても、JWTのsubject本人の分だけを読んで返すこと。
-
-**fraud-agent**（`services/fraud-agent/test/`）：Claude Codeの子プロセスに、組み込みのツールを無効にして中継のツールだけを許すこと、環境変数を引き継がず決めたものだけを渡すこと、
-AWSの認証情報はモデル用のroleのもので実行roleのものではないこと。
-
 **目的を刻むroleのテンプレート**：
 
 | 確かめること | わざと壊して、見逃さないことを確かめる条件 |
@@ -790,6 +785,11 @@ AWSの認証情報はモデル用のroleのもので実行roleのものではな
 | セッション名を`requestId`のtagと同じ値に限ること | セッション名の条件を外す |
 | tagのキーが`purpose`と`requestId`だけで、目的の値が一覧だけであること | 目的の値の制限を外す、目的を増やす |
 | federated roleが、目的を刻むroleへのchainだけを持つこと | — |
+
+**属性サービス**（`services/entitlement-service/test/`）：本文で別のユーザーを指定しても、JWTのsubject本人の分だけを読んで返すこと。
+
+**fraud-agent**（`services/fraud-agent/test/`）：Claude Codeの子プロセスに、組み込みのツールを無効にして中継のツールだけを許すこと、環境変数を引き継がず決めたものだけを渡すこと、
+AWSの認証情報はモデル用のroleのもので実行roleのものではないこと。
 
 ## 11. 前提条件と制約
 

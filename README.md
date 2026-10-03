@@ -37,9 +37,9 @@ AWS上のマイクロサービスで、Authorization Context（誰の権限で�
 
 | ディレクトリ | 内容 |
 |---|---|
-| [infra/](infra/) | CDKアプリ（単一のスタック`Gekko08App`）と、`Hop`のテンプレートと委任の範囲の定義の単体テスト |
+| [infra/](infra/) | CDKアプリ（単一のスタック`Gekko08App`）と、IAMのテンプレート（`Hop`、目的を刻むrole、federated role）と委任の範囲の定義の単体テスト |
 | [packages/authz-context/](packages/authz-context/) | 各ホップが使う共通部品。JWTの検証、chain、JWTの発行、署名付きの呼び出し、エージェントからMCPサーバーを呼ぶ部品、トレースと構造化ログ |
-| [services/](services/) | 各Lambdaのハンドラーと、サービスごとの委任の範囲の定義（`authz.ts`） |
+| [services/](services/) | 各Lambdaのハンドラーと、サービスごとの委任の範囲の定義（`authz.ts`）。audit-service、entitlement-service、fraud-agentには単体テストもある |
 | [web/](web/) | デモの画面（ReactとViteの静的なSPA。合成のときにビルドする） |
 | [tests/](tests/) | 要件のIDにひも付けたシナリオテスト |
 
@@ -140,7 +140,7 @@ aws cognito-idp admin-set-user-password --user-pool-id "$POOL" --username suzuki
 aws cloudformation describe-stacks --stack-name Gekko08App --query "Stacks[0].Outputs[?OutputKey=='WebUrl'].OutputValue" --output text
 ```
 
-シナリオテストは、専用のユーザー（`test-tokyo-manager`、`test-osaka-officer`）とその人事データ、専用の案件と口座（`TC-`、`TA-`で始まるもの）を
+シナリオテストは、専用のユーザー（`test-tokyo-manager`、`test-osaka-officer`、`test-auditor`）とその人事データ、専用の案件と口座（`TC-`、`TA-`で始まるもの）を
 自分で用意して使う。デモのデータには触れないので、テストを流したあとも、設定したパスワードでログインでき、デモの口座の状態も変わらない。
 
 ### 試す

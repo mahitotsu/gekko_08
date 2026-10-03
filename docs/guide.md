@@ -10,16 +10,9 @@
 確かめられず、委任の範囲（scope）も絞れない。OAuth Token Exchangeは正攻法だが、認可サーバーを運用する必要がある。
 
 この参照実装は、Token Exchangeと同等の検証を、認可サーバーもサイドカーも置かずに、Cognito・STS・IAM・Lambdaだけで行う（違いは[PRFAQ Q1](prfaq/aws-authorization-context-propagation.md#q1-oauth-token-exchangeと何が違うのか)）。
-各ホップは、受け取った呼び出しについて次の4つを確かめられる。
-
-| 確かめること | Token Exchangeでの担い手 | この参照実装での担い手 |
-|---|---|---|
-| 誰の代理か（subject） | トークンの`sub` | STSが署名したJWTの`source_identity` |
-| どのサービスから来たか（actor） | 呼び出し元のクライアント認証 | 入口のIAM（呼び出し元の実行roleと関数） |
-| 自分宛てか | トークンの`aud` | JWTの`aud` |
-| 委任の範囲 | トークンの`scope`（交換のたびに絞る） | リクエストの目的（`principal_tags.purpose`）とホップごとのscope（`request_tags.scope`）。値はIAMが強制する |
-
-そのうえで、業務上のアクセス権（このユーザーはこのデータを扱ってよいか）はトークンに入れず、属性サービスから判定のときに得る。
+各ホップは、受け取った呼び出しについて、誰の代理か、どのサービスから来たか、自分宛てか、委任の範囲の4つを確かめられる。
+それぞれをAWSのどの仕組みが担うかは、[§2](#2-仕組み)の「要素の対応」にある。そのうえで、業務上のアクセス権（このユーザーはこのデータを扱ってよいか）は
+トークンに入れず、属性サービスから判定のときに得る。
 
 ### 特殊詐欺の手口に置き換えると
 
@@ -137,6 +130,7 @@ sequenceDiagram
 | JWTの`sub`を呼び出し元と照合する | 入口を通った呼び出し元と、JWTを作ったchain用roleが対応していることを確かめ、別経路で作られたJWTの持ち込みを防ぐ | [設計書§6](design/architecture.md#6-受信側の共通部品と判定) |
 | 入口はBFFにし、ブラウザには認証情報を持たせない | ブラウザは秘密を保持できない。ブラウザには実行roleがなく、actorを確かめられない。リクエストの目的を決める場所としても、サーバー側の入口が要る | [入口のADR](adr/20260930083437-entry-via-bff.md) |
 | IdPはCognito User PoolとPre Token Generation V2 | 1回の`AssumeRoleWithWebIdentity`でSourceIdentityを設定できる | [IdPのADR](adr/20260930091026-idp-cognito-user-pool.md) |
+| ユーザーを認証したIdPを、federated roleと目的を刻むroleの2か所で確かめる | 各ホップのJWTには元のIdPが残らないので、ホップでは確かめられない。目的を刻むroleで`aws:FederatedProvider`を条件にすれば、federated roleの信頼ポリシーを1か所誤っても、別のIdPのユーザーはリクエストを始められない | [IdPの確認のADR](adr/20261003111952-purpose-role-federated-provider.md)、[検証](../experiments/federated-provider/RESULTS.md) |
 | ホップ間はFunction URLの`AWS_IAM`認証で、mTLSは使わない | 参加資格をネットワークではなくIAMで守れる。SPIREのような常駐コンポーネントが要らない | [コンピュートと通信のADR](adr/20260930091257-lambda-function-url-without-mtls.md) |
 | エージェントはClaude Agent SDKで作り、MCPは関数の中の中継から共通部品で呼ぶ | 広く使われているフレームワークでも同じ境界を保てることを示す。SDKのMCPには固定のヘッダーしか付けられないので、認証情報を持つ親のプロセスが中継する。中継をHTTPにすると、トレースの親子関係も一続きになった | [Claude Agent SDKのADR](adr/20261001040729-fraud-agent-on-claude-agent-sdk.md)、[検証](../experiments/agent-frameworks/RESULTS.md) |
 | トレースはOTLPで出し、関数の中のSDKが署名してCloudWatchに直接送る。メトリクスは出さず、件数や時間はログから集計する | 常駐するものも固定費もなく、レイヤーや拡張機能も要らない。実測で、直接送信はADOTのレイヤーやコレクターのレイヤーより要件に合った。子プロセス（Claude Code）のトレースも親が署名して転送できる | [収集先のADR](adr/20261001020115-telemetry-destination-cloudwatch.md)、[送り方のADR](adr/20261001053646-telemetry-direct-export.md)、[検証](../experiments/otel-export/RESULTS.md) |
@@ -212,7 +206,7 @@ Token Exchangeでは、認可サーバーがトークンを交換するたびに
    呼び出し元（この例ではcase-service）の`authz.ts`の`consumes`にも`orders`を加える。定義は[app-stack.ts](../infra/lib/app-stack.ts)の
    `DELEGATION_DEFINITIONS`に、ホップは`connectHops`に渡すホップの表に加える。整合しなければ、合成が失敗して理由を示す。
 
-5. **業務のコードを書く。** `createHopHandler`に業務の関数を渡す。受け取るのは検証済みの`subject`・`actor`・`scope`と、
+5. **業務のコードを書く。** `createHopHandler`に業務の関数を渡す。受け取るのは検証済みの`subject`・`actor`・`scope`、照合済みの`requestId`（ログ用）と、
    次のホップを呼ぶ`call`だけで、JWTも認証情報も、リクエストの目的も扱わない。scopeで操作を、属性サービスのアクセス権でデータを判定する。
    次のホップを呼ぶときは、付けるscopeを指定する（呼び出し先に1つしか求めていなければ省ける。例：`call('orders', body, { scope: 'orders:cancel' })`）。
    AWS SDKのクライアントは`traceAwsClient`で包み、呼び出しをトレースに出す。
@@ -439,7 +433,7 @@ filter message = "handled" and hop = "case-service"
   | stats count(*)
   ```
 
-- 入口のIAMで拒否された呼び出しは、関数のログにもCloudTrailのこれらのイベントにも出ない（Lambdaのデータイベントを記録していれば、そこに出る）。
+- 入口のIAMで拒否された呼び出しは、CloudTrailのこれらのイベントにも出ない（関数のログに出ないことは[ログで集計する](#ログで集計する)のとおり）。Lambdaのデータイベントを記録していれば、そこに出る。
 - リクエストIDは、bffがリクエストの目的と同じくtransitive session tagとして刻み、各chainのセッション名をIAMがその値に限る。乗っ取られたホップも、
   自分と下流のイベントをリクエストIDで引けなくすることはできない（[§5](#5-この構成が守らないもの)）。ただしbffは任意の値を刻めるので、bffの侵害を疑うときは、
   CloudTrailの`sourceIdentity`、呼んだ主体（`userIdentity.arn`のrole）、時刻でも突き合わせる。
@@ -477,13 +471,11 @@ case-serviceとaccount-serviceはそれぞれ属性サービスも呼ぶ）を10
 ### 規模の上限
 
 ホップが増えたときに先に上限になるのは、構成の大きさではIAMのポリシーの大きさ（chain用roleの信頼ポリシーとインラインポリシー。呼び出し元・呼び出し先が
-十前後）、処理量ではSTSのAPIの呼び出し回数である。上限の一覧と、経路ごとのSTSの呼び出し回数は
+十前後）、処理量ではSTSのAPIの呼び出し回数（`AssumeRole`などが共有する毎秒600件。[IAMとSTSのクォータ](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_iam-quotas.html#reference_iam-quotas-sts-requests)）である。
+上限の一覧と、経路ごとのSTSの呼び出し回数、そこから求めた目安（案件を開くリクエストでアカウント全体の毎秒約200リクエスト）は、
 [設計書§11](design/architecture.md#11-前提条件と制約)にある。
 
-- 文書にある上限は、`AssumeRole`などが共有する毎秒600件（アカウント・リージョンごと。[IAMとSTSのクォータ](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_iam-quotas.html#reference_iam-quotas-sts-requests)）である。参照実装では、chainのたびに`AssumeRole`を呼ぶ。
-  案件を開くリクエストでは1回あたり3回なので、アカウント全体でおよそ毎秒200リクエストが目安になる。
-- JWTの発行（`GetWebIdentityToken`）は、ホップへの呼び出しのたびに行うので、`AssumeRole`より回数が多い。ところが、その上限は文書にも
-  Service Quotasにも記載がない。リクエストごとに呼ぶ`AssumeRoleWithWebIdentity`も同じである。この参照実装では、両者の上限を確認できなかった。
+- `GetWebIdentityToken`と`AssumeRoleWithWebIdentity`の上限は、文書にもService Quotasにも記載がなく、確認できなかった。
   負荷をかけて観測しても、その日、そのアカウントでの値にすぎず、上限の根拠にはならないので、実測もしていない。
 
 上限に近づいたときの対処の方向：

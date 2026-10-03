@@ -123,7 +123,7 @@ export class Gekko08AppStack extends cdk.Stack {
       hopName: 'audit-service', entry: 'services/audit-service/src/index.ts', issuer, callsOthers: true,
     });
     auditService.fn.addToRolePolicy(new iam.PolicyStatement({ actions: ['cloudtrail:LookupEvents'], resources: ['*'] }));
-    auditService.fn.addToRolePolicy(new iam.PolicyStatement({ actions: ['logs:GetQueryResults', 'logs:StopQuery'], resources: ['*'] }));
+    auditService.fn.addToRolePolicy(new iam.PolicyStatement({ actions: ['logs:GetQueryResults'], resources: ['*'] }));
 
     // 入口
     const bff = new Bff(this, 'Bff');

@@ -332,7 +332,7 @@ Token Exchangeと同じく「どのサービスから来たか（actor）」と�
   縛られないが、判定のたびに権限のデータ源への問い合わせが加わり、判定のロジックは各サービスに散らばる（Cedarとの関係は[外部FAQ Q9](#q9-amazon-verified-permissionsやcedaraws-verified-accessとどう関係するのか)）。
 - **scopeの絞り込みは、デプロイ時の宣言で決まる**：Token Exchangeのように、実行時の状況に応じて絞ることはできない。
 - **STSへの呼び出しは毎ホップ残る**：認可サーバーへの往復はなくなるが、STSのスロットリングは見積もる必要がある。
-  `AssumeRole`の呼び出し回数の上限は文書にあるが、ホップへの呼び出しのたびに使う`GetWebIdentityToken`と、ログインの
+  `AssumeRole`の呼び出し回数の上限は文書にあるが、ホップへの呼び出しのたびに使う`GetWebIdentityToken`と、リクエストごとに使う
   `AssumeRoleWithWebIdentity`の上限は、文書にもService Quotasにもなく、確認できなかった。
 - **AWSへのロックイン**：AWS外との相互運用には、`GetWebIdentityToken`などでの変換が必要になる。
   受け手には「ユーザーは`sub`（roleのARN）ではなく`source_identity`で表される」と取り決めてもらう必要がある。
