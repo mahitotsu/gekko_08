@@ -37,9 +37,9 @@ AWS上のマイクロサービスで、Authorization Context（誰の権限で�
 
 | ディレクトリ | 内容 |
 |---|---|
-| [infra/](infra/) | CDKアプリ（単一のスタック`Gekko08App`）と、IAMのテンプレート（`Hop`、目的を刻むrole、federated role）と委任の範囲の定義の単体テスト |
+| [infra/](infra/) | CDKアプリ（単一のスタック`Gekko08App`）と、IAMのテンプレート（`Hop`、目的を刻むrole、federated role）、委任の範囲の定義、cdk-nagの単体テスト |
 | [packages/authz-context/](packages/authz-context/) | 各ホップが使う共通部品。JWTの検証、chain、JWTの発行、署名付きの呼び出し、エージェントからMCPサーバーを呼ぶ部品、トレースと構造化ログ |
-| [services/](services/) | 各Lambdaのハンドラーと、サービスごとの委任の範囲の定義（`authz.ts`）。audit-service、entitlement-service、fraud-agentには単体テストもある |
+| [services/](services/) | 各Lambdaのハンドラーと、サービスごとの委任の範囲の定義（`authz.ts`）。bff、audit-service、entitlement-service、fraud-agent、fraud-mcpには単体テストもある |
 | [web/](web/) | デモの画面（ReactとViteの静的なSPA。合成のときにビルドする） |
 | [tests/](tests/) | 要件のIDにひも付けたシナリオテスト |
 
@@ -109,7 +109,9 @@ Cognitoのセルフサインアップは無効なので、利用者を作れる�
 ```sh
 export AWS_REGION=ap-northeast-1
 npm install
-npm test                          # 単体テスト（共通部品、監査の突き合わせ、属性サービス、fraud-agent、IAMのテンプレート、委任の範囲の定義）
+npm run typecheck                 # 型の検査
+npm run lint                      # 静的検査（ESLint）
+npm test                          # 単体テスト（共通部品、各サービス、IAMのテンプレート、委任の範囲の定義、cdk-nag）
 npm run deploy                    # スタック Gekko08App をデプロイする（5分ほど）
 npm run test:scenario             # デプロイしたスタックに対するシナリオテスト（4〜5分。トレースの到着を待つ）
 npm run test:scenario:cloudtrail  # CloudTrailでの追跡も確かめる（最大15分ほどかかる）

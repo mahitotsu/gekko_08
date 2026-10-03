@@ -23,6 +23,7 @@
 | [実装言語はTypeScript](../adr/20260930093745-implementation-language-typescript.md) | 実装言語 |
 | [エージェントとMCPサーバーもLambdaのホップ](../adr/20260930093746-agent-and-mcp-on-lambda.md) | エージェントとMCPの置き場所 |
 | [エージェントはClaude Agent SDK、MCPは関数の中の中継から](../adr/20261001040729-fraud-agent-on-claude-agent-sdk.md) | エージェントの実装 |
+| [MCPサーバーは公式SDK](../adr/20261003144613-fraud-mcp-on-official-sdk.md) | MCPサーバーの実装（提案） |
 | [トレースの収集先はCloudWatch、メトリクスは出さない](../adr/20261001020115-telemetry-destination-cloudwatch.md) | トレースの収集先 |
 | [トレースは関数の中のSDKが署名して直接送る](../adr/20261001053646-telemetry-direct-export.md) | トレースの送り方 |
 
@@ -292,10 +293,10 @@ flowchart LR
 
 | 対象 | 権限 |
 |---|---|
-| すべて | 自分のデータ（DynamoDB）へのアクセス、ログ出力、トレースの送信（`xray:PutTraceSegments`。§7）。呼び出し先ごとに、自分の関数以外からの呼び出しをDenyする文（下の「呼び出し元の関数の限定」） |
+| すべて | 自分のデータ（DynamoDB）へのアクセス、ログ出力、トレースの送信（`xray:PutTraceSegments`。§7。ほかの権限と分けたポリシーに置く）。呼び出し先ごとに、自分の関数以外からの呼び出しをDenyする文（下の「呼び出し元の関数の限定」） |
 | fraud-agent | モデル用のroleの引き受け |
 | bff | セッションのテーブルと、SSMのパラメータ |
-| audit-service | `cloudtrail:LookupEvents`、各ホップのロググループに限った`logs:StartQuery`、`logs:GetQueryResults`（照会のIDで扱う操作なので、ロググループには限れない） |
+| audit-service | `cloudtrail:LookupEvents`、各ホップのロググループに限った`logs:StartQuery`、`logs:GetQueryResults`（照会のIDで扱う操作なので、ロググループには限れない）。ほかの権限と分けたポリシーに置く |
 
 ホップの呼び出しの許可は、実行roleに付けない。呼び出し先のresource policyで許可する。
 
@@ -432,8 +433,13 @@ bffの入口は、CloudFrontのサービスプリンシパルを`AWS:SourceArn`�
 - 4の対応表（実行role名 → 呼び出し元のホップ名とchain用roleのARN）は、デプロイ時に環境変数で渡す。
 - 7は、IAMが発行させない組み合わせなので、通常は起きない。IAMの設定の誤りや手での変更を、提供側の定義で止めるための照合である。
 - JWKSはメモリにキャッシュし、10分ごとか、未知の`kid`のときに取り直す。未知の`kid`による取り直しは30秒に1回まで。
-- 通ったら、subject、呼び出し元のホップ名（actor）、scope、照合済みのリクエストID（ログ用）を業務のコードに渡す。目的は渡さない（ログとトレースには出す）。ヘッダーや引数に含まれるユーザー情報は使わない。
+- 検証の拒否ではない失敗（発行者の公開鍵を取得できないなど）は、呼び出し元の誤りではないので500を返す。
+- 通ったら、本文を読む。JSONのオブジェクトでなければ、業務のコードを呼ばずに400を返す。
+- 業務のコードには、subject、呼び出し元のホップ名（actor）、scope、照合済みのリクエストID（ログ用）、本文、受信したヘッダーを渡す。
+  ヘッダーからは、JWT（`x-authz-context`）、受け渡されたセッション（`x-authz-session`）、署名のヘッダー（`authorization`、`x-amz-*`）を除く（SR-3）。
+  目的は渡さない（ログとトレースには出す）。業務のコードは、ヘッダーや引数に含まれるユーザー情報を使わない。
 - 業務のコードが例外を投げたら500を返す。
+- 設定（ホップ名、宛先、発行者、対応表、提供側・利用側の定義）は、CDKが環境変数で渡す。必須の環境変数がなければ、関数の初期化で、変数の名前を示して失敗させる。
 
 **送信時**：§4の手順を行う。
 
@@ -447,7 +453,7 @@ bffの入口は、CloudFrontのサービスプリンシパルを`AWS:SourceArn`�
 | 部品 | 形 | 使う場面 | 動き |
 |---|---|---|---|
 | `HopMcpTransport` | 直接型。MCPの`Transport` | MCPクライアントを差し替えられるフレームワーク | 1つのメッセージを1回の送信で送る |
-| `startMcpRelay` | 中継型。`127.0.0.1`で受ける | MCPクライアントを差し替えられず、固定のヘッダーしか付けられないフレームワーク（Claude Agent SDK） | 受けたMCPのメッセージを、送信時の手順でそのまま呼び出し先へ転送する。認可の判断はせず、MCPのプロトコルも解釈しない（`initialize`などにも呼び出し先が応える）。受け取った`traceparent`を転送するときのコンテキストにし、自分のスパンは作らない。POST以外には405を、転送に失敗したら502のJSON-RPCのエラーを返す |
+| `startMcpRelay` | 中継型。`127.0.0.1`で受ける | MCPクライアントを差し替えられず、固定のヘッダーしか付けられないフレームワーク（Claude Agent SDK） | 受けたMCPのメッセージを、MCPのヘッダー（`mcp-`で始まるもの）とともに、送信時の手順でそのまま呼び出し先へ転送する。認可の判断はせず、MCPのプロトコルも解釈しない（`initialize`などにも呼び出し先が応える）。受け取った`traceparent`を転送するときのコンテキストにし、自分のスパンは作らない。POST以外には405を、転送に失敗したら502のJSON-RPCのエラーを返す |
 
 どちらも、呼び出し先が受け付けたメッセージ（200か202）とその応答を業務のコードに知らせる（fraud-agentはツールの呼び出しの記録に使う）。
 呼び出し先の入口で拒否された（401や403）呼び出しは知らせない。
@@ -637,7 +643,7 @@ flowchart LR
 | Claude Codeの標準エラー出力 | 中身をClaude Codeが決め、プロンプトやツールの入出力が入らないとは保証できないので、既定ではログに出さない。失敗の原因（Bedrockの権限やモデルの利用の申請など）を調べるときだけ、`cdk deploy -c agentLogStderr=true`でデプロイすると、環境変数`AGENT_LOG_STDERR=1`が付き、異常終了したときに末尾（2,000文字）をログに出す。有効にしている間は、Claude Codeが書く内容がそのままログに入るので、調べ終えたら付けずにデプロイし直す |
 | 関数 | メモリは1024MB。成果物（展開後）は約246MBで、そのうち実行ファイルが約241MB。合成のときに大きさを確かめ、255,000,000バイトを超えたら失敗させる（関数とレイヤーを合わせた展開後の上限は250MiB）。超えたら、コンテナイメージに切り替える |
 
-**MCPサーバー（fraud-mcp）**：Streamable HTTPのステートレスなサーバーで、SSEを使わずJSONで応答する。認可の判断はせず、呼び出し先のホップの結果（HTTPステータスを含む）をそのまま返す。
+**MCPサーバー（fraud-mcp）**：MCPの公式SDKのv2（`@modelcontextprotocol/server`）で作る、Streamable HTTPのステートレスなサーバーで、SSEを使わずJSONで応答する（[MCPサーバーは公式SDKのADR](../adr/20261003144613-fraud-mcp-on-official-sdk.md)）。認可の判断はせず、呼び出し先のホップの結果（HTTPステータスを含む）をそのまま返す。
 
 | ツール | 呼び出し先（scope） | 備考 |
 |---|---|---|
@@ -645,7 +651,8 @@ flowchart LR
 | `get_account` | account-service（`account:read`） | — |
 | `unfreeze_account` | account-serviceに解除を依頼する（`account:read`） | 付けられるscopeが`account:read`だけなので、常に拒否される。ツールの一覧ではなく委任の範囲が境界であることを見せるためのデモ用のツール |
 
-- プロトコルの版は`2026-07-28`・`2025-11-25`・`2025-06-18`に応じる。`ping`にも応え、通知には本文なしの202を返す。
+- 1回の呼び出しごとにサーバーを作り、ツールは、その呼び出しで受け取った委任（共通部品の`call`）で業務のホップを呼ぶ。引数はスキーマで検証し、合わなければ業務のホップを呼ばない。
+- 2025年の版（`initialize`で始める版）は`WebStandardStreamableHTTPServerTransport`（セッションなし）で、`2026-07-28`版は`createMcpHandler`で応える。応じる版はSDKが決める。通知には本文なしの202を返す。
 - MCPの仕様では認可は任意で、HTTPではOAuthに従うことが推奨される。fraud-mcpはOAuthではなく、他のホップと同じ入口（実行roleとJWT）で守る。
 
 **タイムアウト**
@@ -665,10 +672,24 @@ npmのワークスペース（`infra`、`packages/*`、`services/*`、`web`、`t
 |---|---|
 | `infra/` | CDKアプリ（単一のスタック`Gekko08App`。リージョンは`infra/lib/region.ts`の`REGION`＝ap-northeast-1に固定する）と、テンプレートの単体テスト（`infra/test/`。§10） |
 | `packages/authz-context/` | 受信側・送信側の共通部品、MCPの部品、トレース（§6、§7） |
-| `services/<名前>/` | 各Lambdaのハンドラー（bff、case-service、account-service、entitlement-service、fraud-agent、fraud-mcp、audit-service、pretoken）と、委任の範囲の定義（`authz.ts`。§4） |
+| `services/<名前>/` | 各Lambdaのハンドラー（bff、case-service、account-service、entitlement-service、fraud-agent、fraud-mcp、audit-service、pretoken）と、委任の範囲の定義（`authz.ts`。§4）。応答の型を他のパッケージが使うサービスは、`src/api.ts`に置く（bff、entitlement-service、audit-service） |
 | `web/` | デモの画面（ReactとViteの静的なSPA。§3） |
 | `tests/` | シナリオテスト（§10） |
 | `experiments/` | 実機の検証（検証記録とその構成。本体からは参照しない） |
+
+パッケージは、他のパッケージに使わせるものを`package.json`の`exports`で宣言し（`authz.ts`、`api.ts`など）、使う側は依存として宣言して、パッケージ名で参照する。
+相対パスで他のパッケージのファイルを参照しない。bffは、設定（`config.ts`）、ログインとセッション（`session.ts`）、経路（`routes.ts`）、
+目的を刻むchain（`chain.ts`）に分け、`index.ts`で組み合わせる。
+
+ビルドと検査：
+
+| 対象 | 道具 | 設定 |
+|---|---|---|
+| 型 | TypeScript（`npm run typecheck`） | 共通の設定（`tsconfig.base.json`。`strict`、`noUncheckedIndexedAccess`、`verbatimModuleSyntax`など）を、サーバー側（`tsconfig.json`。Node.jsの型だけ）と画面（`web/tsconfig.json`。DOMの型だけ）が継承する。出力はesbuildとViteが作る |
+| 静的検査 | ESLint（`npm run lint`） | typescript-eslintの、型情報を使う推奨の規則と、画面にはReact Hooksの規則。`any`の値は使わない（合成したCloudFormationのテンプレートを読むinfraのテストだけ例外）。`require-await`は無効にする（Promiseを返す約束を示す`async`も指摘するため。待ち忘れは`no-floating-promises`が見つける） |
+| 単体テスト | Vitest（`npm test`） | ルートの`vitest.config.ts`の`projects`で、テストを持つワークスペースをまとめて走らせる。1つだけ走らせるときは`npm test -- --project <パッケージ名>` |
+| CDK | cdk-nag（AwsSolutions） | 合成のたびに確かめ、認めていない指摘があれば合成を止める。採らない指摘は、リソースを作るコンストラクトで理由を付けて認める（`acknowledgeNag`）。ワイルドカードを認める権限は、ほかの権限と分けたポリシーに置く |
+| CDK | feature flag | `cdk.json`に、aws-cdk-libの推奨値を置く。`@aws-cdk/aws-iam:minimizePolicies`だけは`false`にする（federated roleの信頼ポリシーの`aud`の条件（`CfnJson`）と、文の併合が循環参照になるため）。テンプレートの単体テストも同じcontextで合成する |
 
 Lambdaの関数の既定値（`NodeFunction`）：
 
@@ -676,7 +697,7 @@ Lambdaの関数の既定値（`NodeFunction`）：
 |---|---|
 | ランタイム | Node.js 24、arm64 |
 | メモリ、タイムアウト | 512MB、30秒 |
-| ログ | 保持1週間、形式はJSON（アプリのログのレベルはINFO） |
+| ログ | 保持1週間、形式はJSON（アプリのログのレベルはINFO）。ロググループはスタックと一緒に消し、名前はCDKが生成する。CDKが内部で作る関数（カスタムリソース、`BucketDeployment`）にも同じロググループを渡す |
 | バンドル | esbuildでESMの1ファイルにまとめ、AWS SDKも同梱し、ソースマップを付ける |
 
 `Gekko08AppStack`は、検証で構成を足せるように、`issuer`・`bff`・`fraudMcp`・`bedrockResources`を公開する。
@@ -701,9 +722,11 @@ Cognito User Poolのカスタム属性`custom:branch`は使わない。User Pool
 | シナリオテスト | デプロイしたスタック | `npm run test:scenario`（CloudTrailの確認は`npm run test:scenario:cloudtrail`） | する |
 | 共通部品の単体テスト | `packages/authz-context` | `npm test` | しない |
 | 監査の突き合わせの単体テスト | `services/audit-service/src/reconcile.ts`（テストは`services/audit-service/test/`） | `npm test` | しない |
-| テンプレートの単体テスト | `Hop`、目的を刻むrole、federated role、委任の範囲の定義の突き合わせ | `npm test` | しない |
+| テンプレートの単体テスト | `Hop`、目的を刻むrole、federated role、委任の範囲の定義の突き合わせ、cdk-nag（AwsSolutions） | `npm test` | しない |
+| bffの経路の単体テスト | `services/bff/src/routes.ts`（経路ごとの目的、最初のホップ、scope） | `npm test` | しない |
 | 属性サービスの単体テスト | `services/entitlement-service` | `npm test` | しない |
 | fraud-agentの単体テスト | `services/fraud-agent`（子プロセスに渡す設定） | `npm test` | しない |
+| fraud-mcpの単体テスト | `services/fraud-mcp`（2025年の版の応答、ツールの一覧、委任での呼び出し、引数の検証） | `npm test` | しない |
 
 ### シナリオテスト
 
@@ -745,7 +768,7 @@ Cognito User Poolのカスタム属性`custom:branch`は使わない。User Pool
 
 ### 単体テスト
 
-**共通部品**（`packages/authz-context/test/`）：受信時の検証（§6の表の各段階での拒否、ES384以外の署名、発行者の違い）、業務のコードに渡す値（目的を渡さないこと）、送信時に予約したヘッダーを除くこと、MCPの部品、トレースの属性と引き継ぎ、スパンに認証情報を入れないこと。
+**共通部品**（`packages/authz-context/test/`）：受信時の検証（§6の表の各段階での拒否、ES384以外の署名、発行者の違い）、業務のコードに渡す値（目的を渡さないこと、認証情報のヘッダーを渡さないこと）、JSONのオブジェクトでない本文の拒否、送信時に予約したヘッダーを除くこと、MCPの部品、トレースの属性と引き継ぎ、スパンに認証情報を入れないこと。
 
 **監査の突き合わせ**：AWSを呼ばない純粋な関数（`services/audit-service/src/reconcile.ts`）を確かめる。応答の型（`src/api.ts`）は、画面とシナリオテストも参照する。
 
@@ -787,6 +810,14 @@ Cognito User Poolのカスタム属性`custom:branch`は使わない。User Pool
 | federated roleが、目的を刻むroleへのchainだけを持つこと | — |
 
 **属性サービス**（`services/entitlement-service/test/`）：本文で別のユーザーを指定しても、JWTのsubject本人の分だけを読んで返すこと。
+
+**cdk-nag**（`infra/test/nag.test.ts`）：スタック全体に、認めていない指摘がないこと。
+
+**bffの経路**（`services/bff/test/`）：経路ごとに目的、最初のホップ、scopeを決め、本文で目的やユーザーを指定しても最初のホップの本文に入らないこと。
+凍結の解除の目的は解除の経路でだけ刻むこと。不正な案件IDは400、当たらない経路は404。
+
+**fraud-mcp**（`services/fraud-mcp/test/`）：2025年の版の`initialize`と通知への応答、ツールの一覧、ツールが受け取った委任で業務のホップを呼び拒否をツールのエラーとして返すこと、
+スキーマに合わない引数では業務のホップを呼ばないこと。
 
 **fraud-agent**（`services/fraud-agent/test/`）：Claude Codeの子プロセスに、組み込みのツールを無効にして中継のツールだけを許すこと、環境変数を引き継がず決めたものだけを渡すこと、
 AWSの認証情報はモデル用のroleのもので実行roleのものではないこと。

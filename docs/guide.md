@@ -206,18 +206,20 @@ Token Exchangeでは、認可サーバーがトークンを交換するたびに
    呼び出し元（この例ではcase-service）の`authz.ts`の`consumes`にも`orders`を加える。定義は[app-stack.ts](../infra/lib/app-stack.ts)の
    `DELEGATION_DEFINITIONS`に、ホップは`connectHops`に渡すホップの表に加える。整合しなければ、合成が失敗して理由を示す。
 
-5. **業務のコードを書く。** `createHopHandler`に業務の関数を渡す。受け取るのは検証済みの`subject`・`actor`・`scope`、照合済みの`requestId`（ログ用）と、
-   次のホップを呼ぶ`call`だけで、JWTも認証情報も、リクエストの目的も扱わない。scopeで操作を、属性サービスのアクセス権でデータを判定する。
+5. **業務のコードを書く。** `createHopHandler`に業務の関数を渡す。受け取るのは検証済みの`subject`・`actor`・`scope`、照合済みの`requestId`（ログ用）、
+   本文（JSONのオブジェクト。項目の形は業務のコードが確かめる）、認証情報を除いたヘッダーと、次のホップを呼ぶ`call`だけで、
+   JWTも認証情報も、リクエストの目的も扱わない。scopeで操作を、属性サービスのアクセス権でデータを判定する。
    次のホップを呼ぶときは、付けるscopeを指定する（呼び出し先に1つしか求めていなければ省ける。例：`call('orders', body, { scope: 'orders:cancel' })`）。
    AWS SDKのクライアントは`traceAwsClient`で包み、呼び出しをトレースに出す。
 
    ```ts
    export const handler = createHopHandler(async (body, { scope, call }) => {
      if (scope !== 'orders:read') return { status: 403, body: { error: 'forbidden' } };
-     const ent = await call('entitlement-service', {});
-     if (ent.status !== 200) return { status: 403, body: { error: 'forbidden' } }; // 得られなければ拒否する
+     if (typeof body.orderId !== 'string') return { status: 400, body: { error: 'orderId is required' } };
+     const ent = await fetchEntitlements(call); // 属性サービスのパッケージが公開する関数
+     if (!ent) return { status: 403, body: { error: 'forbidden' } }; // 得られなければ拒否する
      const order = await loadOrder(body.orderId);
-     if (order.branch !== (ent.body as { branch: string }).branch) return { status: 403, body: { error: 'forbidden' } };
+     if (order.branch !== ent.branch) return { status: 403, body: { error: 'forbidden' } };
      return { status: 200, body: { order } };
    });
    ```
