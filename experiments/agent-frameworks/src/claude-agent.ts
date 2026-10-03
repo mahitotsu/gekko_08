@@ -8,10 +8,10 @@ import { HopTransport, type ToolCallRecord } from './hop-transport';
 import { dedupe, otlpReceiver, withRootSpan } from './otel-probe';
 import { CASE_ID, SYSTEM_PROMPT, userPrompt } from './prompt';
 
-// Claude Agent SDKで作ったfraud-agent。SDKのHTTPのMCPにはリクエストごとの署名とJWTを付けられないので、
+// Claude Agent SDKで作ったfraud-agent。SDKのHTTPのMCPには呼び出しごとの署名とJWTを付けられないので、
 // 127.0.0.1で受けるMCPサーバー（HTTP、ステートレス、JSONで応答）を置き、それがfraud-mcpへ中継する（中継型）。
 // 中継のMCPクライアントは、共通部品の`call`で送る通信路を使う。認証情報（受け渡されたセッション、JWT）はこのプロセスにとどまり、
-// Claude Codeの子プロセスには渡らない。Claude CodeはHTTPのMCPへのリクエストに`traceparent`を付けるので、中継はそれを引き継ぐ
+// Claude Codeの子プロセスには渡らない。Claude CodeはHTTPのMCPへの呼び出しに`traceparent`を付けるので、中継はそれを引き継ぐ
 async function relayServer(call: Call, toolCalls: ToolCallRecord[]) {
   const upstream = new Client({ name: 'fraud-agent-claude', version: '0.1.0' });
   const transport = new HopTransport(call, 'fraud-mcp', toolCalls);

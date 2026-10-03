@@ -61,7 +61,7 @@
 | 構成要素 | 役割 | 呼び出し元 | 呼び出し先 |
 |---|---|---|---|
 | bff | ログイン、セッション、リクエストの目的の決定、最初のホップ | ブラウザ（CloudFront経由） | case-service、fraud-agent、audit-service、entitlement-service |
-| case-service | 凍結の見直しの案件とリクエストの参照、凍結の解除の依頼 | bff、fraud-mcp | account-service、entitlement-service |
+| case-service | 凍結の見直しの案件と取引の参照、凍結の解除の依頼 | bff、fraud-mcp | account-service、entitlement-service |
 | account-service | 口座の参照と凍結の解除 | case-service、fraud-mcp | entitlement-service |
 | fraud-agent | 案件を分析し、凍結を解除してよいかを提案するAIエージェント。Claude Agent SDKがClaude Codeを子プロセスとして動かし、MCPは関数の中の中継から呼ぶ（§8） | bff | fraud-mcp、Bedrock |
 | fraud-mcp | エージェント向けのツールを提供するMCPサーバー | fraud-agent | case-service、account-service |
@@ -414,7 +414,7 @@ OpenTelemetryで出し、CloudWatchのTransaction Searchに集める（[収集�
 | `<サービス>.<操作>`（`DynamoDB.GetItem`、`STS.AssumeRole`など） | 共通部品の`traceAwsClient`を付けたAWS SDKのクライアント | CLIENT | `rpc.system`（`aws-api`）、`rpc.service`、`rpc.method`、`aws.dynamodb.table_names`、`aws.request_id`、`http.response.status_code` |
 | `claude_code.*`（`interaction`、`llm_request`、`tool`、`tool.execution`など） | fraud-agentのClaude Code（子プロセス） | — | Claude Codeが決める。プロンプトや応答の本文は記録させない |
 
-- **引き継ぎ**：送信のスパンの`traceparent`を、ホップへのリクエストのヘッダーに付ける。受信側はそれを親にする。`traceparent`を受け入れるのは、
+- **引き継ぎ**：送信のスパンの`traceparent`を、ホップへの呼び出しのヘッダーに付ける。受信側はそれを親にする。`traceparent`を受け入れるのは、
   入口のIAMで呼び出し元を確かめたホップの間だけで、bffはブラウザから届いた`traceparent`を使わず、新しいトレースを始める。
 - **AWS SDK**：esbuildで1ファイルにまとめた関数では、AWS SDKの自動計装が効かない。共通部品の`traceAwsClient`がクライアントにミドルウェアを
   加え、呼び出しごとにスパンを作る。キーや本文は属性に入れない。
@@ -427,7 +427,7 @@ OpenTelemetryで出し、CloudWatchのTransaction Searchに集める（[収集�
   接続の処理（`initialize`、`tools/list`）はClaude Codeのスパンの外で行われるので、fraud-agentの受信のスパンの子になる。
 - **ログ**：構造化ログに、その時点のスパンのトレースID（`traceId`）を入れる。
 - **メトリクスは出さない**：認可の判定の件数や処理時間は、構造化ログ（`handled`と`rejected`）からLogs Insightsで集計する（[収集先のADR](../adr/20261001020115-telemetry-destination-cloudwatch.md)）。
-- **入れないもの**：認証情報（JWT、受け渡すセッション）、リクエストとレスポンスの本文、プロンプト、ツールの入出力。業務のコードは属性を加えない。
+- **入れないもの**：認証情報（JWT、受け渡すセッション）、呼び出しと応答の本文、プロンプト、ツールの入出力。業務のコードは属性を加えない。
 - **有効化**：CDKが、bffと各ホップに環境変数`AUTHZ_TELEMETRY=cloudwatch`と、`xray:PutTraceSegments`の権限を付ける。環境変数がなければ、
   OTelのAPIは何もしない（単体テストなど）。
 
@@ -440,7 +440,7 @@ OpenTelemetryで出し、CloudWatchのTransaction Searchに集める（[収集�
 
 - **ユーザー**（人事データ）：yamada（tokyo、支店長）、tanaka（osaka、担当者）、suzuki（honbu、監査担当）
 - **権限マスタ**：担当者は`case:view`・`account:view`、支店長はそれに加えて`account:unfreeze`、監査担当は`audit:view`だけ
-- **データ**：案件とリクエスト（case-service）、口座（account-service）。それぞれ`branch`を持つ。口座は凍結の状態（`status`＝`frozen`／`active`）と凍結の理由を持ち、
+- **データ**：案件と取引（case-service）、口座（account-service）。それぞれ`branch`を持つ。口座は凍結の状態（`status`＝`frozen`／`active`）と凍結の理由を持ち、
   デモの口座（A-101はtokyo、A-201とA-999はosaka）はデプロイの時点で凍結しておく。案件は凍結の見直しの案件（C-1001はA-101、C-2001はA-201）。
 - **案件を開く**（目的`case-summary`）：yamadaが自分の支店の案件を開くと、case-serviceが口座の凍結の状態と理由をaccount-serviceから取得して返す。
   他の支店の案件は、case-serviceが業務上のアクセス権で拒否する。
@@ -622,7 +622,7 @@ tagのキーが`purpose`と`requestId`だけで、目的の値が一覧だけで
 
 | クォータ（既定値→上限） | 効く場所 | 上限の目安 |
 |---|---|---|
-| STSのリクエスト数：600件/秒（アカウント・リージョンごと。`AssumeRole`、`GetCallerIdentity`など6つの操作で共有。引き上げはサポートに依頼） | bffの目的の刻印と、各ホップのchain（`AssumeRole`） | 案件を開くリクエストと凍結を解除するリクエストでは1回あたり`AssumeRole`が3回（bffの目的の刻印、case-serviceとaccount-serviceのchain）で、アカウント全体でおよそ毎秒200リクエスト。エージェントの経路では「2＋2×ツールの呼び出し回数」（bffの目的の刻印、fraud-agentのchain、`tools/call`ごとにfraud-mcpと呼び出し先のchain）で、ツールの呼び出しが3回なら8回、およそ毎秒75リクエスト |
+| STSのAPIの呼び出し回数：600件/秒（アカウント・リージョンごと。`AssumeRole`、`GetCallerIdentity`など6つの操作で共有。引き上げはサポートに依頼） | bffの目的の刻印と、各ホップのchain（`AssumeRole`） | 案件を開くリクエストと凍結を解除するリクエストでは1回あたり`AssumeRole`が3回（bffの目的の刻印、case-serviceとaccount-serviceのchain）で、アカウント全体でおよそ毎秒200リクエスト。エージェントの経路では「2＋2×ツールの呼び出し回数」（bffの目的の刻印、fraud-agentのchain、`tools/call`ごとにfraud-mcpと呼び出し先のchain）で、ツールの呼び出しが3回なら8回、およそ毎秒75リクエスト |
 | CloudFormationのリソース数：1スタック500個 | 1ホップで約8〜10個 | 単一スタックで40〜50ホップ前後 |
 | Lambdaの環境変数：合計4KB | 受信側の`sub`の対応表 | 呼び出し元が十数個を超えるホップ |
 | roleの信頼ポリシー：2,048文字→8,192文字 | chain用roleの信頼ポリシーに呼び出し元を列挙 | 呼び出し元10個前後（引き上げて40個前後） |
@@ -630,7 +630,7 @@ tagのキーが`purpose`と`requestId`だけで、目的の値が一覧だけで
 | roleのインラインポリシー：合計10,240文字 | chain用roleの権限（呼び出し先ごとに、JWTの発行の文と、scopeを付ける許可の文。§5） | 呼び出し先が十数個 |
 | Lambdaのresource policy：20KB | 入口のresource policy | 呼び出し元50個前後 |
 
-`AssumeRoleWithWebIdentity`と`GetWebIdentityToken`は、600件/秒を共有する操作の一覧に入っていない。両者のリクエスト数のクォータは、文書にもService Quotasにも
+`AssumeRoleWithWebIdentity`と`GetWebIdentityToken`は、600件/秒を共有する操作の一覧に入っていない。両者の呼び出し回数のクォータは、文書にもService Quotasにも
 記載がない（2026-10-01に確認。Service QuotasにはSTSの項目がない）。参照実装での1リクエストあたりの回数は次のとおり（2026-10-01のトレースで数えた）。
 
 | 経路 | `AssumeRoleWithWebIdentity` | `AssumeRole` | `GetWebIdentityToken` |

@@ -99,14 +99,14 @@ const headerGetter: TextMapGetter<Record<string, string | undefined>> = {
 };
 
 /**
- * 受信したリクエストの親のコンテキスト。`traceparent`を引き継ぐのは、入口のIAMで呼び出し元を確かめたホップの間だけで、
+ * 受信した呼び出しの親のコンテキスト。`traceparent`を引き継ぐのは、入口のIAMで呼び出し元を確かめたホップの間だけで、
  * ブラウザから届いたものは引き継がない（bffは`ROOT_CONTEXT`から始める）
  */
 export function inboundContext(headers: Record<string, string | undefined>): Context {
   return propagation.extract(ROOT_CONTEXT, headers, headerGetter);
 }
 
-/** 送信するリクエストのヘッダーに、その時点のスパンの`traceparent`を付ける */
+/** 送信する呼び出しのヘッダーに、その時点のスパンの`traceparent`を付ける */
 export function injectTraceContext(headers: Record<string, string>): void {
   propagation.inject(context.active(), headers);
 }

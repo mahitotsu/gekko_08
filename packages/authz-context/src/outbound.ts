@@ -93,7 +93,7 @@ export async function timed<T>(timings: Timings, key: string, f: () => Promise<T
   });
 }
 
-/** 次のホップを呼ぶ関数を作る。chainは1回のリクエストで1度だけ行う。 */
+/** 次のホップを呼ぶ関数を作る。chainは、受け取った1回の呼び出しの処理で1度だけ行う。 */
 export function createCaller(opts: CallerOptions): Call {
   let chained: Promise<SessionCredentials> | undefined;
   const chain = () => {

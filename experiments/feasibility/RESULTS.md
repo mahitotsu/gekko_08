@@ -18,7 +18,7 @@
 
 - 呼び出し元のidentity policyには何も書かず、受信側のresource policy（`lambda:InvokeFunctionUrl`と、
   `lambda:InvokedViaFunctionUrl`付きの`lambda:InvokeFunction`）だけで許可したroleは200だった。
-- 同じアカウントで許可していないroleと、署名のないリクエストは、いずれも403だった（関数コードに届く前に拒否）。
+- 同じアカウントで許可していないroleと、署名のない呼び出しは、いずれも403だった（関数コードに届く前に拒否）。
 - 受信側には`requestContext.authorizer.iam`として、呼び出し元の`userArn`・`principalOrgId`などが渡る。
 
 ## 検証3：Cognito User Pool → IAM OIDC provider → `AssumeRoleWithWebIdentity` → role chaining

@@ -27,7 +27,7 @@ Lambdaが関数を起動する前にIAMで判定する。受信側はresource po
 
 根拠は[実現性検証](../../experiments/feasibility/RESULTS.md)の検証1・2と、[Token Exchange相当の構成](../../experiments/actor-subject-jwt/RESULTS.md)。
 
-- resource policyだけで許可したroleは200、許可していないroleと署名のないリクエストは403だった（関数コードに届く前に拒否）。
+- resource policyだけで許可したroleは200、許可していないroleと署名のない呼び出しは403だった（関数コードに届く前に拒否）。
 - 受信側には呼び出し元の`userArn`が渡る。`lambda:SourceFunctionArn`で、同じ実行roleを持つ関数どうしも区別できた。
 - Lambdaの実行roleから`GetWebIdentityToken`を呼べ、JWTに`lambda_source_function_arn`が入る。
 
@@ -38,7 +38,7 @@ Lambdaが関数を起動する前にIAMで判定する。受信側はresource po
 - **ECS（ALB＋ACM証明書）**：サービスが直接呼び合う構成では、ALBの管理範囲外になり、サービスごとに証明書を用意・更新する必要が出る。
   `GetWebIdentityToken`のECSタスク固有のクレームも文書で確認できていない。
 - **API Gateway（IAM認可）**：Function URLと同じくマネージドなTLSとIAM認可を持ち、プライベート統合でネットワークの到達範囲も絞れる。
-  ただし構成要素とリクエスト課金が増える。ネットワークの制限を追加の防御として重ねたい場合の選択肢として残す。
+  ただし構成要素と呼び出しごとの課金が増える。ネットワークの制限を追加の防御として重ねたい場合の選択肢として残す。
 
 ## 結果として引き受けること
 
@@ -55,6 +55,6 @@ Lambdaが関数を起動する前にIAMで判定する。受信側はresource po
 - **resource policyが唯一の許可リストになるわけではない**：同じアカウント内では、呼び出し元のidentity policyの広い許可でも呼べる。
   許可したrole以外を明示的にDenyする必要がある（多段伝播のADR）。
 - **`PutResourcePolicy`は既存のresource policyを置き換える**：`AddPermission`と同じ関数で併用しない。
-- mTLSが持っていた送信者の拘束はない。SigV4では秘密鍵（`SecretAccessKey`）が通信路に乗らず、署名はリクエストと時刻に縛られるので、
-  通信路で盗み見た値から新しいリクエストは作れない。実行環境から認証情報そのものが漏れた場合の扱いは、多段伝播のADRで整理している。
+- mTLSが持っていた送信者の拘束はない。SigV4では秘密鍵（`SecretAccessKey`）が通信路に乗らず、署名は呼び出しの内容と時刻に縛られるので、
+  通信路で盗み見た値から新しい呼び出しは作れない。実行環境から認証情報そのものが漏れた場合の扱いは、多段伝播のADRで整理している。
 - コンピュートはLambdaに限られる。Lambda以外で動かす場合は、`GetWebIdentityToken`のクレームや呼び出し元の確かめ方を改めて検討する必要がある（本参照実装では扱わない）。
