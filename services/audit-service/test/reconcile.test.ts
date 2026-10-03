@@ -128,7 +128,7 @@ describe('reconcileRecords', () => {
     ];
     const r = reconcileRecords(withEnt, records(), dir);
     expect(r.hops.map((h) => `${h.depth}:${h.hop}`)).toEqual(['1:case-service', '2:entitlement-service', '2:account-service', '3:entitlement-service']);
-    expect(r.hops[0].startedAt).toBe('2026-10-03T01:00:00.100Z');
+    expect(r.hops[0]?.startedAt).toBe('2026-10-03T01:00:00.100Z');
   });
 
   it('応答に、突き合わせにだけ使う項目（JWTを発行したrole名）を含めない', () => {
@@ -157,7 +157,7 @@ describe('ownRows（リクエストIDを偽った呼び出しの拒否の記録�
     const noJwt: Row = { '@timestamp': '2026-10-03 01:00:00.250', message: 'rejected', hop: 'account-service', requestId: RID, status: '401', reason: 'missing authorization context' };
     const rejected = reconcileRecords(ownRows(RID, [noJwt]), [], dir).hops[0];
     expect(rejected).toMatchObject({ outcome: 'rejected', check: { result: 'n/a' } });
-    expect(rejected.claimedRequestId).toBeUndefined();
+    expect(rejected?.claimedRequestId).toBeUndefined();
   });
 });
 

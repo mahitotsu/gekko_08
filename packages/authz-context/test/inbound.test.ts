@@ -64,7 +64,7 @@ describe('verifyInbound', () => {
   it('期限切れのJWTを拒否する', async () => rejected(verifyInbound(await sign(claims, { exp: '-1m' }), CALLER_ARN, opts, RID), 401));
   it('改ざんしたJWTを拒否する', async () => {
     const t = await sign(claims);
-    const [h, p, s] = t.split('.');
+    const [h, p, s] = t.split('.') as [string, string, string];
     const forged = Buffer.from(JSON.stringify({ ...JSON.parse(Buffer.from(p, 'base64url').toString()), ...ns({ source_identity: 'tanaka' }) })).toString('base64url');
     await rejected(verifyInbound(`${h}.${forged}.${s}`, CALLER_ARN, opts, RID), 401);
   });

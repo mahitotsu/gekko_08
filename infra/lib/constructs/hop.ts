@@ -14,7 +14,7 @@ class TrustAddedLater extends iam.ArnPrincipal {
     super('*');
   }
 
-  addToAssumeRolePolicy(_doc: iam.PolicyDocument): void {}
+  override addToAssumeRolePolicy(_doc: iam.PolicyDocument): void {}
 }
 
 /** 呼び出し先の設定。共通部品が読む形（`Target`）のまま、環境変数とbffの設定に書く */

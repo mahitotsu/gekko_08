@@ -18,9 +18,9 @@ function buildFixture() {
   const template: Json = Template.fromStack(stack).toJSON();
   const id = (c: Json) => stack.getLogicalId(c.node.defaultChild as cdk.CfnElement);
   const idOf = (type: string) => {
-    const ids = Object.keys(template.Resources).filter((k) => template.Resources[k].Type === type);
-    if (ids.length !== 1) throw new Error(`${type}: ${ids.length}`);
-    return ids[0];
+    const [only, ...rest] = Object.keys(template.Resources).filter((k) => template.Resources[k].Type === type);
+    if (!only || rest.length > 0) throw new Error(`${type}: ${rest.length + (only ? 1 : 0)}`);
+    return only;
   };
   return {
     stack, template, auth,
@@ -71,7 +71,7 @@ function checkProvider(f: Fixture): string[] {
   return errors;
 }
 
-const checks: Record<string, (f: Fixture) => string[]> = { trust: checkTrust, aud: checkAud, provider: checkProvider };
+const checks = { trust: checkTrust, aud: checkAud, provider: checkProvider } satisfies Record<string, (f: Fixture) => string[]>;
 
 describe('federated roleのテンプレート（SourceIdentityを刻む入口）', () => {
   it('信頼：このUser PoolのOIDC providerだけを、`aud`の条件付きで信頼し、SourceIdentityを刻めるのも同じ相手だけ', () => {

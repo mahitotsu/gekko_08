@@ -57,7 +57,7 @@ describe('FR-7: プロンプトインジェクションで誘導されたエー�
 describe('FR-6: エージェントの経路も、リクエストIDとユーザーで追える', () => {
   it('bff・fraud-agent・fraud-mcpのログが同じリクエストIDでつながり、各ホップが同じユーザーを受け取る', async () => {
     const id = managerResult.body.requestId;
-    const l = (await handledLogs([id], ['bff', 'fraud-agent', 'fraud-mcp', 'case-service'], startTime))[id];
+    const l = (await handledLogs([id], ['bff', 'fraud-agent', 'fraud-mcp', 'case-service'], startTime))(id);
     expect(l.bff).toMatchObject({ user: USERS.tokyoManager, route: 'agent', purpose: 'agent-analysis' });
     for (const hop of ['fraud-agent', 'fraud-mcp', 'case-service'] as const) {
       expect(l[hop]).toMatchObject({ subject: { id: USERS.tokyoManager }, purpose: 'agent-analysis' });

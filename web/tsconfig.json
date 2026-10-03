@@ -1,0 +1,10 @@
+{
+  // 画面：ブラウザで動くReactのコード。DOMの型を使い、Node.jsの型は使わない
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": [],
+    "jsx": "react-jsx"
+  },
+  "include": ["src"]
+}

@@ -32,7 +32,7 @@ beforeAll(async () => {
 
 describe('FR-6: 1回のリクエストを、各ホップのログでリクエストIDとユーザーから追える', () => {
   it('bff・case-service・account-service・属性サービスのログが同じリクエストIDでつながり、ユーザー・目的・呼び出し元が記録される', () => {
-    const l = logsById[allowedId];
+    const l = logsById(allowedId);
     expect(l.bff).toMatchObject({ user: USERS.tokyoManager, purpose: 'case-summary', status: 200 });
     expect(l['case-service']).toMatchObject({ subject: { id: USERS.tokyoManager }, purpose: 'case-summary', scope: 'case:summary', status: 200 });
     expect(l['account-service']).toMatchObject({ subject: { id: USERS.tokyoManager }, purpose: 'case-summary', scope: 'account:read', status: 200 });
@@ -47,7 +47,7 @@ describe('FR-6: 1回のリクエストを、各ホップのログでリクエス
   });
 
   it('拒否されたリクエストも、リクエストIDとユーザーで追える', async () => {
-    const [l] = Object.values(await handledLogs([deniedId], ['bff', 'case-service'], startTime));
+    const l = (await handledLogs([deniedId], ['bff', 'case-service'], startTime))(deniedId);
     expect(l.bff).toMatchObject({ user: USERS.tokyoManager, status: 403 });
     expect(l['case-service']).toMatchObject({ subject: { id: USERS.tokyoManager }, status: 403 });
   });
@@ -93,7 +93,7 @@ describe('SR-3: 各ホップのログに、認証情報・JWT・cookieが含ま�
 
 describe('NFR-3: ホップごとの追加時間を実測する', () => {
   it('各ホップの処理時間を集計する', () => {
-    const pick = (hop: HopName, key: string) => latencyIds.map((id) => (logsById[id][hop] as HandledLog).timings[key]).filter((v) => v !== undefined);
+    const pick = (hop: HopName, key: string) => latencyIds.map((id) => (logsById(id)[hop] as HandledLog).timings[key]).filter((v) => v !== undefined);
     const stats = (xs: number[]) => {
       const s = [...xs].sort((a, b) => a - b);
       return { n: s.length, median: s[Math.floor(s.length / 2)], p90: s[Math.min(s.length - 1, Math.floor(s.length * 0.9))], max: s[s.length - 1] };

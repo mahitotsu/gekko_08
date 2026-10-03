@@ -29,7 +29,7 @@ const named = (spans: SpanRecord[], name: string) => spans.filter((s) => s.name 
 const one = (spans: SpanRecord[], name: string) => {
   const found = named(spans, name);
   expect(found, name).toHaveLength(1);
-  return found[0];
+  return found[0]!;
 };
 const byId = (spans: SpanRecord[], id?: string) => spans.find((s) => s.spanId === id);
 
@@ -41,8 +41,8 @@ beforeAll(async () => {
   const s = await browserGet(`/api/cases/${T.tokyoCase}/summary`, manager, { traceparent: `00-${BROWSER_TRACE_ID}-00f067aa0ba902b7-01` });
   const a = await browserPost('/api/agent', JSON.stringify({ caseId: T.tokyoCase }), manager);
   const logs = await handledLogs([s.body.requestId, a.body.requestId], ['bff'], startTime);
-  const summaryTrace = logs[s.body.requestId].bff!.traceId!;
-  const agentTrace = logs[a.body.requestId].bff!.traceId!;
+  const summaryTrace = logs(s.body.requestId).bff!.traceId!;
+  const agentTrace = logs(a.body.requestId).bff!.traceId!;
   browserTraceIgnored = { bffTraceId: summaryTrace };
   [summary, agent] = await Promise.all([
     // bff、case-service、account-service、属性サービス（2回）の受信と、それぞれへの送信
@@ -110,7 +110,7 @@ describe('FR-6: エージェントの経路も1つのトレースにつながる
       expect(byId(agent, m.parentSpanId)?.name).toBe('call fraud-mcp');
       expect(m.attributes).toMatchObject({ 'authz.actor': 'fraud-agent', 'authz.purpose': 'agent-analysis', 'authz.scope': 'mcp:tools', 'enduser.id': USERS.tokyoManager });
     }
-    expect(named(agent, 'case-service')[0].attributes).toMatchObject({ 'authz.actor': 'fraud-mcp', 'authz.scope': 'case:read' });
+    expect(named(agent, 'case-service')[0]?.attributes).toMatchObject({ 'authz.actor': 'fraud-mcp', 'authz.scope': 'case:read' });
   });
 
   it('Claude Code（子プロセス）のスパンは、fraud-agentの受信のスパンの子になる', () => {

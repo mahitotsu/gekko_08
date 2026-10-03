@@ -65,7 +65,7 @@ function checkFederated(f: Fixture): string[] {
   return diffAtoms('federated role', atoms(roleStatements(f.template, f.federatedRoleId)), expected);
 }
 
-const checks: Record<string, (f: Fixture) => string[]> = { trust: checkTrust, federated: checkFederated };
+const checks = { trust: checkTrust, federated: checkFederated } satisfies Record<string, (f: Fixture) => string[]>;
 
 describe('目的を刻むroleのテンプレート', () => {
   it('信頼：federated roleだけを、このUser Poolで認証されたセッションで、リクエストIDのtagと同じセッション名でだけ信頼し、tagのキーは目的とリクエストID、目的の値は一覧だけ', () => {

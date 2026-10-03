@@ -35,7 +35,7 @@ export const ATTR = {
 async function postTraces(body: Uint8Array | string, contentType: string): Promise<void> {
   const host = `xray.${requireEnv('AWS_REGION')}.amazonaws.com`;
   const req = await execSigner('xray').sign({ method: 'POST', protocol: 'https:', hostname: host, path: '/v1/traces', headers: { host, 'content-type': contentType }, body });
-  const res = await fetch(`https://${host}/v1/traces`, { method: 'POST', headers: req.headers, body: body as BodyInit });
+  const res = await fetch(`https://${host}/v1/traces`, { method: 'POST', headers: req.headers, body });
   await res.arrayBuffer();
   if (!res.ok) throw new Error(`xray: HTTP ${res.status}`);
 }
@@ -153,7 +153,7 @@ export async function startOtlpTraceRelay(): Promise<OtlpTraceRelay | undefined>
     req.on('data', (c: Buffer) => chunks.push(c));
     req.on('end', () => {
       last = Date.now();
-      const contentType = (req.headers['content-type'] ?? 'application/x-protobuf').split(';')[0];
+      const contentType = req.headers['content-type']?.split(';')[0] || 'application/x-protobuf';
       const p: Promise<void> = postTraces(new Uint8Array(Buffer.concat(chunks)), contentType)
         .catch((e) => log('warn', 'telemetry relay failed', { error: (e as Error).message }))
         .finally(() => forwarding.delete(p));

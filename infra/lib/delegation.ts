@@ -60,14 +60,25 @@ export function connectHops(purposes: string[], definitions: DelegationDefinitio
   }
   if (errors.length > 0) throw new Error(`delegation definitions do not match:\n${errors.join('\n')}`);
 
+  // ここから先は、上の突き合わせを通った定義だけを扱う
   const byHop = new Map(definitions.map((d) => [d.hop, d]));
+  const nodeOf = (name: string): Hop | Bff => {
+    const node = nodes[name];
+    if (!node) throw new Error(`${name}: no such hop in the stack`);
+    return node;
+  };
+  const hopOf = (name: string): Hop => {
+    const node = nodeOf(name);
+    if (!('allowCaller' in node)) throw new Error(`${name} is not a hop`);
+    return node;
+  };
   for (const d of definitions) {
-    if (d.provides) (nodes[d.hop] as Hop).provide(d.provides);
+    if (d.provides) hopOf(d.hop).provide(d.provides);
   }
   for (const d of definitions) {
     for (const [target, scopes] of Object.entries(d.consumes ?? {})) {
-      const provides = byHop.get(target)!.provides!;
-      (nodes[target] as Hop).allowCaller(nodes[d.hop].asCaller(), scopes.map((scope) => ({ scope, purposes: provides[scope].purposes })));
+      const provides = byHop.get(target)?.provides ?? {};
+      hopOf(target).allowCaller(nodeOf(d.hop).asCaller(), scopes.map((scope) => ({ scope, purposes: provides[scope]?.purposes })));
     }
   }
 }

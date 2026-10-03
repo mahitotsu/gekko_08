@@ -18,13 +18,23 @@ const cognito = new CognitoIdentityProviderClient({});
 const db = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 const sts = new STSClient({});
 
-export type Outputs = Record<string, string>;
+/** テストが使うスタックの出力（infra/lib/app-stack.tsの`CfnOutput`） */
+const OUTPUT_KEYS = [
+  'WebUrl', 'UserPoolId', 'UserPoolClientId', 'SessionsTable', 'FederatedRoleArn', 'PurposeRoleArn', 'StaffTable', 'CasesTable', 'AccountsTable', 'Issuer',
+  'CaseServiceUrl', 'CaseServiceAudience', 'CaseServiceChainRoleArn', 'AccountServiceUrl', 'AccountServiceAudience', 'EntitlementServiceUrl',
+  'FraudAgentChainRoleArn', 'FraudMcpChainRoleArn',
+] as const;
+export type Outputs = Record<(typeof OUTPUT_KEYS)[number], string>;
 
 let outputs: Promise<Outputs> | undefined;
+/** スタックの出力を読む。テストが使う出力がなければ、デプロイしたスタックが古いので、足りない出力の名前を示して失敗させる */
 export function stackOutputs(): Promise<Outputs> {
   outputs ??= (async () => {
     const { Stacks } = await new CloudFormationClient({}).send(new DescribeStacksCommand({ StackName: STACK }));
-    return Object.fromEntries((Stacks![0].Outputs ?? []).map((o) => [o.OutputKey!, o.OutputValue!]));
+    const all = new Map((Stacks?.[0]?.Outputs ?? []).map((o) => [o.OutputKey, o.OutputValue]));
+    const missing = OUTPUT_KEYS.filter((k) => !all.get(k));
+    if (missing.length > 0) throw new Error(`stack ${STACK} lacks outputs: ${missing.join(', ')}. Deploy the current stack first`);
+    return Object.fromEntries(OUTPUT_KEYS.map((k) => [k, all.get(k)])) as Outputs;
   })();
   return outputs;
 }
@@ -77,11 +87,29 @@ export async function loginTokens(user: DemoUser): Promise<{ idToken: string; re
   return { idToken: r.AuthenticationResult!.IdToken!, refreshToken: r.AuthenticationResult!.RefreshToken! };
 }
 
+/** JWTを、ヘッダー・ペイロード・署名に分ける */
+export function jwtParts(token: string): [header: string, payload: string, signature: string] {
+  const [header, payload, signature, ...rest] = token.split('.');
+  if (header === undefined || payload === undefined || signature === undefined || rest.length > 0) throw new Error('not a JWT');
+  return [header, payload, signature];
+}
+
+/** JWTのペイロード（署名は検証しない）。Tには、テストが読む項目の形を渡す */
+export const jwtPayload = <T>(token: string): T => JSON.parse(Buffer.from(jwtParts(token)[1], 'base64url').toString()) as T;
+
+/** STSが発行するJWTのペイロードのうち、テストが読む項目 */
+export interface StsJwtPayload {
+  sub: string;
+  iat: number;
+  exp: number;
+  'https://sts.amazonaws.com/': { source_identity?: string; principal_tags: Record<string, string>; request_tags: Record<string, string> };
+}
+
 /** bffの`/api/callback`が行うのと同じ形でセッションを作り、セッションcookieを返す */
 export async function loginSession(user: DemoUser): Promise<string> {
   const o = await stackOutputs();
   const { idToken, refreshToken } = await loginTokens(user);
-  const claims = JSON.parse(Buffer.from(idToken.split('.')[1], 'base64url').toString());
+  const claims = jwtPayload<{ exp: number }>(idToken);
   const sid = randomBytes(32).toString('base64url');
   await db.send(new PutCommand({
     TableName: o.SessionsTable,
@@ -312,20 +340,32 @@ export interface HandledLog {
   timings: Record<string, number>;
 }
 
-/** 各ホップの`handled`ログのうち、指定したリクエストIDのものを、すべてのホップに揃うまで待って返す */
-export async function handledLogs(requestIds: string[], hops: HopName[], startTime: number): Promise<Record<string, Partial<Record<HopName, HandledLog>>>> {
+/** 1回のリクエストの、ホップごとの`handled`ログ */
+export type RequestLogs = Partial<Record<HopName, HandledLog>>;
+
+/**
+ * 各ホップの`handled`ログのうち、指定したリクエストIDのものを、すべてのホップに揃うまで待つ。
+ * リクエストIDからそのログを引く関数を返す（指定していないリクエストIDなら失敗する）
+ */
+export async function handledLogs(requestIds: string[], hops: HopName[], startTime: number): Promise<(requestId: string) => RequestLogs> {
   const groups = await hopLogGroups();
-  const byId: Record<string, Partial<Record<HopName, HandledLog>>> = Object.fromEntries(requestIds.map((id) => [id, {}]));
-  return eventually(async () => {
+  const byId = new Map<string, RequestLogs>(requestIds.map((id) => [id, {}]));
+  await eventually(async () => {
     for (const hop of hops) {
       for (const m of await readLogs(groups[hop], startTime, '{ $.message = "handled" }')) {
         // Lambdaのtext形式のログは、時刻などの接頭辞の後ろにJSONが続く
         const l = JSON.parse(m.slice(m.indexOf('{'))) as HandledLog;
-        if (byId[l.requestId]) byId[l.requestId][hop] = l;
+        const logs = byId.get(l.requestId);
+        if (logs) logs[hop] = l;
       }
     }
-    return requestIds.every((id) => hops.every((h) => byId[id][h])) ? byId : undefined;
+    return requestIds.every((id) => hops.every((h) => byId.get(id)?.[h])) || undefined;
   }, 90_000, 5000);
+  return (requestId) => {
+    const logs = byId.get(requestId);
+    if (!logs) throw new Error(`logs of ${requestId} were not requested`);
+    return logs;
+  };
 }
 
 /** CloudWatch Transaction Searchのスパン（ロググループ`aws/spans`の1件） */

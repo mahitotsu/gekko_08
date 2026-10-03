@@ -1,6 +1,6 @@
 import { AuthzError, verifyInbound, type VerifyOptions } from '@gekko08/authz-context';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { chainTo, mintJwt, type Outputs, purposeSession, type RequestSession, stackOutputs, USERS } from './helpers';
+import { chainTo, jwtParts, jwtPayload, mintJwt, type Outputs, purposeSession, type RequestSession, stackOutputs, type StsJwtPayload, USERS } from './helpers';
 import { authz as accountServiceAuthz } from '@gekko08/account-service/authz';
 import { authz as caseServiceAuthz } from '@gekko08/case-service/authz';
 
@@ -29,8 +29,8 @@ async function rejectedWith(p: Promise<unknown>, status: number) {
 }
 
 const b64 = (x: unknown) => Buffer.from(JSON.stringify(x)).toString('base64url');
-const parts = (token: string) => token.split('.');
-const payloadOf = (token: string) => JSON.parse(Buffer.from(parts(token)[1], 'base64url').toString());
+const parts = jwtParts;
+const payloadOf = (token: string) => jwtPayload<StsJwtPayload>(token);
 
 beforeAll(async () => {
   o = await stackOutputs();

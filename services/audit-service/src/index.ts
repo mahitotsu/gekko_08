@@ -1,6 +1,6 @@
 import { CloudTrailClient, LookupEventsCommand } from '@aws-sdk/client-cloudtrail';
 import { CloudWatchLogsClient, GetQueryResultsCommand, StartQueryCommand } from '@aws-sdk/client-cloudwatch-logs';
-import { createHopHandler, traceAwsClient, type CallResult } from '@gekko08/authz-context';
+import { createHopHandler, requireEnv, traceAwsClient, type CallResult } from '@gekko08/authz-context';
 import { fetchEntitlements } from '@gekko08/entitlement-service/api';
 import type { Reconciled, TransactionList } from './api';
 import { logTime, ownRows, reconcileRecords, toAwsRecord, transactionsFrom, type Directory, type Row, type TrailRecord } from './reconcile';
@@ -11,11 +11,19 @@ import { logTime, ownRows, reconcileRecords, toAwsRecord, transactionsFrom, type
 const trail = traceAwsClient(new CloudTrailClient({}));
 const logs = traceAwsClient(new CloudWatchLogsClient({}));
 
+// CDKが渡す対応表（ホップ名→ロググループ名、role名→表示名）
 const DIRECTORY: Directory = {
-  logGroups: JSON.parse(process.env.AUDIT_LOG_GROUPS ?? '{}'),
-  principals: JSON.parse(process.env.AUDIT_PRINCIPALS ?? '{}'),
-  audiencePrefix: process.env.AUDIT_AUDIENCE_PREFIX ?? '',
+  logGroups: JSON.parse(requireEnv('AUDIT_LOG_GROUPS')) as Record<string, string>,
+  principals: JSON.parse(requireEnv('AUDIT_PRINCIPALS')) as Record<string, string>,
+  audiencePrefix: requireEnv('AUDIT_AUDIENCE_PREFIX'),
 };
+const BFF_LOG_GROUP = logGroupOf('bff');
+
+function logGroupOf(hop: string): string {
+  const group = DIRECTORY.logGroups[hop];
+  if (!group) throw new Error(`AUDIT_LOG_GROUPS lacks ${hop}`);
+  return group;
+}
 
 /** bffが発行するリクエストID（UUID）。Logs Insightsの照会に埋め込むので、形を厳しく確かめる */
 const REQUEST_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -57,7 +65,7 @@ async function insights(groups: string[], queryString: string, startMs: number):
 
 /** 最近のリクエスト（bffが最初のホップを呼んだもの）。表示の経路は除く。監査の操作もリクエストとして含め、誰がどのリクエストを監査したかを追えるようにする */
 async function listTransactions(): Promise<TransactionList> {
-  const rows = await insights([DIRECTORY.logGroups.bff], `fields @timestamp, requestId, route, purpose, user, status, sessionRef, loggedInAt, caseId, auditTarget
+  const rows = await insights([BFF_LOG_GROUP], `fields @timestamp, requestId, route, purpose, user, status, sessionRef, loggedInAt, caseId, auditTarget
 | filter message = "handled" and hop = "bff" and route != "me"
 | sort @timestamp desc
 | limit 500`, Date.now() - LIST_HOURS * 3600_000);
@@ -88,7 +96,8 @@ async function reconcile(requestId: string): Promise<Reconciled> {
 | sort @timestamp asc
 | limit 1000`, Date.now() - RECONCILE_DAYS * 86400_000));
   // CloudTrailはリクエストの少し前から引く（時刻はUTC）
-  const since = rows.length ? new Date(logTime(rows[0]['@timestamp']) - 5 * 60_000) : undefined;
+  const first = rows[0]?.['@timestamp'];
+  const since = first ? new Date(logTime(first) - 5 * 60_000) : undefined;
   const records = since ? await awsRecords(requestId, since) : [];
   return reconcileRecords(rows, records, DIRECTORY);
 }

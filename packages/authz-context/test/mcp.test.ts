@@ -30,7 +30,7 @@ describe('HopMcpTransport', () => {
     await t.send({ jsonrpc: '2.0', method: 'notifications/initialized' });
     await new Promise((r) => setTimeout(r, 0));
     expect(sent.map((s) => s.target)).toEqual(['fraud-mcp', 'fraud-mcp']);
-    expect(sent[0].options?.headers).toMatchObject({ accept: 'application/json, text/event-stream', 'mcp-protocol-version': '2025-11-25' });
+    expect(sent[0]?.options?.headers).toMatchObject({ accept: 'application/json, text/event-stream', 'mcp-protocol-version': '2025-11-25' });
     expect(got).toEqual([{ jsonrpc: '2.0', id: 1, result: { ok: 'tools/list' } }]);
     expect(seen).toEqual([
       { request: { jsonrpc: '2.0', id: 1, method: 'tools/list' }, response: { jsonrpc: '2.0', id: 1, result: { ok: 'tools/list' } } },

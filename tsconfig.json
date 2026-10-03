@@ -1,17 +1,10 @@
 {
+  // サーバー側：Lambdaの関数、共通部品、CDK、テスト。Node.jsの型だけを使い、DOMの型は使わない
+  "extends": "./tsconfig.base.json",
   "compilerOptions": {
-    "target": "ES2022",
-    "module": "Preserve",
-    "moduleResolution": "Bundler",
-    "lib": ["ES2022", "DOM"],
-    "strict": true,
-    "esModuleInterop": true,
-    "skipLibCheck": true,
-    "resolveJsonModule": true,
-    "noEmit": true,
-    "allowImportingTsExtensions": true,
-    "jsx": "react-jsx"
+    "lib": ["ES2022"],
+    "types": ["node"]
   },
-  "include": ["infra", "packages/*/src", "packages/*/test", "services/*/src", "services/*/test", "services/*/authz.ts", "tests", "web/src", "web/vite.config.ts"],
+  "include": ["infra", "packages/*/src", "packages/*/test", "services/*/src", "services/*/test", "services/*/authz.ts", "tests", "web/vite.config.ts", "vitest.config.ts", "eslint.config.ts"],
   "exclude": ["**/node_modules", "**/cdk.out"]
 }

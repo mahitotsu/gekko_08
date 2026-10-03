@@ -193,7 +193,7 @@ function checkCallersMap(f: Fixture, hop: Hop): string[] {
 
 const hops = (f: Fixture) => [f.front, f.leaf];
 const callers = (f: Fixture) => [f.origin, f.front.asCaller()];
-const checks: Record<string, (f: Fixture) => string[]> = {
+const checks = {
   entry: (f) => hops(f).flatMap((h) => checkEntry(f, h)),
   callerGuard: (f) => hops(f).flatMap((h) => checkCallerGuard(f, h)),
   issuance: (f) => callers(f).flatMap((c) => checkIssuance(f, c)),
@@ -201,7 +201,7 @@ const checks: Record<string, (f: Fixture) => string[]> = {
   chainTrust: (f) => hops(f).flatMap((h) => checkChainTrust(f, h)),
   callersMap: (f) => hops(f).flatMap((h) => checkCallersMap(f, h)),
   provides: (f) => hops(f).flatMap((h) => checkProvides(f, h)),
-};
+} satisfies Record<string, (f: Fixture) => string[]>;
 
 describe('Hopのテンプレート', () => {
   it('入口：Function URLはAWS_IAMで、許可した呼び出し元の実行role以外をDenyする', () => {

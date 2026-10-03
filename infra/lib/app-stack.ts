@@ -38,7 +38,7 @@ const MAX_BUNDLE_BYTES = 255_000_000;
 function claudeCodeBundling(): NodeFunctionProps['bundling'] {
   const manifest = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'services/fraud-agent/package.json'), 'utf8')) as { dependencies: Record<string, string> };
   const version = manifest.dependencies['@anthropic-ai/claude-agent-sdk'];
-  if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error(`pin @anthropic-ai/claude-agent-sdk to an exact version (got ${version})`);
+  if (!version || !/^\d+\.\d+\.\d+$/.test(version)) throw new Error(`pin @anthropic-ai/claude-agent-sdk to an exact version (got ${version})`);
   const pkg = '@anthropic-ai/claude-agent-sdk-linux-arm64';
   const cache = path.join(os.tmpdir(), `gekko08-claude-code-${version}`);
   return {

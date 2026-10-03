@@ -3,8 +3,13 @@ import type { AwsRecord, Check, EventRef, Field, HopRecord, Reconciled, Transact
 // 突き合わせのロジック。AWSを呼ばない純粋な関数だけを置き、単体テストで確かめる。
 // AWSから読む部分（Logs Insights、CloudTrailの`LookupEvents`）は`index.ts`にある
 
-/** Logs Insightsの結果の1行（フィールド名→値） */
-export type Row = Record<string, string>;
+/** Logs Insightsの結果の1行（フィールド名→値）。値のない項目は、行に含まれない */
+export type Row = Partial<Record<string, string>>;
+
+/** 行の項目の値。値がなければ空文字 */
+const text = (r: Row, name: string): string => r[name] ?? '';
+/** 行の項目の値。値がないか空なら、undefined */
+const optional = (r: Row, name: string): string | undefined => r[name] || undefined;
 
 /** CDKが渡す対応表 */
 export interface Directory {
@@ -75,14 +80,15 @@ export function toAwsRecord(cloudTrailEvent: string | undefined, dir: Directory)
  */
 export function transactionsFrom(rows: Row[]): Transaction[] {
   const items: Transaction[] = rows.map((r) => ({
-    time: r['@timestamp'], requestId: r.requestId, route: r.route, purpose: r.purpose, user: r.user, status: num(r.status),
-    sessionRef: r.sessionRef || undefined, loggedInAt: num(r.loggedInAt), caseId: r.caseId || undefined, auditTarget: r.auditTarget || undefined,
+    time: text(r, '@timestamp'), requestId: text(r, 'requestId'), route: text(r, 'route'), purpose: text(r, 'purpose'), user: text(r, 'user'),
+    status: num(r.status), sessionRef: optional(r, 'sessionRef'), loggedInAt: num(r.loggedInAt), caseId: optional(r, 'caseId'),
+    auditTarget: optional(r, 'auditTarget'),
   }));
   // セッションの識別子がない記録（識別子を記録する前のセッション）は、ユーザーごとに1つにまとめる
   const key = (t: Transaction) => t.sessionRef ?? `user:${t.user}`;
   const latest = new Map<string, string>();
   for (const t of items) if ((latest.get(key(t)) ?? '') < t.time) latest.set(key(t), t.time);
-  const started = (t: Transaction) => (t.loggedInAt ? new Date(t.loggedInAt * 1000).toISOString() : latest.get(key(t))!);
+  const started = (t: Transaction) => (t.loggedInAt ? new Date(t.loggedInAt * 1000).toISOString() : latest.get(key(t)) ?? t.time);
   return items.sort((a, b) => started(b).localeCompare(started(a)) || key(a).localeCompare(key(b)) || a.time.localeCompare(b.time));
 }
 
@@ -96,34 +102,36 @@ export function ownRows(requestId: string, rows: Row[]): Row[] {
 
 /**
  * ログは各ホップが処理を終えたときに書くので、そのままでは下流のホップが先に並ぶ。処理時間から各ホップの処理の区間を求め、
- * 呼び出し元（actor）のホップの区間のうち、その区間を含む最も短いものを親とみなして、呼び出しの順（深さ優先）に並べる。
- * `hops`と`hopRows`は同じ順の、同じ記録である
+ * 呼び出し元（actor）のホップの区間のうち、その区間を含む最も短いものを親とみなして、呼び出しの順（深さ優先）に並べる
  */
-export function callOrder(hops: HopRecord[], hopRows: Row[]): HopRecord[] {
-  const span = (r: Row) => {
-    const end = logTime(r['@timestamp']);
-    const ms = num(r['timings.totalMs']);
-    return { start: ms === undefined ? end : end - ms, end };
-  };
-  const nodes = hops.map((h, i) => ({ h, ...span(hopRows[i]), children: [] as number[] }));
-  for (const n of nodes) if (n.start !== n.end) n.h.startedAt = new Date(n.start).toISOString();
-  const roots: number[] = [];
+export function callOrder(entries: { record: HopRecord; row: Row }[]): HopRecord[] {
+  interface Node { h: HopRecord; start: number; end: number; children: Node[] }
   const TOLERANCE_MS = 5;
-  nodes.forEach((n, i) => {
-    let parent = -1;
-    nodes.forEach((p, j) => {
-      if (j === i || p.h.hop !== n.h.actor) return;
-      if (p.start - TOLERANCE_MS <= n.start && n.end <= p.end + TOLERANCE_MS && (parent < 0 || p.end - p.start < nodes[parent].end - nodes[parent].start)) parent = j;
-    });
-    (parent < 0 ? roots : nodes[parent].children).push(i);
+  const nodes: Node[] = entries.map(({ record, row }) => {
+    const end = logTime(text(row, '@timestamp'));
+    const ms = num(row['timings.totalMs']);
+    return { h: record, start: ms === undefined ? end : end - ms, end, children: [] };
   });
+  for (const n of nodes) if (n.start !== n.end) n.h.startedAt = new Date(n.start).toISOString();
+  const length = (n: Node) => n.end - n.start;
+  const roots: Node[] = [];
+  for (const n of nodes) {
+    let parent: Node | undefined;
+    for (const p of nodes) {
+      if (p === n || p.h.hop !== n.h.actor) continue;
+      const contains = p.start - TOLERANCE_MS <= n.start && n.end <= p.end + TOLERANCE_MS;
+      if (contains && (!parent || length(p) < length(parent))) parent = p;
+    }
+    (parent ? parent.children : roots).push(n);
+  }
+  const byStart = (a: Node, b: Node) => a.start - b.start;
   const out: HopRecord[] = [];
-  const visit = (i: number, depth: number) => {
-    nodes[i].h.depth = depth;
-    out.push(nodes[i].h);
-    for (const c of nodes[i].children.sort((a, b) => nodes[a].start - nodes[b].start)) visit(c, depth + 1);
+  const visit = (n: Node, depth: number) => {
+    n.h.depth = depth;
+    out.push(n.h);
+    for (const c of n.children.sort(byStart)) visit(c, depth + 1);
   };
-  for (const r of roots.sort((a, b) => nodes[a].start - nodes[b].start)) visit(r, 1);
+  for (const r of roots.sort(byStart)) visit(r, 1);
   return out;
 }
 
@@ -154,14 +162,17 @@ export function reconcileRecords(rows: Row[], records: TrailRecord[], dir: Direc
   const purposeField = (app: string | undefined): Field => compare('目的', app, stamped && { value: stamped.purpose, event: stamped });
 
   const hopRows = rows.filter((r) => r.hop !== 'bff');
-  const hops: HopRecord[] = hopRows.map((r): HopRecord => {
+  const hops = hopRows.map((r): { record: HopRecord; row: Row } => ({ record: hopRecord(r), row: r }));
+
+  function hopRecord(r: Row): HopRecord {
+    const hop = text(r, 'hop');
     const base = {
-      time: r['@timestamp'], hop: r.hop, status: num(r.status), reason: r.reason || undefined, depth: 1, logGroup: dir.logGroups[r.hop],
+      time: text(r, '@timestamp'), hop, status: num(r.status), reason: optional(r, 'reason'), depth: 1, logGroup: dir.logGroups[hop],
     };
     if (r.message === 'rejected') {
       return { ...base, outcome: 'rejected', ...(r.stampedRequestId ? { claimedRequestId: r.requestId } : {}), check: { result: 'n/a' } };
     }
-    const tokenId = r.tokenId || undefined;
+    const tokenId = optional(r, 'tokenId');
     const ev = tokenId ? byToken.get(tokenId) : undefined;
     const fromToken = (value: string | undefined) => ev && { value, event: ev };
     // JWTを発行したroleは、role名で比べ、表示名で示す
@@ -180,7 +191,7 @@ export function reconcileRecords(rows: Row[], records: TrailRecord[], dir: Direc
       ...(ev ? { tokenEvent: { ...eventRef(ev), tokenId: ev.tokenId } } : {}),
       fields, check: summarize(fields),
     };
-  });
+  }
 
   const entryFields = bffRow ? [
     purposeField(bffRow.purpose),
@@ -188,9 +199,9 @@ export function reconcileRecords(rows: Row[], records: TrailRecord[], dir: Direc
   ] : [];
 
   return {
-    hops: callOrder(hops, hopRows),
+    hops: callOrder(hops),
     transaction: bffRow ? {
-      time: bffRow['@timestamp'], user: bffRow.user, route: bffRow.route, purpose: bffRow.purpose, status: num(bffRow.status),
+      time: text(bffRow, '@timestamp'), user: text(bffRow, 'user'), route: text(bffRow, 'route'), purpose: text(bffRow, 'purpose'), status: num(bffRow.status),
       logGroup: dir.logGroups.bff, fields: entryFields, check: summarize(entryFields),
     } : null,
     awsRecords: records.map(({ issuerRole: _, ...r }) => r),

@@ -32,6 +32,13 @@ beforeAll(async () => {
 });
 beforeEach(() => memory.reset());
 
+/** 記録されたスパンが1つだけであることを確かめて、そのスパンを返す */
+function onlySpan() {
+  const spans = memory.getFinishedSpans();
+  expect(spans).toHaveLength(1);
+  return spans[0]!;
+}
+
 const event = (headers: Record<string, string>, userArn = 'arn:aws:sts::123456789012:assumed-role/bff-exec/bff-fn') => ({
   headers, body: '{}', isBase64Encoded: false, requestContext: { authorizer: { iam: { userArn } } },
 }) as unknown as LambdaFunctionURLEvent;
@@ -40,7 +47,7 @@ describe('受信のスパン', () => {
   it('呼び出し元のtraceparentを親にし、検証の結果（actor、目的、scope、ユーザー）を属性に入れる', async () => {
     const handler = createHopHandler(async () => ({ status: 200, body: {} }), config);
     await handler(event({ 'x-authz-context': token, 'x-request-id': 'req-1', traceparent: `00-${TRACE_ID}-${PARENT}-01` }));
-    const [span] = memory.getFinishedSpans();
+    const span = onlySpan();
     expect(span.name).toBe('case-service');
     expect(span.spanContext().traceId).toBe(TRACE_ID);
     expect(span.parentSpanContext?.spanId).toBe(PARENT);
@@ -53,7 +60,7 @@ describe('受信のスパン', () => {
   it('拒否したときは、拒否の理由を属性に入れる', async () => {
     const handler = createHopHandler(async () => ({ status: 200, body: {} }), config);
     await handler(event({ 'x-authz-context': token, 'x-request-id': 'req-2' }, 'arn:aws:sts::123456789012:assumed-role/other/x'));
-    const [span] = memory.getFinishedSpans();
+    const span = onlySpan();
     expect(span.attributes).toMatchObject({ [ATTR.inbound]: 'rejected', [ATTR.rejectReason]: 'caller not allowed', [ATTR.status]: 403 });
     expect(span.attributes[ATTR.enduser]).toBeUndefined();
   });
@@ -94,7 +101,7 @@ describe('AWS SDKの呼び出しのスパン', () => {
 
   it('サービス名・操作名・テーブル名・リクエストIDを属性に入れ、キーは入れない', async () => {
     await fakeClient()({ TableName: 'cases', Key: { caseId: 'C-1001' } }, { output: { $metadata: { requestId: 'r-1', httpStatusCode: 200 } } });
-    const [span] = memory.getFinishedSpans();
+    const span = onlySpan();
     expect(span.name).toBe('DynamoDB.GetItem');
     expect(span.attributes).toMatchObject({
       'rpc.system': 'aws-api', 'rpc.service': 'DynamoDB', 'rpc.method': 'GetItem', 'aws.dynamodb.table_names': ['cases'], 'aws.request_id': 'r-1',

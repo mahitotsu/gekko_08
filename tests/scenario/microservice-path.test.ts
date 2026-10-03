@@ -225,7 +225,8 @@ describe('FR-5: ブラウザには認証情報を持たせない', () => {
   it('ログインのstateがcookieと違えば拒否し、一度使ったstateは二度と使えない', async () => {
     // ログインCSRFとstateの使い回しを防ぐ（脅威の総点検 G-3）
     const login = await browserGet('/api/login');
-    const state = /__Host-login=([\w-]+)/.exec(login.headers.get('set-cookie') ?? '')![1];
+    const state = /__Host-login=([\w-]+)/.exec(login.headers.get('set-cookie') ?? '')?.[1];
+    if (!state) throw new Error('no login state cookie');
     const cb = (qs: string, cookieState: string) => browserGet(`/api/callback?${qs}`, `__Host-login=${cookieState}`);
     expect((await cb(`code=x&state=${state}`, 'other-state')).body).toEqual({ error: 'invalid login state' });
     // 1回目：stateは消費される（認可コードは偽物なので、トークンの交換は失敗する）
