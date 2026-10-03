@@ -333,6 +333,8 @@ fraud-agentは、委任に使う認証情報を子プロセスに渡さない（
 - 1つのトレースは、bffの受信のスパンから始まり、各ホップの受信（SERVER）と送信（`call <呼び出し先>`）、その内訳（chain、JWTの発行）、
   AWS SDKの呼び出し（`DynamoDB.GetItem`など）が親子でつながる。エージェントの経路では、fraud-agentの受信の下にClaude Codeのスパン
   （`claude_code.*`）が入り、`tools/call`ごとのfraud-mcpへの送信がその下につながる。
+  Claude Codeのスパンはすべてプロセス内の処理（INTERNAL）なので、トレースのタイムラインには出るが、トレースマップには独立したサービスとして現れない。
+  マップでは、fraud-agentからfraud-mcpへの線として見える。
 - 受信のスパンの`authz.actor`・`authz.purpose`・`authz.scope`・`enduser.id`で、どの呼び出し元が、何のリクエストで、誰の代理で呼んだかがわかる。
   共通部品が拒否したときは、`authz.inbound`が`rejected`になり、`authz.reject_reason`に理由が入る。
 - スパンの量（2026-10-01の実測）は、1リクエストあたり、案件を開くリクエストで32スパン・約27KB、エージェントの分析（ツールの呼び出し3回）で
