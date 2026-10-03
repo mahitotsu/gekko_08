@@ -8,7 +8,7 @@
 2. **[設計ガイド](guide.md)**：仕組みと用語、各判断の根拠、自分のシステムへの当てはめ方、この構成が守らないもの、運用（トレースとログの見方、
    レイテンシの実測、規模の上限）。参照実装を自分のシステムに持ち込むときは、ここを読めば足りる。
 3. 必要に応じて、次を読む。
-   - なぜ作ったのか、既存の解決策とどう違うのか：[PRFAQ](prfaq/aws-authorization-context-propagation.md)（実装の前に書いた文書）
+   - なぜ作ったのか、既存の解決策とどう違うのか：[PRFAQ](prfaq/aws-authorization-context-propagation.md)（実装の前に書き、実装に合わせて更新している）
    - 参照実装が満たすべきこと：[要件定義](requirements.md)
    - 構成の詳細（IAMのポリシー、共通部品の動き、CDKの構成、テストと要件の対応）：[設計書](design/architecture.md)
    - 個々の判断の経緯と、採用しなかった選択肢：[ADRの索引](adr/README.md)
