@@ -653,6 +653,9 @@ flowchart LR
 
 - 1回の呼び出しごとにサーバーを作り、ツールは、その呼び出しで受け取った委任（共通部品の`call`）で業務のホップを呼ぶ。引数はスキーマで検証し、合わなければ業務のホップを呼ばない。
 - 2025年の版（`initialize`で始める版）は`WebStandardStreamableHTTPServerTransport`（セッションなし）で、`2026-07-28`版は`createMcpHandler`で応える。応じる版はSDKが決める。通知には本文なしの202を返す。
+  Claude Codeは`2026-07-28`版で話す（`server/discover`から始め、`mcp-method`と、ツールの呼び出しでは`mcp-name`のヘッダーを付ける）。
+- ツールの一覧は変わらない（`tools.listChanged: false`）と答える。変わると答えると、クライアントが変更の通知の購読（SSEのストリーム）を開こうとするが、ホップはJSONの本文しか返せない。
+  それでもSDKがストリームで応じた要求には、本文を読まずに、応じられないことをJSON-RPCのエラー（`-32601`）で返す。
 - MCPの仕様では認可は任意で、HTTPではOAuthに従うことが推奨される。fraud-mcpはOAuthではなく、他のホップと同じ入口（実行roleとJWT）で守る。
 
 **タイムアウト**

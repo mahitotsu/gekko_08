@@ -122,7 +122,7 @@ describe('FR-6: エージェントの経路も1つのトレースにつながる
   it('ツールの呼び出し（tools/call）のfraud-mcpへの送信は、Claude Codeのツールの実行のスパンの子になる', () => {
     const toMcp = named(agent, 'call fraud-mcp');
     const underTool = toMcp.filter((c) => byId(agent, c.parentSpanId)?.name === 'claude_code.tool.execution');
-    // 接続の処理（initializeやtools/list）は、Claude Codeがスパンの外で行うので、fraud-agentの受信のスパンの子になる
+    // 接続の処理（2026-07-28版のserver/discover、tools/listなど）は、Claude Codeがスパンの外で行うので、fraud-agentの受信のスパンの子になる
     const underAgent = toMcp.filter((c) => byId(agent, c.parentSpanId)?.name === 'fraud-agent');
     expect(underTool.length).toBe(named(agent, 'claude_code.tool.execution').length);
     expect(underTool.length + underAgent.length).toBe(toMcp.length);

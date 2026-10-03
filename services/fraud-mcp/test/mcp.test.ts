@@ -8,7 +8,7 @@ import { beforeAll, describe, expect, it, vi } from 'vitest';
 type Call = (target: string, body: unknown, options?: unknown) => Promise<{ status: number; body: unknown }>;
 /** JSON-RPCの応答のうち、テストが読む項目 */
 interface RpcResponse {
-  result?: { tools?: { name: string; inputSchema: { required?: string[] } }[]; isError?: boolean };
+  result?: { tools?: { name: string; inputSchema: { required?: string[] } }[]; isError?: boolean; [key: string]: unknown };
   error?: unknown;
 }
 type Business = (body: Record<string, unknown>, ctx: { headers: Record<string, string>; call: Call }) => Promise<{ status: number; body?: RpcResponse }>;
@@ -71,5 +71,42 @@ describe('fraud-mcp（2025年の版、ステートレス）', () => {
     const r = await rpc({ jsonrpc: '2.0', id: 5, method: 'tools/call', params: { name: 'get_case', arguments: { caseId: 1001 } } });
     expect(r.body?.result?.isError ?? r.body?.error).toBeTruthy();
     expect(calls).toEqual([]);
+  });
+});
+
+/**
+ * 2026-07-28版。Claude Code（Claude Agent SDK 0.3.286）が実際に送ったリクエストの形（`server/discover`から始め、`mcp-method`のヘッダーを付ける）
+ */
+describe('fraud-mcp（2026-07-28版）', () => {
+  const VERSION_2026 = '2026-07-28';
+  const meta = {
+    'io.modelcontextprotocol/protocolVersion': VERSION_2026,
+    'io.modelcontextprotocol/clientInfo': { name: 'claude-code', version: '0' },
+    'io.modelcontextprotocol/clientCapabilities': {},
+  };
+  // 2026-07-28版は、メソッドを`mcp-method`に、tools/callのツール名を`mcp-name`にも書く
+  const modern = (method: string, body: Record<string, unknown>, extra: Record<string, string> = {}) =>
+    rpc({ jsonrpc: '2.0', method, ...body, params: { ...((body.params) ?? {}), _meta: meta } },
+      { ...HEADERS, 'mcp-protocol-version': VERSION_2026, 'mcp-method': method, ...extra });
+
+  it('server/discoverに、ツールの一覧は変わらない（listChanged: false）と答える', async () => {
+    const r = await modern('server/discover', { id: 'probe-1' });
+    expect(r.status).toBe(200);
+    expect(r.body?.result).toMatchObject({ supportedVersions: [VERSION_2026], capabilities: { tools: { listChanged: false } } });
+  });
+
+  it('ツールの一覧とツールの呼び出しに、JSONで応える', async () => {
+    calls.length = 0;
+    const list = await modern('tools/list', { id: 1 });
+    expect((list.body?.result?.tools ?? []).map((t) => t.name).sort()).toEqual(['get_account', 'get_case', 'unfreeze_account']);
+    const r = await modern('tools/call', { id: 2, params: { name: 'get_account', arguments: { accountId: 'A-101' } } }, { 'mcp-name': 'get_account' });
+    expect(r.body?.result).toMatchObject({ isError: false, structuredContent: { status: 200 } });
+    expect(calls).toEqual([{ target: 'account-service', body: { action: 'get', accountId: 'A-101' } }]);
+  });
+
+  it('変更の通知の購読（ストリームで応じる要求）は、500にせず、応じられないことをJSON-RPCのエラーで返す', async () => {
+    const r = await modern('subscriptions/listen', { id: 'listen:0', params: { notifications: { toolsListChanged: true } } });
+    expect(r.status).toBe(200);
+    expect(r.body?.error).toMatchObject({ code: -32601 });
   });
 });

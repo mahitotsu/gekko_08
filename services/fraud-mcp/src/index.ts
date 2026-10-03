@@ -20,7 +20,8 @@ function toolResult(r: CallResult) {
 
 /** 1回の呼び出しに応えるMCPサーバー。ツールは、この呼び出しで受け取った委任（`call`）で業務のホップを呼ぶ */
 function buildServer(call: Call): McpServer {
-  const server = new McpServer({ name: 'fraud-mcp', version: '0.1.0' });
+  // ツールの一覧は変わらない。変わると答えると、クライアントは変更の通知の購読（SSEのストリーム）を開こうとするが、ホップはストリームを返せない
+  const server = new McpServer({ name: 'fraud-mcp', version: '0.1.0' }, { capabilities: { tools: { listChanged: false } } });
   server.registerTool('get_case', {
     description: '凍結の見直しの案件を取得する。案件の概要、対象の口座ID、取引の一覧を返す。',
     inputSchema: z.object({ caseId: z.string().describe('案件ID（例：C-1001）') }),
@@ -65,6 +66,11 @@ export const handler = createHopHandler(async (body, { headers, call }) => {
   // 共通部品が検証した本文とヘッダー（認証情報を除いたもの）から、MCPのSDKに渡すHTTPのリクエストを組み立て直す
   const request = new Request('https://fraud-mcp.internal/mcp', { method: 'POST', headers, body: JSON.stringify(body) });
   const res = await serveMcp(request, call);
+  // ホップの応答はJSONの本文だけ。SDKがストリーム（SSE）で応じた要求（変更の通知の購読など）は、読まずに、応じられないことをJSON-RPCのエラーで返す
+  if (res.headers.get('content-type')?.startsWith('text/event-stream')) {
+    await res.body?.cancel();
+    return { status: 200, body: { jsonrpc: '2.0', id: body.id ?? null, error: { code: -32601, message: 'Streaming responses are not supported by this stateless server' } } };
+  }
   const text = await res.text();
   return { status: res.status, body: text ? (JSON.parse(text) as unknown) : undefined };
 });
