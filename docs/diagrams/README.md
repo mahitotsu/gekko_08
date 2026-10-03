@@ -9,12 +9,14 @@
 ## 準備（Ubuntuの場合）
 
 ```sh
-sudo apt install -y graphviz fonts-noto-cjk python3-venv
+sudo apt install -y graphviz libgvplugin-neato-layout8 fonts-noto-cjk python3-venv
 python3 -m venv .venv-diagrams
 .venv-diagrams/bin/pip install -r docs/diagrams/requirements.txt
 ```
 
 日本語のラベルには、フォント「Noto Sans CJK JP」を使う。入っていないと、文字が化ける。
+線を直線で引くため、各ノードの位置を座標で決め、Graphvizのneatoで配置する。Ubuntuでは、neatoは`libgvplugin-neato-layout8`に分かれている。
+ノードを足すときは、ほかのノードやラベルと重ならない座標を選ぶ。
 
 ## 生成
 
