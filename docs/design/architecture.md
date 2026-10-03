@@ -127,7 +127,7 @@ IDトークンには、Pre Token Generation V2トリガーが`https://aws.amazon
 
 | 設定 | 置き場所 | 理由 |
 |---|---|---|
-| アプリクライアントのID、マネージドログインのドメイン、コールバックURL、ログアウトの戻り先、federated roleと目的を刻むroleのARN、呼び出し先 | SSM Parameter StoreのStringパラメータ。実行時に読む | 環境変数にすると、bff→CloudFront→アプリクライアント（コールバックURL）→federated role→目的を刻むrole→case-serviceのchain用role→case-service→bffという循環参照になる |
+| アプリクライアントのID、マネージドログインのドメイン、コールバックURL、ログアウトの戻り先、federated roleと目的を刻むroleのARN、呼び出し先 | SSM Parameter StoreのStringパラメータ。関数の初期化のときに読む（top-level await。読めなければ初期化が失敗し、次の呼び出しで初期化し直す） | 環境変数にすると、bff→CloudFront→アプリクライアント（コールバックURL）→federated role→目的を刻むrole→case-serviceのchain用role→case-service→bffという循環参照になる |
 | アプリクライアントのシークレット | SSM Parameter StoreのSecureString。デプロイ時にカスタムリソースが書く | CloudFormationはSecureStringを作れない |
 
 ### リクエストごとの処理
@@ -168,6 +168,7 @@ sequenceDiagram
 - 目的はbffが経路ごとに決める。bffは、リクエストの入口として、Transaction Tokensの発行サービスに当たる役割を持つ。
 - 目的の一覧はbffの定義に置き（§4）、刻める目的の値はIAMで限る（§5）。目的は、リクエストの種類として少数に保つ。画面を増やしても、既存の目的で足りるなら増やさない。
 - フロントエンドは、POSTの本文のSHA-256を`x-amz-content-sha256`ヘッダーに付ける（CloudFrontのOACの要件）。
+- ブラウザから受け取るのは、パスの案件ID・リクエストIDと、`POST /api/agent`の本文の案件ID（`^[\w-]{1,64}$`）だけである。経路は合っているが値が不正なら400、どの経路にも当たらなければ404を返す。
 
 応答（`/api/me`を除く）：
 
@@ -446,7 +447,7 @@ bffの入口は、CloudFrontのサービスプリンシパルを`AWS:SourceArn`�
 - 業務のコードは、呼び出しごとに付けるscopeを指定する（呼び出し先に1つしか求めていなければ省略できる）。
 - 業務のコードは追加のヘッダー（MCPの`Accept`など）を渡せる。ただし、認可・追跡・署名に使うヘッダー（`x-authz-context`、`x-authz-session`、`x-request-id`、`traceparent`、`authorization`など）は、渡しても除く。
 - 利用側の定義にないscopeなら、STSを呼ばずに失敗させる。目的の制限があるscopeを、許されていない目的のリクエストで付けようとすると、IAMが拒否する。
-- STSクライアントとJWKSは、Lambdaの実行環境ごとに使い回す。
+- 実行roleの認証情報とSigV4の署名器、JWKSは、Lambdaの実行環境ごとに使い回す。受け取ったセッションでSTSを呼ぶクライアントは、セッションの認証情報に結びつくので、セッションごとに作る。
 
 **MCP**（`@gekko08/authz-context/mcp`）：MCPサーバーのホップを、エージェントのフレームワークから送信時の手順で呼ぶための部品。
 
@@ -514,7 +515,7 @@ OpenTelemetryで出し、CloudWatchのTransaction Searchに集める（[収集�
 flowchart TD
   bff["bff（SERVER）"] --> callAgent["call fraud-agent（CLIENT）"]
   callAgent --> agentIn["fraud-agent（SERVER）"]
-  agentIn --> connect["call fraud-mcp（CLIENT）<br/>接続の処理：initialize、tools/list"]
+  agentIn --> connect["call fraud-mcp（CLIENT）<br/>接続の処理：server/discover、tools/list"]
   agentIn --> interaction["claude_code.interaction"]
   interaction --> toolExec["claude_code.tool.execution"]
   toolExec --> callMcp["call fraud-mcp（CLIENT）<br/>tools/call"]
@@ -537,7 +538,7 @@ flowchart TD
 | 引き継ぎ | 送信のスパンの`traceparent`を、ホップへの呼び出しのヘッダーに付ける。受信側はそれを親にする。`traceparent`を受け入れるのは、入口のIAMで呼び出し元を確かめたホップの間だけで、bffはブラウザから届いた`traceparent`を使わず、新しいトレースを始める |
 | AWS SDK | esbuildで1ファイルにまとめた関数では、AWS SDKの自動計装が効かない。共通部品の`traceAwsClient`がクライアントにミドルウェアを加え、呼び出しごとにスパンを作る。キーや本文は属性に入れない |
 | Claude Code | トレースだけを有効にする（メトリクスとログのイベントは出さない）。送り先は、共通部品の`startOtlpTraceRelay`が`127.0.0.1`に立てた受け口で、受け口は受けたOTLPを実行roleで署名してX-Rayに転送する。Claude Codeは、SDKが入れる`TRACEPARENT`を親にするので、`claude_code.interaction`はfraud-agentの受信のスパンの子になる。分析の終わりに、Claude Codeが残りを送り終えるのを待つ（最後の受信から300ms、最大2秒） |
-| MCPの中継 | 自分のスパンを作らず、受け取った`traceparent`を転送するときのコンテキストにする。Claude Codeは`tools/call`に`traceparent`を付けるので、その送信は`claude_code.tool.execution`の子になる。接続の処理（`initialize`、`tools/list`）はClaude Codeのスパンの外で行われるので、fraud-agentの受信のスパンの子になる |
+| MCPの中継 | 自分のスパンを作らず、受け取った`traceparent`を転送するときのコンテキストにする。Claude Codeは`tools/call`に`traceparent`を付けるので、その送信は`claude_code.tool.execution`の子になる。接続の処理（`2026-07-28`版の`server/discover`、`tools/list`）はClaude Codeのスパンの外で行われるので、fraud-agentの受信のスパンの子になる |
 | ログとの対応 | 構造化ログに、その時点のスパンのトレースID（`traceId`）を入れる |
 | メトリクス | 出さない。認可の判定の件数や処理時間は、構造化ログ（`handled`と`rejected`）からLogs Insightsで集計する（[収集先のADR](../adr/20261001020115-telemetry-destination-cloudwatch.md)） |
 | 入れないもの | 認証情報（JWT、受け渡すセッション）、呼び出しと応答の本文、プロンプト、ツールの入出力。業務のコードは属性を加えない |

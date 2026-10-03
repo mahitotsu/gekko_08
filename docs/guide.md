@@ -173,8 +173,10 @@ Token Exchangeでは、認可サーバーがトークンを交換するたびに
 - **このリポジトリをフォークして、`services/`を自分のサービスに置き換える。** 試すにはこれがいちばん早い。
 - **部品をコピーする。** 実行時の共通部品[packages/authz-context](../packages/authz-context/)と、合成の部品
   （[infra/lib/constructs/hop.ts](../infra/lib/constructs/hop.ts)の`Hop`、[infra/lib/delegation.ts](../infra/lib/delegation.ts)の`connectHops`、
-  [infra/lib/constructs/node-function.ts](../infra/lib/constructs/node-function.ts)）を自分のリポジトリに置き、npmのworkspacesで
-  `@gekko08/authz-context`として参照する。下の手順の`import`は、この名前を前提にしている。単体テスト（`packages/authz-context/test`、`infra/test`）も一緒に持っていく。
+  [infra/lib/constructs/node-function.ts](../infra/lib/constructs/node-function.ts)、cdk-nagの指摘を理由付きで認める[infra/lib/nag.ts](../infra/lib/nag.ts)）を
+  自分のリポジトリに置き、npmのworkspacesで`@gekko08/authz-context`として参照する（合成の部品は、型と定数を`@gekko08/authz-context/types`から読む）。
+  下の手順の`import`は、この名前を前提にしている。単体テスト（`packages/authz-context/test`、`infra/test`）も一緒に持っていく。
+  `infra/test`のcdk-nagのテストには、開発用の依存として`cdk-nag`が要る。
 
 ### 手順
 
@@ -213,10 +215,13 @@ Token Exchangeでは、認可サーバーがトークンを交換するたびに
    AWS SDKのクライアントは`traceAwsClient`で包み、呼び出しをトレースに出す。
 
    ```ts
+   import { createHopHandler } from '@gekko08/authz-context';
+   import { fetchEntitlements } from '@gekko08/entitlement-service/api'; // 属性サービスのパッケージが公開する関数と型
+
    export const handler = createHopHandler(async (body, { scope, call }) => {
      if (scope !== 'orders:read') return { status: 403, body: { error: 'forbidden' } };
      if (typeof body.orderId !== 'string') return { status: 400, body: { error: 'orderId is required' } };
-     const ent = await fetchEntitlements(call); // 属性サービスのパッケージが公開する関数
+     const ent = await fetchEntitlements(call);
      if (!ent) return { status: 403, body: { error: 'forbidden' } }; // 得られなければ拒否する
      const order = await loadOrder(body.orderId);
      if (order.branch !== ent.branch) return { status: 403, body: { error: 'forbidden' } };
@@ -244,6 +249,10 @@ Token Exchangeでは、認可サーバーがトークンを交換するたびに
    親のプロセスが署名して転送する。エージェントが本文（プロンプト、ツールの入出力）を記録しない設定になっているかを確かめる。
    エージェントが子プロセスで動く場合（Claude Agent SDK）は、委任に使う認証情報（受け取ったJWT、受け渡されたセッション、chainのセッション、実行roleの認証情報）を
    子プロセスに渡さない。渡すのは、モデルの呼び出しだけを許すroleの認証情報だけにし、組み込みのツール（シェルやファイルの読み書き）を無効にする（[fraud-agent](../services/fraud-agent/src/index.ts)）。
+
+   MCPサーバーもホップとして作り、MCPの公式SDK（v2）でステートレスに、JSONで応答させる（[fraud-mcp](../services/fraud-mcp/src/index.ts)）。
+   ホップの応答はJSONの本文だけなので、ツールの一覧は変わらない（`tools.listChanged: false`）と答え、変更の通知の購読（SSEのストリーム）を開かせない。
+   SDKは、共通部品が業務のコードに渡すヘッダー（`mcp-protocol-version`、`mcp-method`など）を読む。
 7. **データは各ホップの実行roleで読み書きする。** ユーザーの権限でAWSリソースに直接アクセスすることは扱わない（要件定義のスコープ外）。
 8. **シナリオテストを要件にひも付ける。** [tests/scenario](../tests/scenario/)を参考に、正しいユーザーが通ること、アクセス権のないユーザー、
    目的やscopeに合わない呼び出し、飛ばした呼び出し、許可していない主体が拒否されることを確かめる。影響の大きいscopeは、許していない目的のリクエストの
@@ -258,7 +267,7 @@ Token Exchangeでは、認可サーバーがトークンを交換するたびに
 - scopeや目的のないJWTを受け入れない。共通部品は拒否する。
 - 業務のコードで目的を使わない。目的で振る舞いを変えたいときは、scopeを分ける。
 - 属性サービスが使えないときは拒否する（fail closed）。
-- 受け渡すセッションとJWTをログや応答に出さない。共通部品は出さないが、業務のコードで`event`全体をログに出すと漏れる。
+- 受け渡すセッションとJWTをログや応答に出さない。共通部品は出さず、業務のコードに渡すヘッダーからも除く。共通部品を通さずにハンドラーを書き、`event`全体をログに出すと漏れる。
 - Pre Token Generationトリガー、User Poolの設定、属性サービスのデータを守る。SourceIdentityの値はこのLambdaが決め、AWSは値の正しさを
   検証しない。業務上のアクセス権は属性サービスのデータがすべてを決める。
 - ユーザーを認証するIdPを足すときは、federated roleの信頼ポリシーと、目的を刻むroleの`aws:FederatedProvider`の条件の両方を変える。

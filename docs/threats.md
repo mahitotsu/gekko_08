@@ -20,7 +20,7 @@
 テストのファイルは、`scenario/`が[tests/scenario/](../tests/scenario/)のシナリオテスト（デプロイしたスタックに対して実行する）である。ほかは単体テストで、
 `inbound`などが[packages/authz-context/test/](../packages/authz-context/test/)、`hop`・`purpose-role`・`auth-foundation`が[infra/test/](../infra/test/)、
 `reconcile`が[services/audit-service/test/](../services/audit-service/test/)、`entitlement-service`が[services/entitlement-service/test/](../services/entitlement-service/test/)、
-`fraud-agent`が[services/fraud-agent/test/](../services/fraud-agent/test/)にある。
+`fraud-agent`が[services/fraud-agent/test/](../services/fraud-agent/test/)、`routes`が[services/bff/test/](../services/bff/test/)にある。
 
 ## 集計
 
@@ -70,7 +70,7 @@
 | C-3 | 期限の切れたJWTを使う | JWTを手に入れた | 受信側の検証：`exp` | `scenario/token-verification`「期限の切れたJWTは401」 | 防ぐ（テストあり） | RFC 9700 |
 | C-4 | 有効期限内（5分）のJWTを、同じ宛先に再送する | JWTと、直前のホップの実行roleの署名を持つ | 止めない（`jti`の使用済みの記録は持たない） | 再送に要る署名を持つ主体は、新しいJWTを発行できる（[根拠](#防がないものの根拠)） | 影響なし | RFC 9700 |
 | C-5 | 別のリクエストのJWTを、このリクエストIDで送る | 途中のホップ | 受信側の検証：JWTに刻まれたリクエストIDとヘッダーの照合 | `scenario/token-verification`「JWTに刻まれたリクエストIDと違うリクエストIDで届いたら401（FR-6）」、`inbound` | 防ぐ（テストあり） | RFC 8693 |
-| C-6 | JWTや受け渡すセッションを、ログやトレースから盗む | ログやトレースを読める | 共通部品：認証情報をログにもスパンにも出さない | `scenario/observability`「テスト中に出たログのすべてに、認証情報のパターンが現れない」、`scenario/tracing`「2つのトレースのすべてのスパンに、認証情報のパターンが現れない」 | 防ぐ（テストあり） | RFC 9700 |
+| C-6 | JWTや受け渡すセッションを、ログやトレースから盗む | ログやトレースを読める | 共通部品：認証情報をログにもスパンにも出さず、業務のコードに渡すヘッダーからも除く | `scenario/observability`「テスト中に出たログのすべてに、認証情報のパターンが現れない」、`scenario/tracing`「2つのトレースのすべてのスパンに、認証情報のパターンが現れない」、`handler`「SR-3: 業務のコードに渡すヘッダーから、JWT、受け渡されたセッション、署名を除く」 | 防ぐ（テストあり） | RFC 9700 |
 | C-7 | 監査の応答から認証情報を得る（`AssumeRole`の応答にはアクセスキーが入る） | 監査担当 | 監査サービス：突き合わせの項目だけを取り出す | `reconcile`「SR-3: AssumeRoleの応答の認証情報もARNも取り出さない」 | 防ぐ（テストあり） | — |
 
 ## D. 委任の範囲の拡大
@@ -122,7 +122,7 @@
 | G-6 | セッションなしで、bffに最初のホップを呼ばせる | 外部 | BFF | `scenario/microservice-path`「セッションcookieがなければ401」 | 防ぐ（テストあり） | API2 |
 | G-7 | ログアウトしたあとのセッションを使う | cookieを盗んだ | BFF：ログアウトでセッションを消す | `scenario/microservice-path`「ログアウトするとセッションが無効になり、cookieが消える」 | 防ぐ（テストあり） | — |
 | G-8 | ブラウザから`traceparent`を送り、他人のトレースに紛れ込ませる | 外部（ログイン済み） | BFF：ブラウザの`traceparent`を使わない | `scenario/tracing`「ブラウザから届いたtraceparentは引き継がず、bffで新しいトレースを始める」 | 防ぐ（テストあり） | — |
-| G-9 | ブラウザから目的を指定して、許されていない操作の目的を刻ませる | 外部（ログイン済み） | BFF：目的は経路から決め、ブラウザから受け取らない | `scenario/microservice-path`「FR-2: ブラウザが別のユーザーや目的を自己申告しても結果は変わらない」 | 防ぐ（テストあり） | — |
+| G-9 | ブラウザから目的を指定して、許されていない操作の目的を刻ませる | 外部（ログイン済み） | BFF：目的は経路から決め、ブラウザから受け取らない | `scenario/microservice-path`「FR-2: ブラウザが別のユーザーや目的を自己申告しても結果は変わらない」、`routes`「本文で目的やユーザーを指定しても、最初のホップへの本文には入らない」「凍結の解除の目的は、解除の経路でだけ刻む」 | 防ぐ（テストあり） | — |
 
 ## H. 監査と追跡
 
