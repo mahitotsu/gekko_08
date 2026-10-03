@@ -164,7 +164,9 @@ sequenceDiagram
   S-->>F: federated roleのセッション（SourceIdentityが刻まれる）
   F->>S: AssumeRole → 目的を刻むrole（Tags＝purpose・requestId、transitive。RoleSessionName＝リクエストID）
   S-->>F: 目的を刻むroleのセッション
-  F->>H: §4の手順で呼ぶ
+  F->>S: GetWebIdentityToken（目的を刻むroleのセッションで。aud＝最初のホップ、Tags＝scope）
+  S-->>F: JWT
+  F->>H: bffの実行roleでSigV4署名して呼ぶ（x-authz-context：JWT、x-authz-session：目的を刻むroleのセッション）
   H-->>F: 応答
   F-->>B: 応答の本文＋requestId・purpose（bffの値で上書き）
 ```
@@ -224,7 +226,9 @@ sequenceDiagram
 | リクエストID | `x-request-id`ヘッダー | 追跡（§7） |
 
 - chainは`DurationSeconds`＝900、`RoleSessionName`＝リクエストID。JWTは`DurationSeconds`＝300、`SigningAlgorithm`＝`ES384`。
-- bffは、chainをせずに、目的を刻むroleのセッションをそのまま使う。
+- ホップを呼ぶ署名は、常に呼び出し元の実行roleで行う。chain用role（bffでは目的を刻むrole）のセッションは、JWTを作るためと、次のホップに渡すためだけに使い、
+  ホップを呼ぶ権限を持たない（SR-1）。
+- bffは、chainをせずに、目的を刻むroleのセッションでJWTを作る（上の図の3から）。
 - JWTの`Tags`のscopeは、業務のコードが呼び出しごとに指定する。利用側の定義でその呼び出し先に1つしか求めていなければ省略できる。
 
 ### 委任の範囲
