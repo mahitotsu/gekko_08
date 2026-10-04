@@ -24,7 +24,7 @@ frontendは、ログインした田中さんに頼まれて、田中さんの代
 
 ## 窓口は、名乗りではなく書類を見る
 
-では、現実の窓口は、代理人の名乗りをどう確かめているのでしょうか。たとえば三菱UFJ信託銀行は、家族が代理で取引する場合について、委任状を出すときは、名義人本人と来店する人の両方の確認書類を提示するよう案内しています（[「ご本人さまのご確認」について](https://www.tr.mufg.jp/ippan/tetsuzuki/kakunin.html)）。新宿区で戸籍の証明書を代理で請求するときも、委任状と、窓口に来た代理人の本人確認書類が求められます（[新宿区の案内](https://www.city.shinjuku.lg.jp/todokede/koseki02_001005.html)）。
+では、現実の窓口は、代理人の名乗りをどう確かめているのでしょうか。たとえば三菱UFJ信託銀行は、家族が代理で取引する場合について、委任状を出すときは、名義人本人と来店する人の両方の確認書類を提示するよう案内しています（[「ご本人さまのご確認」について](https://www.tr.mufg.jp/ippan/tetsuzuki/kakunin.html)）。ゆうちょ銀行も、委任状をもとに代理人が払い戻しなどの手続きをするときは、代理人の本人確認書類と印章が要るとしています（[委任状について](https://www.jp-bank.japanpost.jp/tetuzuki/ininjo/tzk_inj_index.html)）。
 
 求められる書類は機関や手続きによって少しずつ違いますが、私は、どの窓口も同じ3つを確かめていると考えています。そして、その書類には共通点があります。どれも、持ってきた代理人とは別の誰かが中身を保証していることです。
 
@@ -34,7 +34,7 @@ frontendは、ログインした田中さんに頼まれて、田中さんの代
 | 委任状 | 誰に宛てて、何を頼んだか | 委任者本人（自筆と押印） |
 | 代理人の本人確認書類 | 持ってきたのが代理人本人か | 発行した公的な機関 |
 
-本人確認書類は公的な機関が発行し、委任状は委任者本人が書きます。ゆうちょ銀行は、委任状のすべての欄を、委任する本人が自筆で書き、押印するよう求めています（[委任状について](https://www.jp-bank.japanpost.jp/tetuzuki/ininjo/tzk_inj_index.html)）。名乗りは名乗る本人しか保証しませんが、書類は代理人には書き換えられない誰かが保証します。**窓口が名乗りではなく書類を見るのは、代理人の言い分ではなく、代理人以外の保証を確かめるためだと私は考えています。**
+本人確認書類は公的な機関が発行し、委任状は委任者本人が書きます。先のゆうちょ銀行の案内は、委任状のすべての欄を、委任する本人が自筆で書き、押印するよう求めています。名乗りは名乗る本人しか保証しませんが、書類は代理人には書き換えられない誰かが保証します。**窓口が名乗りではなく書類を見るのは、代理人の言い分ではなく、代理人以外の保証を確かめるためだと私は考えています。**
 
 一方で、書類が保証するのは、頼まれたことまでです。「田中さんの代理で来ました。渡辺さんの口座の残高を見せてください」は、委任状と本人確認書類が揃っていても通りません。先の三菱UFJ信託銀行の案内でも、代理で取引できるのは、口座の名義人本人が委任した場合です。委任状は「田中さんに頼まれたこと」を示しても、「田中さんにその権利があること」までは示しません。
 
@@ -46,7 +46,7 @@ frontendは、ログインした田中さんに頼まれて、田中さんの代
 
 最初に浮かぶのは、ログインで得たトークン（OIDCのIDトークンやアクセストークン）をそのまま下流に渡す方法だと思います。手元にすでにあり、IdPの署名も付いているので、自然な発想です。
 
-ただ、これは委任者の本人確認書類のコピーだけを持ってきた人を、代理人として信じるのに近いと私は感じています。コピーは「誰の代理か」を示せても、「誰に宛てて何を頼まれたか」は示せません。ログインのトークンの`aud`はアプリのクライアントで、下流のサービスではないからです。受け取ったサービスは、自分宛てかを確かめられず、確かめることを諦めがちです。持ってきたのが誰かも示せません。トークンを手に入れた者は、誰でも同じように差し出せます。
+ただ、これは委任者の本人確認書類のコピーだけを持ってきた人を、代理人として信じるのに近いと私は感じています。コピーは「誰の代理か」を示せても、「誰に宛てて何を頼まれたか」は示せません。たとえばIDトークンの`aud`はアプリのクライアントで、下流のサービスではないからです。受け取ったサービスは、自分宛てかを確かめられず、確かめることを諦めがちです。持ってきたのが誰かも示せません。トークンを手に入れた者は、誰でも同じように差し出せます。
 
 この問題は、以前の記事「[奥までユーザーの権限を届けたい](https://zenn.dev/akring/articles/1a9f25fd6b04ab)」で「権限の丸ごと転送」として扱いました。そこでは、OAuth Token Exchange（RFC 8693）で解きました。ログインのトークンをそのまま渡すのではなく、呼び出すたびに認可サーバーに交換してもらい、`sub`（誰の代理か）は保ったまま、`aud`（宛先）を呼び出し先に、`scope`（頼む操作）をその呼び出しに必要なものだけに絞った新しいトークンを使います。窓口で言えば、宛先と委任事項を書いた委任状を、信頼できる発行者に毎回作ってもらう形です。標準に沿った正攻法だと、私は今も考えています。
 
@@ -62,10 +62,10 @@ frontendは、ログインした田中さんに頼まれて、田中さんの代
 ログインからbackendを呼ぶまでの流れは、次のとおりです。
 
 1. 田中さんがログインすると、CognitoがIDトークンを発行します。委任者の本人確認書類に当たるもので、frontendはこれをサーバー側に保管します。
-2. リクエストのたびに、frontendはIDトークンをSTSに渡し（`AssumeRoleWithWebIdentity`）、federated roleのロールセッションを受け取ります。ロールセッションは、STSが発行する有効期限の短い認証情報（一時的セキュリティ認証情報。[IAMの文書](https://docs.aws.amazon.com/ja_jp/IAM/latest/UserGuide/id_credentials_temp.html)）で、このときSourceIdentityとして`tanaka`が刻まれます。
-3. frontendは、そのロールセッションから、委任状を作るためのロールセッション（目的を刻むrole）に移ります。ロールからロールへ移ることを、ロールの連鎖（role chaining）と呼びます。このセッションにできるのはSTSへの依頼だけで、backendを呼ぶ権限はありません。
+2. リクエストのたびに、frontendはIDトークンをSTSに渡し（`AssumeRoleWithWebIdentity`）、フェデレーション用のロール（federated role）のロールセッションを受け取ります。ロールセッションは、STSが発行する有効期限の短い認証情報（一時的セキュリティ認証情報。[IAMの文書](https://docs.aws.amazon.com/ja_jp/IAM/latest/UserGuide/id_credentials_temp.html)）で、このときSourceIdentityとして`tanaka`が刻まれます。
+3. frontendは、そのロールセッションから、委任状を作るロールのロールセッションに移ります（このロールを、参照実装では「目的を刻むrole」と呼んでいます）。ロールからロールへ移ることを、ロールの連鎖（role chaining）と呼びます。このセッションにできるのはSTSへの依頼だけで、backendを呼ぶ権限はありません。
 4. frontendは、このセッションでSTSに委任状の発行を頼み（`GetWebIdentityToken`）、JWTを受け取ります。誰の代理かはセッションから引き継がれ、frontendは変えられません。宛先と頼む操作はfrontendが指定し、IAMが許した範囲だけを書けます。
-5. frontendは、自分の実行roleでSigV4の署名をして、JWTを添えてbackendを呼びます。
+5. frontendは、自分の実行ロールでSigV4の署名をして、JWTを添えてbackendを呼びます。
 
 図にすると次のようになります。
 
@@ -77,24 +77,24 @@ sequenceDiagram
   participant H as backend
   C->>F: IDトークン（source_identity: tanaka）
   F->>S: AssumeRoleWithWebIdentity
-  S-->>F: federated roleのロールセッション（SourceIdentity＝tanaka）
-  F->>S: AssumeRole（目的を刻むroleへ）
-  S-->>F: 目的を刻むroleのロールセッション
+  S-->>F: フェデレーション用のロールのロールセッション（SourceIdentity＝tanaka）
+  F->>S: AssumeRole（委任状を作るロールへ）
+  S-->>F: 委任状を作るロールのロールセッション
   F->>S: GetWebIdentityToken（aud＝backend、scope）
   S-->>F: JWT（委任状）
-  F->>H: frontendの実行roleでSigV4署名して呼ぶ（JWTを添える）
+  F->>H: frontendの実行ロールでSigV4署名して呼ぶ（JWTを添える）
   H->>H: 入口のIAMが呼び出し元を確かめ、アプリがJWTを検証する
 ```
 
 参照実装では、frontendをBFF（Backend for Frontend）の`bff`として、backendを案件を扱う`case-service`として作っています。
 
-この構成の要は、委任状を作る権限と、backendを呼ぶ権限を、別々の認証情報に分けることです。backendを呼ぶSigV4の署名は、常にfrontendの関数の実行roleで行います。委任状を作るロールセッションは、STSに委任状を頼むことしかできず、backendを呼ぶ権限を持ちません。
+この構成の要は、委任状を作る権限と、backendを呼ぶ権限を、別々の認証情報に分けることです。backendを呼ぶSigV4の署名は、常にfrontendの関数の実行ロールで行います。委任状を作るロールセッションは、STSに委任状を頼むことしかできず、backendを呼ぶ権限を持ちません。
 
 こうしておくと、片方が漏れても、それだけではbackendに届きません。委任状（JWT）を拾った人は、代理人の本人確認書類を持っていないので、窓口に持ち込んでも受け付けてもらえません。委任状を作るロールセッションが漏れた場合は、委任状は作れても、窓口に持ち込めません。**権限を2つに分けることで、どちらか一方が漏れたときの被害を、委任状が出回ることまでにとどめています。** 両方を持ち出された場合は別で、最後に扱います。
 
 ## 委任者の本人確認書類：IDトークンからSourceIdentityを刻む
 
-STSのSourceIdentityは、roleを引き受けるときに設定する値で、一度設定すると変えられず、role chainingの先にも引き継がれます（[AssumeRoleWithWebIdentityのAPIリファレンス](https://docs.aws.amazon.com/STS/latest/APIReference/API_AssumeRoleWithWebIdentity.html)）。OIDCのIDトークンに`https://aws.amazon.com/source_identity`クレームがあれば、`AssumeRoleWithWebIdentity`がその値をSourceIdentityにします。
+STSのSourceIdentityは、ロールを引き受けるときに設定する値で、一度設定すると変えられず、ロールの連鎖の先にも引き継がれます（[AssumeRoleWithWebIdentityのAPIリファレンス](https://docs.aws.amazon.com/STS/latest/APIReference/API_AssumeRoleWithWebIdentity.html)）。OIDCのIDトークンに`https://aws.amazon.com/source_identity`クレームがあれば、`AssumeRoleWithWebIdentity`がその値をSourceIdentityにします。
 
 Cognito User Poolは既定ではこのクレームを入れないので、Pre Token Generation V2のトリガーで入れます。参照実装のトリガーは、これだけです。
 
@@ -111,9 +111,9 @@ export const handler = async (event: PreTokenGenerationV2TriggerEvent) => {
 };
 ```
 
-STSにCognitoのIDトークンを受け付けさせるには、設定が2つ要ります。1つは、User PoolをIAMのOIDC providerとして登録することです。これで、STSはこのUser Poolが署名したIDトークンを検証できるようになります。もう1つは、federated roleの信頼ポリシーで、どのIDトークンならこのroleのロールセッションを始めてよいかを書くことです（[コード](https://github.com/mahitotsu/gekko_08/blob/bfabebb9155f0fa5e6ea923a061042a889188dcf/infra/lib/constructs/auth-foundation.ts#L81-L99)）。
+STSにCognitoのIDトークンを受け付けさせるには、設定が2つ要ります。1つは、User PoolをIAMのOIDC providerとして登録することです。これで、STSはこのUser Poolが署名したIDトークンを検証できるようになります。もう1つは、フェデレーション用のロールの信頼ポリシーで、どのIDトークンならこのロールのロールセッションを始めてよいかを書くことです（[コード](https://github.com/mahitotsu/gekko_08/blob/bfabebb9155f0fa5e6ea923a061042a889188dcf/infra/lib/constructs/auth-foundation.ts#L81-L99)）。
 
-```json:federated roleの信頼ポリシー（抜粋）
+```json:フェデレーション用のロールの信頼ポリシー（抜粋）
 {
   "Effect": "Allow",
   "Principal": { "Federated": "<User PoolのOIDC provider>" },
@@ -122,20 +122,20 @@ STSにCognitoのIDトークンを受け付けさせるには、設定が2つ要�
 }
 ```
 
-意図したIdP（このUser Pool）が、frontendに宛てて発行したIDトークン（`aud`がfrontendのアプリクライアントのID）を持っているときだけ、federated roleのロールセッションを始められる、という条件です。`aud`の条件がないと、同じUser Poolがfrontend以外のアプリクライアントに宛てて発行したIDトークンでも、同じユーザーとして引き受けられてしまいます。
+意図したIdP（このUser Pool）が、frontendに宛てて発行したIDトークン（`aud`がfrontendのアプリクライアントのID）を持っているときだけ、フェデレーション用のロールのロールセッションを始められる、という条件です。`aud`の条件がないと、同じUser Poolがfrontend以外のアプリクライアントに宛てて発行したIDトークンでも、同じユーザーとして引き受けられてしまいます。
 
-実際に委任状を発行するのは、federated roleのセッションではなく、そこから引き受けた「目的を刻むrole」のセッションです。ここでリクエストの目的とリクエストIDがタグとして付きます。その意味は、この記事では扱いません。
+参照実装では、委任状を作るロールに移るときに、リクエストの目的とリクエストIDをタグとして付けています。その意味は、別の記事で扱います。
 
 ### 本人確認書類は、委任状を作る段階で確かめる
 
-backendに届くのは委任状だけで、田中さんの本人確認書類（IDトークン）そのものは届きません。委任状には「tanakaの代理」と書かれていても、その本人確認書類をどのIdPが発行したかは書かれていません（[検証記録](https://github.com/mahitotsu/gekko_08/blob/main/experiments/federated-provider/RESULTS.md)）。backendは、委任状を作る段階で本人確認書類が確かめられたことを信頼します。その信頼を置けるのは、委任状の作り方を知っているからです。委任状の作成をSTSに頼めるのは、目的を刻むroleのロールセッションだけで、そのroleへは、下に書く本人確認書類の確認を通らないと移れません。委任状の`sub`には作成を頼んだroleが入るので、backendはそれが目的を刻むroleであることを確かめられます（詳しくは後述）。
+backendに届くのは委任状だけで、田中さんの本人確認書類（IDトークン）そのものは届きません。委任状には「tanakaの代理」と書かれていても、その本人確認書類をどのIdPが発行したかは書かれていません（[検証記録](https://github.com/mahitotsu/gekko_08/blob/main/experiments/federated-provider/RESULTS.md)）。backendは、委任状を作る段階で本人確認書類が確かめられたことを信頼します。その信頼を置けるのは、委任状の作り方を知っているからです。委任状の作成をSTSに頼めるのは、委任状を作るロールのロールセッションだけで、そのロールへは、下に書く本人確認書類の確認を通らないと移れません。委任状の`sub`には作成を頼んだロールが入るので、backendはそれが委任状を作るロールであることを確かめられます（詳しくは後述）。
 
-backendがこの信頼を十分に置けるように、本人確認書類は、委任状を作る段階で2回確かめます。1回目は、frontendがIDトークンでロールセッションを始めるとき（先のfederated roleの信頼ポリシー）です。2回目は、委任状を作るロールセッションに移るとき（目的を刻むroleの信頼ポリシー）で、条件キー`aws:FederatedProvider`で、このUser Poolで認証されたことを確かめます（[コード](https://github.com/mahitotsu/gekko_08/blob/bfabebb9155f0fa5e6ea923a061042a889188dcf/infra/lib/constructs/bff.ts#L67-L89)）。片方の設定を誤っても、別のIdPの本人確認書類では委任状を作れません。
+backendがこの信頼を十分に置けるように、本人確認書類は、委任状を作る段階で2回確かめます。1回目は、frontendがIDトークンでロールセッションを始めるとき（先のフェデレーション用のロールの信頼ポリシー）です。2回目は、委任状を作るロールセッションに移るとき（委任状を作るロールの信頼ポリシー）で、条件キー`aws:FederatedProvider`で、このUser Poolで認証されたことを確かめます（[コード](https://github.com/mahitotsu/gekko_08/blob/bfabebb9155f0fa5e6ea923a061042a889188dcf/infra/lib/constructs/bff.ts#L67-L89)）。片方の設定を誤っても、別のIdPの本人確認書類では委任状を作れません。
 
-```json:目的を刻むroleの信頼ポリシー（抜粋）
+```json:委任状を作るロールの信頼ポリシー（抜粋）
 {
   "Effect": "Allow",
-  "Principal": { "AWS": "<federated role>" },
+  "Principal": { "AWS": "<フェデレーション用のロール>" },
   "Action": "sts:AssumeRole",
   "Condition": { "StringEquals": { "aws:FederatedProvider": "cognito-idp.<region>.amazonaws.com/<User PoolのID>" } }
 }
@@ -153,7 +153,7 @@ backendがこの信頼を十分に置けるように、本人確認書類は、�
 {
   "iss": "https://<アカウント固有のID>.tokens.sts.global.api.aws",
   "aud": "<backendのaud>",
-  "sub": "arn:aws:iam::<アカウントID>:role/<目的を刻むrole>",
+  "sub": "arn:aws:iam::<アカウントID>:role/<委任状を作るロール>",
   "https://sts.amazonaws.com/": {
     "source_identity": "tanaka",
     "principal_tags": { "purpose": "case-summary", "requestId": "<リクエストID>" },
@@ -162,7 +162,7 @@ backendがこの信頼を十分に置けるように、本人確認書類は、�
 }
 ```
 
-「tanakaの代理で」「backendに宛てて」「案件の要約を読むこと（`case:summary`）を頼む」と書かれ、STSが署名しています。
+「tanakaの代理で」「backendに宛てて」「案件の要約を読むこと（`case:summary`）を頼む」と書かれ、STSが署名しています。`principal_tags`の`purpose`と`requestId`は、別の記事で扱います。
 
 大事なのは、委任状に何を書けるかをIAMが縛ることです。セッションに付ける権限は次のとおりです（[コード](https://github.com/mahitotsu/gekko_08/blob/bfabebb9155f0fa5e6ea923a061042a889188dcf/infra/lib/constructs/hop.ts#L171-L204)）。
 
@@ -200,21 +200,21 @@ backendがこの信頼を十分に置けるように、本人確認書類は、�
 
 1つ目は、委任状が本物で、改ざんされていないことです。委任状にはSTSが秘密鍵で署名しているので、backendはSTSが公開している公開鍵で署名を検証します。検証できれば、STSが作り、その後に書き換えられていない委任状だとわかります。使う公開鍵は自アカウントのSTSが公開するものだけで、署名の方式はES384に固定します。方式を固定しないと、署名を外したJWTや、公開鍵をHMACの鍵として使う取り違えを受け付けかねません。
 
-2つ目は、委任状の中身です。誰が作ったか（`iss`が自アカウントのSTSで、`sub`が作成を頼んだrole）、誰に宛てたか（`aud`がbackend自身）、誰の代理か（`source_identity`）、何を頼んだか（scope）を確かめます。`sub`は、入口を通った呼び出し元に対応づけたroleと照合します。frontendからの呼び出しなら、目的を刻むroleです。別の手順で作られた委任状は、ここで止まります。宛先が違う委任状も、別のサービス宛てのものを素通しで渡されたとみなして拒否します。`source_identity`やscopeのない委任状は何も許さず、scopeは、backendが提供すると定義したscopeに含まれるかを照合します。受信側の実装は[共通部品](https://github.com/mahitotsu/gekko_08/blob/bfabebb9155f0fa5e6ea923a061042a889188dcf/packages/authz-context/src/inbound.ts#L80-L122)にあります。
+2つ目は、委任状の中身です。誰が作ったか（`iss`が自アカウントのSTSで、`sub`が作成を頼んだロール）、誰に宛てたか（`aud`がbackend自身）、誰の代理か（`source_identity`）、何を頼んだか（scope）を確かめます。`sub`は、入口を通った呼び出し元に対応づけたロールと照合します。frontendからの呼び出しなら、委任状を作るロールです。別の手順で作られた委任状は、ここで止まります。宛先が違う委任状も、別のサービス宛てのものを素通しで渡されたとみなして拒否します。`source_identity`やscopeのない委任状は何も許さず、scopeは、backendが提供すると定義したscopeに含まれるかを照合します。受信側の実装は[共通部品](https://github.com/mahitotsu/gekko_08/blob/bfabebb9155f0fa5e6ea923a061042a889188dcf/packages/authz-context/src/inbound.ts#L80-L122)にあります。
 
-3つ目は、持ってきたのが代理人本人かです。SigV4で署名された呼び出しからは、署名したIAMのroleがわかります。これが代理人の本人確認書類に当たります。注意したいのは、ここで署名するroleが、委任状の作成を頼んだ目的を刻むroleではなく、代理人であるfrontend自身の実行roleだということです。
+3つ目は、持ってきたのが代理人本人かです。SigV4で署名された呼び出しからは、署名したIAMのロールがわかります。これが代理人の本人確認書類に当たります。注意したいのは、ここで署名するロールが、委任状を作るロールではなく、代理人であるfrontend自身の実行ロールだということです。
 
-**3つ目の確認は、backendのアプリではなく、IAMのresource policyに任せます。** どの代理人がbackendを呼べるかをresource policyの条件で制限し、それ以外の呼び出しは関数に届く前に止めます。そのために、backendのFunction URLを`AWS_IAM`認証にして署名のない呼び出しを止め、resource policyでfrontendの実行role以外の署名をDenyします（[コード](https://github.com/mahitotsu/gekko_08/blob/bfabebb9155f0fa5e6ea923a061042a889188dcf/infra/lib/constructs/hop.ts#L110-L134)）。
+**3つ目の確認は、backendのアプリではなく、IAMのresource policyに任せます。** どの代理人がbackendを呼べるかをresource policyの条件で制限し、それ以外の呼び出しは関数に届く前に止めます。そのために、backendのFunction URLを`AWS_IAM`認証にして署名のない呼び出しを止め、resource policyでfrontendの実行ロール以外の署名をDenyします（[コード](https://github.com/mahitotsu/gekko_08/blob/bfabebb9155f0fa5e6ea923a061042a889188dcf/infra/lib/constructs/hop.ts#L110-L134)）。
 
 ```json:backendの入口のresource policy（抜粋）
 {
   "Sid": "DenyOtherPrincipals", "Effect": "Deny", "Principal": "*",
   "Action": ["lambda:InvokeFunctionUrl", "lambda:InvokeFunction"], "Resource": "<この関数>",
-  "Condition": { "ArnNotEquals": { "aws:PrincipalArn": ["<呼び出し元の実行role>"] } }
+  "Condition": { "ArnNotEquals": { "aws:PrincipalArn": ["<呼び出し元の実行ロール>"] } }
 }
 ```
 
-Allowではなく明示的なDenyにしているのは、同じアカウントでは、resource policyが許していなくても、呼び出す側のidentity policyの広い許可だけで呼べてしまうからです（[検証記録](https://github.com/mahitotsu/gekko_08/blob/main/experiments/actor-subject-jwt/RESULTS.md)）。呼び出し元の一覧は、backendの作り手が手で書くのではありません。各呼び出し元が「このbackendを呼ぶ」と自分の側で宣言し、CDKがそれを集めて一覧を作り、呼び出し先であるbackendのresource policyに書き込みます。この仕組みは、scopeの宣言と合わせて別の記事で扱います。同じ実行roleを別の関数が使う場合の区別など、ポリシーの細部は[設計書§5](https://github.com/mahitotsu/gekko_08/blob/main/docs/design/architecture.md#5-iamの設計)にあります。
+Allowではなく明示的なDenyにしているのは、同じアカウントでは、resource policyが許していなくても、呼び出す側のidentity policyの広い許可だけで呼べてしまうからです（[検証記録](https://github.com/mahitotsu/gekko_08/blob/main/experiments/actor-subject-jwt/RESULTS.md)）。呼び出し元の一覧は、backendの作り手が手で書くのではありません。各呼び出し元が「このbackendを呼ぶ」と自分の側で宣言し、CDKがそれを集めて一覧を作り、呼び出し先であるbackendのresource policyに書き込みます。この仕組みは、scopeの宣言と合わせて別の記事で扱います。同じ実行ロールを別の関数が使う場合の区別など、ポリシーの細部は[設計書§5](https://github.com/mahitotsu/gekko_08/blob/main/docs/design/architecture.md#5-iamの設計)にあります。
 
 ここまでで確かめたのは書類だけです。田中さんが渡辺さんの口座を見てよいかどうかは、受け取った書類ではなく、窓口で業務を行う側が、自分の業務ルールに従って決めることです。
 
@@ -222,7 +222,7 @@ Allowではなく明示的なDenyにしているのは、同じアカウント�
 
 この構成には代償があります。
 
-- **レイテンシ**：frontendがbackendを呼ぶたびに、STSへの往復が3回加わりました。中央値で、`AssumeRoleWithWebIdentity`が15ms、目的を刻むroleへの`AssumeRole`が55ms、`GetWebIdentityToken`が42msです（2026-10-01、ap-northeast-1、ウォームで測定。[設計ガイド§6](https://github.com/mahitotsu/gekko_08/blob/main/docs/guide.md#レイテンシの実測)）。認可サーバーへの往復がSTSへの往復に置き換わるだけで、回数は減りません。
+- **レイテンシ**：frontendがbackendを呼ぶたびに、STSへの往復が3回加わりました。中央値で、`AssumeRoleWithWebIdentity`が15ms、委任状を作るロールへの`AssumeRole`が55ms、`GetWebIdentityToken`が42msです（2026-10-01、ap-northeast-1、ウォームで測定。[設計ガイド§6](https://github.com/mahitotsu/gekko_08/blob/main/docs/guide.md#レイテンシの実測)）。認可サーバーでトークンを交換する構成なら、呼び出し1回につき往復は1回なので、往復の回数はむしろ増えます。
 - **上限が文書にない**：`GetWebIdentityToken`の呼び出し回数の上限は、文書にもService Quotasにも見つかりませんでした（2026-10-01に確認）。
 - **取り消せない**：発行した委任状（JWT、有効期間5分）は、途中で取り消せません。
 - **1つのCDKアプリに収まる範囲が前提**：呼び出し元の宣言を集めてbackendのresource policyに書き込むのは、CDKの合成の中で行っています。参照実装はすべてのサービスを1つのCDKアプリ（1つのスタック）に置いているので、これが成り立ちます。サービスごとにリポジトリやチームが分かれる構成では、宣言を共有する場所と、宣言をレビューする手順が別に要り、参照実装はまだそれを持っていません（[設計ガイド§7](https://github.com/mahitotsu/gekko_08/blob/main/docs/guide.md#7-将来の拡張の方向)）。
@@ -232,7 +232,7 @@ Allowではなく明示的なDenyにしているのは、同じアカウント�
 - **frontendの侵害**：frontendはログイン中のすべてのユーザーのIDトークンを持っています。誰の代理かは変えられなくても、侵害されれば、ログイン中の誰の代理としても、許された範囲の委任状を作れます。frontendは信頼の起点です。
 - **IdPの設定の改ざん**：Pre Token Generationの関数やUser Poolの設定を改ざんされると、任意のSourceIdentityを入れられます。AWSは値の正しさを検証しないので、ここは信頼の起点です。
 - **アカウントの管理者**：IAMを書き換えられる管理者は、信頼ポリシーを書き換えられます。単一のアカウントの中でIAMに強制させる構成なので、管理者に対する境界はアカウントの分離やSCPで作ります。
-- **両方の認証情報の持ち出し**：実行環境から、実行roleの認証情報と委任状を作るロールセッションの両方を持ち出されると、有効期限内はfrontendとしてbackendを呼べます。持ち出した認証情報で呼んでも、IAMにはfrontendからの呼び出しと区別できませんでした。
+- **両方の認証情報の持ち出し**：実行環境から、実行ロールの認証情報と委任状を作るロールセッションの両方を持ち出されると、有効期限内（ロールセッションは15分、委任状は5分）に限り、そのロールセッションのユーザーの代理として、そのロールで書ける範囲の委任状を添えて、frontendとしてbackendを呼べます。持ち出した認証情報で呼んでも、IAMにはfrontendからの呼び出しと区別できませんでした。
 
 ---
 
@@ -254,5 +254,7 @@ frontendがAPIキーでbackendを呼ぶ構成では、確かめられるのは�
 :::
 
 窓口の手続きは、この原則をそのまま形にしています。代理人がいくら「田中さんの代理です」と言っても、窓口はそれだけでは受け付けず、委任状と本人確認書類を求めます。どちらも代理人ではない誰か（委任者本人や公的な機関）が保証したもので、窓口はそれを自分で確かめられます。この記事でAWSに置き換えたのも、同じことです。frontendが`x-user-id`で名乗る代わりに、Cognitoが認証してSTSが署名したJWTを渡し、backendはその署名を自分で検証します。呼んできたのがfrontendであることも、frontendの名乗りではなく、IAMが署名から確かめます。
+
+とはいえ、この構成にも自己申告は残っています。何を頼むかはfrontendが決め、その中身が田中さんの意思どおりかは確かめられません。残る自己申告は、frontendを信頼の起点として明示し、書ける範囲をIAMで限定しています。
 
 自分のシステムでも、どこかで自己申告をそのまま信じていないか、信じているなら、それを誰に保証させれば受け取った側が確かめられるかを、一度見直してみてはどうでしょうか。この記事が、その見直しのきっかけになれば幸いです。

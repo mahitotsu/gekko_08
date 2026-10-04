@@ -25,7 +25,7 @@ digraph G {
     <tr>
       <td bgcolor="#e0f2fe" align="left" balign="left"><b>代理人の本人確認書類</b></td>
       <td align="left" balign="left">持ってきたのが代理人本人か</td>
-      <td align="left" balign="left">実行roleによるSigV4の署名<br/>（＋JWTの <font face="monospace">sub</font> との対応）</td>
+      <td align="left" balign="left">実行ロールによるSigV4の署名<br/>（＋JWTの <font face="monospace">sub</font> との対応）</td>
       <td align="left" balign="left">IAM（入口で確かめる）</td>
     </tr>
     <tr>
