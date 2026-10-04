@@ -1,0 +1,34 @@
+digraph G {
+  graph [fontname="Noto Sans CJK JP", bgcolor="white", pad="0.4", nodesep="0.5", ranksep="0.35", rankdir=TB, label=<<b>「田中さんの代理で来ました」を、AWSが署名しIAMが強制する書類にする</b>>, labelloc=t, fontsize=20];
+  node [fontname="Noto Sans CJK JP", shape=plain, fontsize=14];
+  edge [fontname="Noto Sans CJK JP"];
+
+  t [label=<
+  <table border="0" cellborder="1" cellspacing="0" cellpadding="10">
+    <tr>
+      <td bgcolor="#334155"><font color="white"><b>窓口で求められるもの</b></font></td>
+      <td bgcolor="#334155"><font color="white"><b>確かめること</b></font></td>
+      <td bgcolor="#334155"><font color="white"><b>AWSでの担い手</b></font></td>
+    </tr>
+    <tr>
+      <td bgcolor="#e0f2fe" align="left" balign="left"><b>委任者の身分証明書</b></td>
+      <td align="left" balign="left">誰の代理か</td>
+      <td align="left" balign="left">SourceIdentity（IDトークンから刻む）<br/>→ JWTの <font face="monospace">source_identity</font></td>
+    </tr>
+    <tr>
+      <td bgcolor="#e0f2fe" align="left" balign="left"><b>委任状</b></td>
+      <td align="left" balign="left">誰に宛てて、何を頼んだか</td>
+      <td align="left" balign="left"><font face="monospace">GetWebIdentityToken</font> の <font face="monospace">aud</font> と scope<br/>（書けるものをIAMが縛る）</td>
+    </tr>
+    <tr>
+      <td bgcolor="#e0f2fe" align="left" balign="left"><b>代理人の本人確認書類</b></td>
+      <td align="left" balign="left">持ってきたのが代理人本人か</td>
+      <td align="left" balign="left">SigV4の署名と入口のIAM<br/>（＋JWTの <font face="monospace">sub</font> との対応）</td>
+    </tr>
+    <tr>
+      <td bgcolor="#f1f5f9" align="left" balign="left"><i>（書類に書かないもの）</i></td>
+      <td align="left" balign="left">田中さんがその口座を<br/>扱ってよいか</td>
+      <td align="left" balign="left">受け取った側が属性サービスに問い合わせる</td>
+    </tr>
+  </table>>];
+}
