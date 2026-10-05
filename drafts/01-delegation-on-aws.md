@@ -26,7 +26,7 @@ frontendは、ログインした田中さんに頼まれて、田中さんの代
 
 また、書類が示すのは頼まれたことまでです。窓口でも「田中さんの代理で来ました。渡辺さんの口座の残高を見せてください」は、書類が揃っていても通りません。田中さんにその権利があるかは、書類には書かず、backendが自分の業務ルールで判断します。
 
-使うのはCognito、STS、IAM、Lambdaだけで、認可サーバーは置きません。範囲は1つの呼び出しで、frontendがログインしたユーザーの代理としてbackendを呼び、backendがそれを検証するところまでです。呼び出しが多段になる場合（代理人がさらに別の代理人に頼む場合）、リクエストの目的とリクエストIDの扱い、scopeや呼び出し元の一覧をCDKで生成する仕組みは、別の記事で扱います。仕組みは参照実装[gekko_08](https://github.com/mahitotsu/gekko_08)として公開しています。
+使うのはCognito、STS、IAM、Lambdaだけで、認可サーバーは置きません。範囲は1つの呼び出しで、frontendがログインしたユーザーの代理としてbackendを呼び、backendがそれを検証するところまでです。呼び出しが多段になる場合（代理人がさらに別の代理人に頼む場合）や、リクエストの目的とリクエストIDの扱いは、この記事では扱いません。仕組みは、それらも含めて参照実装[gekko_08](https://github.com/mahitotsu/gekko_08)として公開しています。
 
 ---
 
@@ -150,7 +150,7 @@ SourceIdentityを引き継ぐロールの連鎖でも、`sts:SetSourceIdentity`�
 }
 ```
 
-「tanakaの代理で」「backendに宛てて」「案件の要約を読むこと（`case:summary`）を頼む」と書かれ、STSが署名しています。リージョンのエンドポイントで発行を頼んでも、`iss`は`tokens.sts.global.api.aws`の形でした（[検証記録](https://github.com/mahitotsu/gekko_08/blob/main/experiments/feasibility/RESULTS.md)）。`principal_tags`のリクエストの目的とリクエストIDは、冒頭で触れたとおり別の記事で扱います。
+「tanakaの代理で」「backendに宛てて」「案件の要約を読むこと（`case:summary`）を頼む」と書かれ、STSが署名しています。リージョンのエンドポイントで発行を頼んでも、`iss`は`tokens.sts.global.api.aws`の形でした（[検証記録](https://github.com/mahitotsu/gekko_08/blob/main/experiments/feasibility/RESULTS.md)）。`principal_tags`のリクエストの目的とリクエストIDは、多段の呼び出しで使うもので、この記事では扱いません（[設計書§4](https://github.com/mahitotsu/gekko_08/blob/main/docs/design/architecture.md#4-ホップ間の呼び出し)）。
 
 大事なのは、委任状を発行してよいか、何を書いてよいかを、IAMのポリシーの評価が判定することです。委任状の発行について、認可サーバーが実行時に担っていた判定が、IAMに移ります。セッションに付ける権限は次のとおりです（[コード](https://github.com/mahitotsu/gekko_08/blob/bfabebb9155f0fa5e6ea923a061042a889188dcf/infra/lib/constructs/hop.ts#L171-L204)）。
 
