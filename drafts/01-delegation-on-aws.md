@@ -96,7 +96,7 @@ sequenceDiagram
 
 STSのSourceIdentityは、ロールを引き受けるときに設定する値で、一度設定すると変えられず、ロールの連鎖の先にも引き継がれます（[AssumeRoleWithWebIdentityのAPIリファレンス](https://docs.aws.amazon.com/STS/latest/APIReference/API_AssumeRoleWithWebIdentity.html)）。OIDCのIDトークンに`https://aws.amazon.com/source_identity`クレームがあれば、`AssumeRoleWithWebIdentity`がその値をSourceIdentityにします。
 
-Cognito User Poolは既定ではこのクレームを入れないので、Pre Token Generation V2のトリガーで入れます。参照実装のトリガーは、これだけです。
+Cognito User Poolは既定ではこのクレームを入れないので、Pre Token Generation V2のトリガーで入れます。V2のトリガーには、User PoolのEssentials以上の機能プランが要ります。参照実装のトリガーは、これだけです。
 
 ```ts:services/pretoken/src/index.ts（抜粋）
 export const handler = async (event: PreTokenGenerationV2TriggerEvent) => {
@@ -142,7 +142,7 @@ backendがこの信頼を十分に置けるように、本人確認書類は、�
 ]
 ```
 
-SourceIdentityを引き継ぐロールの連鎖でも、`sts:SetSourceIdentity`を許す必要があります。目的のタグを付けるための`sts:TagSession`とセッション名の条件は、抜粋から省いています。
+SourceIdentityを引き継ぐロールの連鎖でも、`sts:SetSourceIdentity`を許す必要があります。この文は`sts:AssumeRole`が許されたときにだけ効くので、条件は`sts:AssumeRole`の文に置いています。目的のタグを付けるための`sts:TagSession`とセッション名の条件は、抜粋から省いています。
 
 :::message
 `aws:FederatedProvider`の値には、OIDC providerのARNではなく、`https://`を除いた発行者を書きます。[条件キーの文書](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_condition-keys.html#condition-keys-federatedprovider)ではARNとされていますが、Cognito User Poolでは発行者の形でした。ARNで書くと、正規の手順の呼び出しまで`AccessDenied`になりました（2026-10-03（UTC）、ap-northeast-1で確認。[検証記録](https://github.com/mahitotsu/gekko_08/blob/main/experiments/federated-provider/RESULTS.md)）。
@@ -150,7 +150,7 @@ SourceIdentityを引き継ぐロールの連鎖でも、`sts:SetSourceIdentity`�
 
 ## 委任状：宛先とscopeを付けたJWTを発行する
 
-委任状に当たるのは、`sts:GetWebIdentityToken`が発行するJWTです。IAMのアウトバウンドIDフェデレーションとして2025年11月に発表された機能で、AWSのワークロードの身元を、外部のサービスに証明するためのものです（[発表](https://aws.amazon.com/about-aws/whats-new/2025/11/aws-iam-identity-federation-external-services-jwts/)、[AWS News Blog](https://aws.amazon.com/blogs/aws/simplify-access-to-external-services-using-aws-iam-outbound-identity-federation)）。この記事では、これをAWSの内側の委任に使います。AWSが内側のサービス間の委任の方法として示しているものではなく、参照実装で成り立つことを確かめた使い方です。
+委任状に当たるのは、`sts:GetWebIdentityToken`が発行するJWTです。IAMのアウトバウンドIDフェデレーションとして2025年11月に発表された機能で、AWSのワークロードの身元を、外部のサービスに証明するためのものです（[発表](https://aws.amazon.com/about-aws/whats-new/2025/11/aws-iam-identity-federation-external-services-jwts/)、[AWS News Blog](https://aws.amazon.com/blogs/aws/simplify-access-to-external-services-using-aws-iam-outbound-identity-federation)）。この記事では、これをAWSの内側の委任に使います。AWSが内側のサービス間の委任の方法として示しているものではなく、参照実装で成り立つことを確かめた使い方です。使うには、IAMのアウトバウンドIDフェデレーションを、アカウント単位で有効にしておく必要があります。アカウント全体の設定なので、参照実装は自動では有効にせず、無効ならデプロイを止めて有効にする手順を示します（[README](https://github.com/mahitotsu/gekko_08/blob/main/README.md#前提条件)）。
 
 呼び出し元は、宛先（`Audience`）と、scopeをタグ（`Tags`）として付けて発行させます。JWTには、SourceIdentityが`source_identity`として、セッションのタグが`principal_tags`として、発行時に付けたタグが`request_tags`として入ります。発行された委任状は、次のような形です（値の一部を伏せています）。
 
@@ -167,7 +167,7 @@ SourceIdentityを引き継ぐロールの連鎖でも、`sts:SetSourceIdentity`�
 }
 ```
 
-「tanakaの代理で」「backendに宛てて」「案件の要約を読むこと（`case:summary`）を頼む」と書かれ、STSが署名しています。
+「tanakaの代理で」「backendに宛てて」「案件の要約を読むこと（`case:summary`）を頼む」と書かれ、STSが署名しています。`principal_tags`のリクエストの目的とリクエストIDは、冒頭で触れたとおり別の記事で扱います。
 
 大事なのは、委任状を発行してよいか、何を書いてよいかを、IAMのポリシーの評価が判定することです。認可サーバーが実行時に担っていた判定が、IAMに移ります。セッションに付ける権限は次のとおりです（[コード](https://github.com/mahitotsu/gekko_08/blob/bfabebb9155f0fa5e6ea923a061042a889188dcf/infra/lib/constructs/hop.ts#L171-L204)）。
 
@@ -227,7 +227,7 @@ Allowではなく明示的なDenyにしているのは、同じアカウント�
 
 この構成には代償があります。
 
-- **レイテンシ**：この参照実装では、frontendがbackendを呼ぶリクエストごとに、STSへの往復が3回加わり、中央値の合計で約110msでした。内訳は、`AssumeRoleWithWebIdentity`が15ms、委任状を作るロールへの`AssumeRole`が55ms、`GetWebIdentityToken`が42msです（2026-10-01、ap-northeast-1、ウォームで測定。[設計ガイド§6](https://github.com/mahitotsu/gekko_08/blob/main/docs/guide.md#レイテンシの実測)）。認可サーバーでトークンを交換する構成なら、呼び出し1回につき往復は1回なので、往復の回数はむしろ増えます。その代わり、認可サーバーとその署名鍵の保管、ローテーション、可用性の確保は、自分たちの運用から外れます。
+- **レイテンシ**：この参照実装では、frontendがbackendを呼ぶリクエストごとに、STSへの往復が3回加わり、中央値の合計で約110msでした。内訳は、`AssumeRoleWithWebIdentity`が15ms、委任状を作るロールへの`AssumeRole`が55ms、`GetWebIdentityToken`が42msです（2026-10-01、ap-northeast-1、ウォームで測定。[設計ガイド§6](https://github.com/mahitotsu/gekko_08/blob/main/docs/guide.md#レイテンシの実測)）。認可サーバーでトークンを交換する構成なら、呼び出し1回につき往復は1回なので、往復の回数はむしろ増えます。その代わり、認可サーバーとその署名鍵の保管、ローテーション、可用性の確保は、自分たちの運用から外れ、AWSの責任になります。その分、STSが止まれば、backendを呼ぶ経路も止まります。
 - **上限の一部が文書にない**：文書にある上限は、`AssumeRole`などが共有するSTSの呼び出しの毎秒600件（アカウント・リージョンごと）で、この構成ではリクエストごとに1回使います。一方、`GetWebIdentityToken`と`AssumeRoleWithWebIdentity`の上限は、文書にもService Quotasにも見つかりませんでした（2026-10-01に確認。[設計書§11](https://github.com/mahitotsu/gekko_08/blob/main/docs/design/architecture.md#11-前提条件と制約)）。
 - **取り消せない**：発行した委任状（JWT、有効期間5分）は、途中で取り消せません。
 - **1つのCDKアプリに収まる範囲が前提**：呼び出し元の宣言を集めてbackendのresource policyに書き込むのは、CDKの合成の中で行っています。参照実装はすべてのサービスを1つのCDKアプリ（1つのスタック）に置いているので、これが成り立ちます。サービスごとにリポジトリやチームが分かれる構成では、宣言を共有する場所と、宣言をレビューする手順が別に要り、参照実装はまだそれを持っていません（[設計ガイド§7](https://github.com/mahitotsu/gekko_08/blob/main/docs/guide.md#7-将来の拡張の方向)）。
