@@ -19,7 +19,7 @@ digraph G {
     <tr>
       <td bgcolor="#e0f2fe" align="left" balign="left"><b>委任状</b></td>
       <td align="left" balign="left">誰に宛てて、何を頼んだか</td>
-      <td align="left" balign="left">JWTの <font face="monospace">aud</font> と scope</td>
+      <td align="left" balign="left">JWTの <font face="monospace">aud</font> と scope<br/>（frontendが書く）</td>
       <td align="left" balign="left">STS（JWTに署名）<br/>IAM（書ける中身を限る）</td>
     </tr>
     <tr>
