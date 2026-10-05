@@ -90,7 +90,7 @@ sequenceDiagram
 
 この構成の要は、委任状を作る権限と、backendを呼ぶ権限を、別々の認証情報に分けることです。backendを呼ぶSigV4の署名は、常にfrontendの関数の実行ロールで行います。委任状を作るロールセッションは、STSに委任状を頼むことしかできず、backendを呼ぶ権限を持ちません。
 
-こうしておくと、片方が漏れても、それだけではbackendに届きません。委任状を作るロールセッションだけが漏れた場合、作れるのは田中さんの代理の委任状だけで（誰の代理かはセッションに刻まれています）、それを添えてbackendを呼ぶ署名ができません。frontendの実行ロールだけが漏れた場合、backendは呼べても、有効な委任状がないので、受信側の共通部品が401を返します。委任状（JWT）だけを拾った人も、代理人の本人確認書類（実行ロールの署名）を持っていないので、入口で止まります。**権限を2つに分けることで、どちらか一方が漏れたときの被害を、委任状が出回ることまでにとどめています。** 両方を持ち出された場合は別で、最後に扱います。
+こうしておくと、片方が漏れても、それだけではbackendに届きません。委任状を作るロールセッションだけが漏れた場合、作れるのは田中さんの代理の委任状だけで（誰の代理かはセッションに刻まれています）、それを添えてbackendを呼ぶ署名ができません。frontendの実行ロールだけが漏れた場合、backendは呼べても、有効な委任状がないので、受信側の共通部品が401を返します。委任状（JWT）だけを拾った人も、代理人の本人確認書類（実行ロールの署名）を持っていないので、入口で止まります。**権限を2つに分けることで、どちらか一方が漏れただけでは、田中さんの代理としてbackendの処理を実行できないようにしています。** 両方を持ち出された場合は別で、最後に扱います。
 
 ## 委任者の本人確認書類：IDトークンからSourceIdentityを刻む
 
@@ -150,7 +150,7 @@ SourceIdentityを引き継ぐロールの連鎖でも、`sts:SetSourceIdentity`�
 
 ## 委任状：宛先とscopeを付けたJWTを発行する
 
-委任状に当たるのは、`sts:GetWebIdentityToken`が発行するJWTです。IAMのアウトバウンドIDフェデレーションとして2025年11月に発表された機能で、AWSのワークロードの身元を、外部のサービスに証明するためのものです（[発表](https://aws.amazon.com/about-aws/whats-new/2025/11/aws-iam-identity-federation-external-services-jwts/)、[AWS News Blog](https://aws.amazon.com/blogs/aws/simplify-access-to-external-services-using-aws-iam-outbound-identity-federation)）。この記事では、これをAWSの内側の委任に使います。AWSが内側のサービス間の委任の方法として示しているものではなく、参照実装で成り立つことを確かめた使い方です。使うには、IAMのアウトバウンドIDフェデレーションを、アカウント単位で有効にしておく必要があります。アカウント全体の設定なので、参照実装は自動では有効にせず、無効ならデプロイを止めて有効にする手順を示します（[README](https://github.com/mahitotsu/gekko_08/blob/main/README.md#前提条件)）。
+委任状に当たるのは、`sts:GetWebIdentityToken`が発行するJWTです。IAMのアウトバウンドIDフェデレーションとして2025年11月に発表された機能で、AWSのワークロードの身元を、外部のサービスに証明するためのものです（[発表](https://aws.amazon.com/about-aws/whats-new/2025/11/aws-iam-identity-federation-external-services-jwts/)、[AWS News Blog](https://aws.amazon.com/blogs/aws/simplify-access-to-external-services-using-aws-iam-outbound-identity-federation)）。この記事では、これをAWSの内側の委任に使います。AWSが内側のサービス間の委任の方法として示しているものではなく、参照実装で成り立つことを確かめた使い方です。使うには、IAMのアウトバウンドIDフェデレーションを、アカウント単位で有効にしておく必要があります。アカウント全体の設定なので、参照実装は自動では有効にせず、無効ならデプロイを止めて有効にする手順を示します（[README](https://github.com/mahitotsu/gekko_08/blob/main/README.md#前提条件)）。また、`GetWebIdentityToken`はSTSのグローバルエンドポイントでは使えず、リージョンのエンドポイントで呼びます（[APIリファレンス](https://docs.aws.amazon.com/STS/latest/APIReference/API_GetWebIdentityToken.html)）。
 
 呼び出し元は、宛先（`Audience`）と、scopeをタグ（`Tags`）として付けて発行させます。JWTには、SourceIdentityが`source_identity`として、セッションのタグが`principal_tags`として、発行時に付けたタグが`request_tags`として入ります。発行された委任状は、次のような形です（値の一部を伏せています）。
 
@@ -169,7 +169,7 @@ SourceIdentityを引き継ぐロールの連鎖でも、`sts:SetSourceIdentity`�
 
 「tanakaの代理で」「backendに宛てて」「案件の要約を読むこと（`case:summary`）を頼む」と書かれ、STSが署名しています。`principal_tags`のリクエストの目的とリクエストIDは、冒頭で触れたとおり別の記事で扱います。
 
-大事なのは、委任状を発行してよいか、何を書いてよいかを、IAMのポリシーの評価が判定することです。認可サーバーが実行時に担っていた判定が、IAMに移ります。セッションに付ける権限は次のとおりです（[コード](https://github.com/mahitotsu/gekko_08/blob/bfabebb9155f0fa5e6ea923a061042a889188dcf/infra/lib/constructs/hop.ts#L171-L204)）。
+大事なのは、委任状を発行してよいか、何を書いてよいかを、IAMのポリシーの評価が判定することです。委任状の発行について、認可サーバーが実行時に担っていた判定が、IAMに移ります。セッションに付ける権限は次のとおりです（[コード](https://github.com/mahitotsu/gekko_08/blob/bfabebb9155f0fa5e6ea923a061042a889188dcf/infra/lib/constructs/hop.ts#L171-L204)）。
 
 ```json:委任状を作るロールセッションの権限（抜粋）
 [
