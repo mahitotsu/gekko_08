@@ -150,7 +150,7 @@ SourceIdentityを引き継ぐロールの連鎖でも、`sts:SetSourceIdentity`�
 }
 ```
 
-「tanakaの代理で」「backendに宛てて」「案件の要約を読むこと（`case:summary`）を頼む」と書かれ、STSが署名しています。`principal_tags`のリクエストの目的とリクエストIDは、冒頭で触れたとおり別の記事で扱います。
+「tanakaの代理で」「backendに宛てて」「案件の要約を読むこと（`case:summary`）を頼む」と書かれ、STSが署名しています。リージョンのエンドポイントで発行を頼んでも、`iss`は`tokens.sts.global.api.aws`の形でした（[検証記録](https://github.com/mahitotsu/gekko_08/blob/main/experiments/feasibility/RESULTS.md)）。`principal_tags`のリクエストの目的とリクエストIDは、冒頭で触れたとおり別の記事で扱います。
 
 大事なのは、委任状を発行してよいか、何を書いてよいかを、IAMのポリシーの評価が判定することです。委任状の発行について、認可サーバーが実行時に担っていた判定が、IAMに移ります。セッションに付ける権限は次のとおりです（[コード](https://github.com/mahitotsu/gekko_08/blob/bfabebb9155f0fa5e6ea923a061042a889188dcf/infra/lib/constructs/hop.ts#L171-L204)）。
 
